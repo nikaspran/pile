@@ -60,24 +60,55 @@ pub fn show_editor(
         .show_viewport(ui, |ui, viewport| {
             let (rect, response) = ui.allocate_exact_size(
                 egui::vec2(content_width, content_height),
-                egui::Sense::click(),
+                egui::Sense::click_and_drag(),
             );
 
             if *focus_pending {
                 response.request_focus();
                 *focus_pending = false;
             }
-            if response.clicked() {
+            if response.drag_started() || response.clicked() {
                 response.request_focus();
                 if let Some(pointer_position) = response.interact_pointer_pos() {
-                    let line = ((pointer_position.y - rect.top()).max(0.0) / row_height) as usize;
-                    let line = line.min(line_count.saturating_sub(1));
-                    let column = ((pointer_position.x - (rect.left() + text_origin_x)) / char_width)
-                        .round()
-                        .max(0.0) as usize;
-                    let offset = byte_for_line_column(&document.rope, line, column);
+                    let offset = offset_at_pointer(
+                        &document.rope,
+                        pointer_position,
+                        rect,
+                        text_origin_x,
+                        row_height,
+                        char_width,
+                        line_count,
+                    );
                     set_primary_selection(document, Selection::caret(offset));
                     view_state.preferred_column = None;
+                }
+            } else if response.dragged() {
+                if let Some(pointer_position) = response.interact_pointer_pos() {
+                    let offset = offset_at_pointer(
+                        &document.rope,
+                        pointer_position,
+                        rect,
+                        text_origin_x,
+                        row_height,
+                        char_width,
+                        line_count,
+                    );
+                    let mut selection = primary_selection(document);
+                    selection.head = offset;
+                    set_primary_selection(document, selection);
+                    view_state.preferred_column = None;
+
+                    let viewport_top_abs = rect.top() + viewport.min.y;
+                    let viewport_bottom_abs = rect.top() + viewport.max.y;
+                    if pointer_position.y < viewport_top_abs
+                        || pointer_position.y > viewport_bottom_abs
+                    {
+                        let scroll_rect = egui::Rect::from_min_size(
+                            egui::pos2(pointer_position.x, pointer_position.y - row_height * 0.5),
+                            egui::vec2(1.0, row_height),
+                        );
+                        ui.scroll_to_rect(scroll_rect, None);
+                    }
                 }
             }
 
@@ -611,6 +642,23 @@ fn column_of_byte(rope: &Rope, offset: usize) -> usize {
     rope.byte_slice(line_start..offset).chars().count()
 }
 
+fn offset_at_pointer(
+    rope: &Rope,
+    pos: egui::Pos2,
+    rect: egui::Rect,
+    text_origin_x: f32,
+    row_height: f32,
+    char_width: f32,
+    line_count: usize,
+) -> usize {
+    let line = ((pos.y - rect.top()).max(0.0) / row_height) as usize;
+    let line = line.min(line_count.saturating_sub(1));
+    let column = ((pos.x - (rect.left() + text_origin_x)) / char_width)
+        .round()
+        .max(0.0) as usize;
+    byte_for_line_column(rope, line, column)
+}
+
 fn byte_for_line_column(rope: &Rope, line_index: usize, column: usize) -> usize {
     let (start, end) = visual_line_bounds(rope, line_index);
     let mut offset = start;
@@ -1118,6 +1166,40 @@ mod tests {
                 anchor: 1,
                 head: document.rope.byte_len(),
             }
+        );
+    }
+
+    #[test]
+    fn offset_at_pointer_maps_clicks_to_byte_offsets() {
+        let document = document("abc\nhello\nworld");
+        let rope = &document.rope;
+        let line_count = visual_line_count(rope);
+        let row_height = 10.0;
+        let char_width = 8.0;
+        let text_origin_x = 20.0;
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 200.0));
+
+        let pointer_at = |x: f32, y: f32| {
+            offset_at_pointer(
+                rope,
+                egui::pos2(x, y),
+                rect,
+                text_origin_x,
+                row_height,
+                char_width,
+                line_count,
+            )
+        };
+
+        assert_eq!(pointer_at(text_origin_x - 50.0, 0.0), 0);
+        assert_eq!(pointer_at(text_origin_x + char_width * 2.0, 0.0), 2);
+        assert_eq!(
+            pointer_at(text_origin_x + char_width * 100.0, row_height * 1.5),
+            "abc\nhello".len()
+        );
+        assert_eq!(
+            pointer_at(text_origin_x, row_height * 50.0),
+            "abc\nhello\n".len()
         );
     }
 }
