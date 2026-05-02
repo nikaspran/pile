@@ -120,6 +120,17 @@ pub fn show_editor(
             view_state.visible_rows = Some(viewport_rows);
 
             if response.has_focus() {
+                ui.memory_mut(|memory| {
+                    memory.set_focus_lock_filter(
+                        response.id,
+                        egui::EventFilter {
+                            tab: true,
+                            horizontal_arrows: true,
+                            vertical_arrows: true,
+                            escape: false,
+                        },
+                    );
+                });
                 changed |= handle_input(ui, document, view_state);
                 if changed {
                     ui.memory_mut(|memory| memory.request_focus(response.id));
