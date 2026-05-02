@@ -31,12 +31,14 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 - Completed: add incremental in-buffer search with match counts and current-match
   navigation.
-- Add match highlighting for all visible search results in the custom editor
-  renderer.
+- Completed: add match highlighting for all visible search results in the custom
+  editor renderer, with a distinct current match.
 - Add replace and replace-all with undo grouping.
 - Add regular expression search and replace.
 - Completed: add case-sensitive, whole-word, and wrap-around modes for in-buffer
   search.
+- Move in-buffer search from active-document string materialization to a
+  rope-native or bounded-window search engine.
 - Add search-in-tabs across all open scratch buffers.
 - Add search result previews with quick navigation.
 - Add find-under-cursor and select-next-occurrence commands.

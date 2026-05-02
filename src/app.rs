@@ -5,7 +5,7 @@ use eframe::egui;
 use tracing::{info, warn};
 
 use crate::{
-    editor::{EditorViewState, show_editor},
+    editor::{EditorViewState, SearchHighlight, show_editor},
     model::{AppState, DocumentId, SessionSnapshot},
     native_menu::{NativeMenu, NativeMenuCommand},
     persistence::{
@@ -421,6 +421,21 @@ impl PileApp {
         };
         self.search.selection_pending = false;
 
+        let search_highlights = if self.search.visible {
+            self.search
+                .matches
+                .iter()
+                .enumerate()
+                .map(|(index, search_match)| SearchHighlight {
+                    start: search_match.start,
+                    end: search_match.end,
+                    is_current: Some(index) == self.search.current_match,
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
         let Some(document) = self.state.active_document_mut() else {
             return;
         };
@@ -431,6 +446,7 @@ impl PileApp {
             &mut self.editor_view,
             &mut self.editor_focus_pending,
             reveal_selection,
+            &search_highlights,
         );
 
         if response.changed {

@@ -17,12 +17,20 @@ pub struct EditorResponse {
     pub changed: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SearchHighlight {
+    pub start: usize,
+    pub end: usize,
+    pub is_current: bool,
+}
+
 pub fn show_editor(
     ui: &mut egui::Ui,
     document: &mut Document,
     view_state: &mut EditorViewState,
     focus_pending: &mut bool,
     reveal_selection: Option<Selection>,
+    search_highlights: &[SearchHighlight],
 ) -> EditorResponse {
     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
     clamp_primary_selection(document);
@@ -111,6 +119,17 @@ pub fn show_editor(
                 );
 
                 let text_pos = egui::pos2(rect.left() + text_origin_x, y);
+                paint_search_highlights_for_line(
+                    &painter,
+                    &document.rope,
+                    search_highlights,
+                    line_index,
+                    false,
+                    text_pos,
+                    row_height,
+                    char_width,
+                    ui.visuals(),
+                );
                 paint_selection_for_line(
                     &painter,
                     document,
@@ -120,6 +139,17 @@ pub fn show_editor(
                     row_height,
                     char_width,
                     ui.visuals().selection.bg_fill,
+                );
+                paint_search_highlights_for_line(
+                    &painter,
+                    &document.rope,
+                    search_highlights,
+                    line_index,
+                    true,
+                    text_pos,
+                    row_height,
+                    char_width,
+                    ui.visuals(),
                 );
 
                 let line_text = visual_line_text(&document.rope, line_index);
@@ -531,6 +561,76 @@ fn paint_selection_for_line(
     painter.rect_filled(egui::Rect::from_min_max(min, max), 0.0, color);
 }
 
+fn paint_search_highlights_for_line(
+    painter: &egui::Painter,
+    rope: &Rope,
+    highlights: &[SearchHighlight],
+    line_index: usize,
+    current_only: bool,
+    text_pos: egui::Pos2,
+    row_height: f32,
+    char_width: f32,
+    visuals: &egui::Visuals,
+) {
+    let normal_fill = visuals.warn_fg_color.gamma_multiply(0.30);
+    let current_fill = visuals.warn_fg_color.gamma_multiply(0.55);
+    let current_stroke = egui::Stroke::new(1.0, visuals.warn_fg_color);
+
+    for highlight in highlights {
+        if highlight.is_current != current_only {
+            continue;
+        }
+
+        let Some(span) = highlight_columns_for_line(rope, *highlight, line_index) else {
+            continue;
+        };
+
+        let min = egui::pos2(
+            text_pos.x + span.start_column as f32 * char_width,
+            text_pos.y,
+        );
+        let max = egui::pos2(
+            text_pos.x + span.end_column as f32 * char_width,
+            text_pos.y + row_height,
+        );
+        let rect = egui::Rect::from_min_max(min, max);
+        if highlight.is_current {
+            painter.rect_filled(rect, 0.0, current_fill);
+            painter.rect_stroke(rect, 0.0, current_stroke, egui::StrokeKind::Inside);
+        } else {
+            painter.rect_filled(rect, 0.0, normal_fill);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HighlightColumns {
+    start_column: usize,
+    end_column: usize,
+}
+
+fn highlight_columns_for_line(
+    rope: &Rope,
+    highlight: SearchHighlight,
+    line_index: usize,
+) -> Option<HighlightColumns> {
+    if highlight.start >= highlight.end {
+        return None;
+    }
+
+    let (line_start, line_end) = visual_line_bounds(rope, line_index);
+    let start = highlight.start.max(line_start).min(line_end);
+    let end = highlight.end.min(line_end).max(line_start);
+    if start >= end {
+        return None;
+    }
+
+    Some(HighlightColumns {
+        start_column: rope.byte_slice(line_start..start).chars().count(),
+        end_column: rope.byte_slice(line_start..end).chars().count(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -631,6 +731,82 @@ mod tests {
         assert_eq!(visual_line_count(&Rope::from("")), 1);
         assert_eq!(visual_line_count(&Rope::from("a\n")), 2);
         assert_eq!(byte_for_line_column(&Rope::from("a\n"), 1, 0), 2);
+    }
+
+    #[test]
+    fn search_highlight_columns_clip_to_visual_line() {
+        let rope = Rope::from("abc\ndef");
+
+        assert_eq!(
+            highlight_columns_for_line(
+                &rope,
+                SearchHighlight {
+                    start: 1,
+                    end: 3,
+                    is_current: false,
+                },
+                0,
+            ),
+            Some(HighlightColumns {
+                start_column: 1,
+                end_column: 3,
+            })
+        );
+        assert_eq!(
+            highlight_columns_for_line(
+                &rope,
+                SearchHighlight {
+                    start: 1,
+                    end: 3,
+                    is_current: false,
+                },
+                1,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn search_highlight_columns_split_multiline_matches() {
+        let rope = Rope::from("abc\ndef");
+        let highlight = SearchHighlight {
+            start: 2,
+            end: 6,
+            is_current: true,
+        };
+
+        assert_eq!(
+            highlight_columns_for_line(&rope, highlight, 0),
+            Some(HighlightColumns {
+                start_column: 2,
+                end_column: 3,
+            })
+        );
+        assert_eq!(
+            highlight_columns_for_line(&rope, highlight, 1),
+            Some(HighlightColumns {
+                start_column: 0,
+                end_column: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn search_highlight_columns_count_multibyte_characters() {
+        let rope = Rope::from("aé日z");
+        let highlight = SearchHighlight {
+            start: 1,
+            end: "aé日".len(),
+            is_current: false,
+        };
+
+        assert_eq!(
+            highlight_columns_for_line(&rope, highlight, 0),
+            Some(HighlightColumns {
+                start_column: 1,
+                end_column: 3,
+            })
+        );
     }
 
     #[test]
