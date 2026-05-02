@@ -6,7 +6,7 @@ use eframe::egui;
 use tracing::{info, warn};
 
 use crate::{
-    editor::{EditorViewState, SearchHighlight, show_editor},
+    editor::{EditorViewState, SearchHighlight, replace_all_matches, replace_match, show_editor},
     model::{AppState, DocumentId, SessionSnapshot},
     native_menu::{NativeMenu, NativeMenuCommand},
     persistence::{
@@ -19,7 +19,9 @@ use crate::{
 #[derive(Clone, Debug, Default)]
 struct SearchState {
     visible: bool,
+    replace_visible: bool,
     query: String,
+    replacement: String,
     case_sensitive: bool,
     whole_word: bool,
     matches: Vec<SearchMatch>,
@@ -291,6 +293,17 @@ impl PileApp {
             self.close_active_scratch();
         }
 
+        let open_replace = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND.plus(egui::Modifiers::ALT),
+                logical_key: egui::Key::F,
+            })
+        });
+        if open_replace {
+            self.open_search();
+            self.search.replace_visible = true;
+        }
+
         let open_search = ctx.input_mut(|input| {
             input.consume_shortcut(&egui::KeyboardShortcut {
                 modifiers: egui::Modifiers::COMMAND,
@@ -334,6 +347,8 @@ impl PileApp {
         let mut changed = false;
         let mut go_next = false;
         let mut go_previous = false;
+        let mut do_replace_one = false;
+        let mut do_replace_all = false;
 
         ui.horizontal(|ui| {
             ui.label("Find");
@@ -383,10 +398,56 @@ impl PileApp {
                 .on_hover_text("Whole word")
                 .changed();
 
+            let replace_label = if self.search.replace_visible { "v" } else { ">" };
+            if ui
+                .button(replace_label)
+                .on_hover_text("Toggle replace")
+                .clicked()
+            {
+                self.search.replace_visible = !self.search.replace_visible;
+            }
+
             if ui.button("x").on_hover_text("Close search").clicked() {
                 self.close_search();
             }
         });
+
+        if self.search.replace_visible {
+            ui.horizontal(|ui| {
+                ui.label("Replace");
+                let response = ui.add_sized(
+                    [240.0, ui.spacing().interact_size.y],
+                    egui::TextEdit::singleline(&mut self.search.replacement)
+                        .hint_text("Replacement text")
+                        .desired_width(240.0),
+                );
+
+                let pressed_enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
+                let pressed_escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
+                if response.has_focus() && pressed_enter {
+                    do_replace_one = true;
+                }
+                if response.has_focus() && pressed_escape {
+                    self.close_search();
+                }
+
+                let has_matches = !self.search.matches.is_empty();
+                if ui
+                    .add_enabled(has_matches, egui::Button::new("Replace"))
+                    .on_hover_text("Replace current match")
+                    .clicked()
+                {
+                    do_replace_one = true;
+                }
+                if ui
+                    .add_enabled(has_matches, egui::Button::new("Replace all"))
+                    .on_hover_text("Replace every match in this scratch")
+                    .clicked()
+                {
+                    do_replace_all = true;
+                }
+            });
+        }
 
         if changed {
             if let Some(document) = self.state.active_document() {
@@ -399,6 +460,60 @@ impl PileApp {
         if go_previous {
             self.search.previous_match();
         }
+        if do_replace_one {
+            self.replace_current_match();
+        }
+        if do_replace_all {
+            self.replace_all_in_active_document();
+        }
+    }
+
+    fn replace_current_match(&mut self) {
+        let Some(index) = self.search.current_match else {
+            return;
+        };
+        let Some(search_match) = self.search.matches.get(index).copied() else {
+            return;
+        };
+        let replacement = self.search.replacement.clone();
+
+        let Some(document) = self.state.active_document_mut() else {
+            return;
+        };
+        replace_match(document, search_match, &replacement);
+
+        let rope = document.rope.clone();
+        self.search.recompute(&rope);
+        if !self.search.matches.is_empty() {
+            let next = if index < self.search.matches.len() {
+                index
+            } else {
+                0
+            };
+            self.search.current_match = Some(next);
+            self.search.selection_pending = true;
+        }
+        self.document_edited();
+    }
+
+    fn replace_all_in_active_document(&mut self) {
+        if self.search.matches.is_empty() {
+            return;
+        }
+        let matches = self.search.matches.clone();
+        let replacement = self.search.replacement.clone();
+
+        let Some(document) = self.state.active_document_mut() else {
+            return;
+        };
+        let count = replace_all_matches(document, &matches, &replacement);
+        if count == 0 {
+            return;
+        }
+
+        let rope = document.rope.clone();
+        self.search.recompute(&rope);
+        self.document_edited();
     }
 
     fn render_editor(&mut self, ui: &mut egui::Ui) {

@@ -33,7 +33,8 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
   navigation.
 - Completed: add match highlighting for all visible search results in the custom
   editor renderer, with a distinct current match.
-- Add replace and replace-all with undo grouping.
+- Completed: add replace and replace-all (undo grouping deferred until an
+  undo/redo stack lands).
 - Add regular expression search and replace.
 - Completed: add case-sensitive, whole-word, and wrap-around modes for in-buffer
   search.

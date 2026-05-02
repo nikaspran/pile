@@ -2,6 +2,7 @@ use crop::Rope;
 use eframe::egui;
 
 use crate::model::{Document, Selection};
+use crate::search::SearchMatch;
 
 const LINE_GUTTER_MIN_WIDTH: f32 = 44.0;
 const LINE_GUTTER_PADDING: f32 = 10.0;
@@ -348,6 +349,65 @@ pub fn replace_selection_with(document: &mut Document, text: &str) -> bool {
     set_primary_selection(document, Selection::caret(caret));
     document.revision += 1;
     true
+}
+
+pub fn replace_match(
+    document: &mut Document,
+    search_match: SearchMatch,
+    replacement: &str,
+) -> usize {
+    let SearchMatch { start, end } = search_match;
+    if end > document.rope.byte_len() || start > end {
+        return start.min(document.rope.byte_len());
+    }
+
+    if start != end {
+        document.rope.delete(start..end);
+    }
+    if !replacement.is_empty() {
+        document.rope.insert(start, replacement);
+    }
+
+    let caret = start + replacement.len();
+    set_primary_selection(document, Selection::caret(caret));
+    document.revision += 1;
+    caret
+}
+
+pub fn replace_all_matches(
+    document: &mut Document,
+    matches: &[SearchMatch],
+    replacement: &str,
+) -> usize {
+    if matches.is_empty() {
+        return 0;
+    }
+
+    let rope_len = document.rope.byte_len();
+    let mut count = 0;
+    for search_match in matches.iter().rev() {
+        let SearchMatch { start, end } = *search_match;
+        if end > rope_len || start > end {
+            continue;
+        }
+        if start != end {
+            document.rope.delete(start..end);
+        }
+        if !replacement.is_empty() {
+            document.rope.insert(start, replacement);
+        }
+        count += 1;
+    }
+
+    if count > 0 {
+        document.revision += 1;
+        let first_start = matches.first().map(|m| m.start).unwrap_or(0);
+        let caret = first_start + replacement.len();
+        let caret = caret.min(document.rope.byte_len());
+        set_primary_selection(document, Selection::caret(caret));
+    }
+
+    count
 }
 
 pub fn backspace(document: &mut Document) -> bool {
@@ -1440,5 +1500,101 @@ mod tests {
                 head: "a\nb\n".len()
             }
         );
+    }
+
+    #[test]
+    fn replace_match_replaces_range_and_moves_caret() {
+        let mut document = document("hello world hello");
+        let revision_before = document.revision;
+
+        let caret = replace_match(
+            &mut document,
+            SearchMatch { start: 6, end: 11 },
+            "earth",
+        );
+
+        assert_eq!(document.text(), "hello earth hello");
+        assert_eq!(caret, 11);
+        assert_eq!(primary_selection(&document), Selection::caret(11));
+        assert_eq!(document.revision, revision_before + 1);
+    }
+
+    #[test]
+    fn replace_match_handles_empty_replacement() {
+        let mut document = document("delete me here");
+
+        let caret = replace_match(&mut document, SearchMatch { start: 7, end: 9 }, "");
+
+        assert_eq!(document.text(), "delete  here");
+        assert_eq!(caret, 7);
+        assert_eq!(primary_selection(&document), Selection::caret(7));
+    }
+
+    #[test]
+    fn replace_all_matches_applies_in_reverse_order() {
+        let mut document = document("foo bar foo bar foo");
+        let revision_before = document.revision;
+
+        let count = replace_all_matches(
+            &mut document,
+            &[
+                SearchMatch { start: 0, end: 3 },
+                SearchMatch { start: 8, end: 11 },
+                SearchMatch { start: 16, end: 19 },
+            ],
+            "qux",
+        );
+
+        assert_eq!(count, 3);
+        assert_eq!(document.text(), "qux bar qux bar qux");
+        assert_eq!(primary_selection(&document), Selection::caret(3));
+        assert_eq!(document.revision, revision_before + 1);
+    }
+
+    #[test]
+    fn replace_all_matches_handles_replacement_containing_query() {
+        let mut document = document("a a a");
+
+        let count = replace_all_matches(
+            &mut document,
+            &[
+                SearchMatch { start: 0, end: 1 },
+                SearchMatch { start: 2, end: 3 },
+                SearchMatch { start: 4, end: 5 },
+            ],
+            "aa",
+        );
+
+        assert_eq!(count, 3);
+        assert_eq!(document.text(), "aa aa aa");
+    }
+
+    #[test]
+    fn replace_all_matches_handles_multibyte_text() {
+        let mut document = document("aé日 aé日");
+
+        let count = replace_all_matches(
+            &mut document,
+            &[
+                SearchMatch { start: 1, end: 6 },
+                SearchMatch { start: 8, end: 13 },
+            ],
+            "x",
+        );
+
+        assert_eq!(count, 2);
+        assert_eq!(document.text(), "ax ax");
+    }
+
+    #[test]
+    fn replace_all_matches_no_op_for_empty_input() {
+        let mut document = document("untouched");
+        let revision_before = document.revision;
+
+        let count = replace_all_matches(&mut document, &[], "x");
+
+        assert_eq!(count, 0);
+        assert_eq!(document.text(), "untouched");
+        assert_eq!(document.revision, revision_before);
     }
 }
