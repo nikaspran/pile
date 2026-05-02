@@ -10,6 +10,7 @@ const EDITOR_MIN_WIDTH: f32 = 320.0;
 #[derive(Debug, Default)]
 pub struct EditorViewState {
     preferred_column: Option<usize>,
+    visible_rows: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -111,6 +112,11 @@ pub fn show_editor(
                     }
                 }
             }
+
+            let viewport_rows = ((viewport.max.y - viewport.min.y) / row_height)
+                .floor()
+                .max(1.0) as usize;
+            view_state.visible_rows = Some(viewport_rows);
 
             if response.has_focus() {
                 changed |= handle_input(ui, document, view_state);
@@ -274,19 +280,43 @@ fn handle_input(ui: &egui::Ui, document: &mut Document, view_state: &mut EditorV
                         }
                         view_state.preferred_column = None;
                     }
-                    egui::Key::ArrowUp if !word => {
-                        move_vertical(document, view_state, -1, extend);
+                    egui::Key::ArrowUp => {
+                        if word {
+                            move_paragraph_up(document, extend);
+                            view_state.preferred_column = None;
+                        } else {
+                            move_vertical(document, view_state, -1, extend);
+                        }
                     }
-                    egui::Key::ArrowDown if !word => {
-                        move_vertical(document, view_state, 1, extend);
+                    egui::Key::ArrowDown => {
+                        if word {
+                            move_paragraph_down(document, extend);
+                            view_state.preferred_column = None;
+                        } else {
+                            move_vertical(document, view_state, 1, extend);
+                        }
                     }
-                    egui::Key::Home if !word => {
-                        move_home(document, extend);
+                    egui::Key::Home => {
+                        if word {
+                            move_document_start(document, extend);
+                        } else {
+                            move_home(document, extend);
+                        }
                         view_state.preferred_column = None;
                     }
-                    egui::Key::End if !word => {
-                        move_end(document, extend);
+                    egui::Key::End => {
+                        if word {
+                            move_document_end(document, extend);
+                        } else {
+                            move_end(document, extend);
+                        }
                         view_state.preferred_column = None;
+                    }
+                    egui::Key::PageUp => {
+                        move_page(document, view_state, -1, extend);
+                    }
+                    egui::Key::PageDown => {
+                        move_page(document, view_state, 1, extend);
                     }
                     _ => {}
                 }
@@ -433,6 +463,69 @@ pub fn move_vertical(
     view_state.preferred_column = Some(column);
     let target = byte_for_line_column(&document.rope, target_line, column);
     apply_motion(document, target, extend);
+}
+
+pub fn move_document_start(document: &mut Document, extend: bool) {
+    clamp_primary_selection(document);
+    apply_motion(document, 0, extend);
+}
+
+pub fn move_document_end(document: &mut Document, extend: bool) {
+    clamp_primary_selection(document);
+    apply_motion(document, document.rope.byte_len(), extend);
+}
+
+pub fn move_paragraph_up(document: &mut Document, extend: bool) {
+    clamp_primary_selection(document);
+    let head = primary_selection(document).head;
+    let current_line = line_index_of_byte(&document.rope, head);
+    let target = (0..current_line)
+        .rev()
+        .find(|line| is_blank_line(&document.rope, *line))
+        .map(|line| byte_of_visual_line(&document.rope, line))
+        .unwrap_or(0);
+    apply_motion(document, target, extend);
+}
+
+pub fn move_paragraph_down(document: &mut Document, extend: bool) {
+    clamp_primary_selection(document);
+    let head = primary_selection(document).head;
+    let current_line = line_index_of_byte(&document.rope, head);
+    let line_count = visual_line_count(&document.rope);
+    let target = ((current_line + 1)..line_count)
+        .find(|line| is_blank_line(&document.rope, *line))
+        .map(|line| byte_of_visual_line(&document.rope, line))
+        .unwrap_or_else(|| document.rope.byte_len());
+    apply_motion(document, target, extend);
+}
+
+pub fn move_page(
+    document: &mut Document,
+    view_state: &mut EditorViewState,
+    delta_pages: isize,
+    extend: bool,
+) {
+    clamp_primary_selection(document);
+    let selection = primary_selection(document);
+    let current_line = line_index_of_byte(&document.rope, selection.head);
+    let line_count = visual_line_count(&document.rope);
+    let visible_rows = view_state.visible_rows.unwrap_or(1).max(1);
+    let step = visible_rows.saturating_sub(1).max(1) as isize;
+    let target_line =
+        (current_line as isize + delta_pages * step).clamp(0, line_count as isize - 1) as usize;
+    let column = view_state
+        .preferred_column
+        .unwrap_or_else(|| column_of_byte(&document.rope, selection.head));
+    view_state.preferred_column = Some(column);
+    let target = byte_for_line_column(&document.rope, target_line, column);
+    apply_motion(document, target, extend);
+}
+
+fn is_blank_line(rope: &Rope, line_index: usize) -> bool {
+    if line_index >= rope.line_len() {
+        return true;
+    }
+    rope.line(line_index).chars().all(|c| c.is_whitespace())
 }
 
 fn apply_motion(document: &mut Document, target: usize, extend: bool) {
@@ -901,19 +994,13 @@ mod tests {
         move_right(&mut document, true);
         assert_eq!(
             primary_selection(&document),
-            Selection {
-                anchor: 3,
-                head: 5
-            }
+            Selection { anchor: 3, head: 5 }
         );
 
         move_left(&mut document, true);
         assert_eq!(
             primary_selection(&document),
-            Selection {
-                anchor: 3,
-                head: 4
-            }
+            Selection { anchor: 3, head: 4 }
         );
     }
 
@@ -925,10 +1012,7 @@ mod tests {
         move_home(&mut document, true);
         assert_eq!(
             primary_selection(&document),
-            Selection {
-                anchor: 6,
-                head: 0
-            }
+            Selection { anchor: 6, head: 0 }
         );
 
         set_primary_selection(&mut document, Selection::caret(6));
@@ -951,10 +1035,7 @@ mod tests {
         move_vertical(&mut document, &mut view_state, 1, true);
         assert_eq!(
             primary_selection(&document),
-            Selection {
-                anchor: 3,
-                head: 7
-            }
+            Selection { anchor: 3, head: 7 }
         );
         assert_eq!(view_state.preferred_column, Some(3));
 
@@ -1023,10 +1104,7 @@ mod tests {
         assert!(document.rope.is_char_boundary(after_first));
 
         move_word_right(&mut document, false);
-        assert_eq!(
-            primary_selection(&document),
-            Selection::caret(text.len())
-        );
+        assert_eq!(primary_selection(&document), Selection::caret(text.len()));
     }
 
     #[test]
@@ -1037,19 +1115,13 @@ mod tests {
         move_word_right(&mut document, true);
         assert_eq!(
             primary_selection(&document),
-            Selection {
-                anchor: 0,
-                head: 3
-            }
+            Selection { anchor: 0, head: 3 }
         );
 
         move_word_right(&mut document, true);
         assert_eq!(
             primary_selection(&document),
-            Selection {
-                anchor: 0,
-                head: 7
-            }
+            Selection { anchor: 0, head: 7 }
         );
     }
 
@@ -1200,6 +1272,173 @@ mod tests {
         assert_eq!(
             pointer_at(text_origin_x, row_height * 50.0),
             "abc\nhello\n".len()
+        );
+    }
+
+    #[test]
+    fn document_boundary_motion_jumps_to_doc_ends() {
+        let text = "abc\ndef\nghi";
+        let mut document = document(text);
+        set_primary_selection(&mut document, Selection::caret(5));
+
+        move_document_start(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(0));
+
+        move_document_end(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(text.len()));
+    }
+
+    #[test]
+    fn document_boundary_motion_extends_selection() {
+        let text = "abc\ndef\nghi";
+        let mut document = document(text);
+        set_primary_selection(&mut document, Selection::caret(5));
+
+        move_document_end(&mut document, true);
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 5,
+                head: text.len()
+            }
+        );
+
+        move_document_start(&mut document, true);
+        assert_eq!(
+            primary_selection(&document),
+            Selection { anchor: 5, head: 0 }
+        );
+    }
+
+    #[test]
+    fn paragraph_motion_jumps_blank_line_boundaries() {
+        // line indices: 0:"first" 1:"more" 2:"" 3:"second" 4:"two" 5:"" 6:"third"
+        let text = "first\nmore\n\nsecond\ntwo\n\nthird";
+        let mut document = document(text);
+
+        // From caret on line 0, paragraph_down lands on the blank between "more" and "second".
+        set_primary_selection(&mut document, Selection::caret(2));
+        move_paragraph_down(&mut document, false);
+        let blank_one = "first\nmore\n".len();
+        assert_eq!(primary_selection(&document), Selection::caret(blank_one));
+
+        // Next paragraph_down lands on the blank before "third".
+        move_paragraph_down(&mut document, false);
+        let blank_two = "first\nmore\n\nsecond\ntwo\n".len();
+        assert_eq!(primary_selection(&document), Selection::caret(blank_two));
+
+        // Past the last blank, paragraph_down clamps to EOF.
+        move_paragraph_down(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(text.len()));
+
+        // From EOF, paragraph_up walks back through blanks.
+        move_paragraph_up(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(blank_two));
+
+        move_paragraph_up(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(blank_one));
+
+        // No earlier blank — clamps to doc start.
+        move_paragraph_up(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(0));
+    }
+
+    #[test]
+    fn paragraph_motion_extends_selection() {
+        let text = "first\n\nsecond";
+        let mut document = document(text);
+        set_primary_selection(&mut document, Selection::caret(0));
+
+        move_paragraph_down(&mut document, true);
+        let blank = "first\n".len();
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 0,
+                head: blank
+            }
+        );
+    }
+
+    #[test]
+    fn page_motion_steps_by_visible_rows_minus_one() {
+        let text = "l0\nl1\nl2\nl3\nl4\nl5\nl6\nl7";
+        let mut document = document(text);
+        set_primary_selection(&mut document, Selection::caret(0));
+        let mut view_state = EditorViewState {
+            visible_rows: Some(5),
+            ..Default::default()
+        };
+
+        move_page(&mut document, &mut view_state, 1, false);
+        // Step is 4 → land on line 4 column 0.
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("l0\nl1\nl2\nl3\n".len())
+        );
+
+        move_page(&mut document, &mut view_state, 1, false);
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("l0\nl1\nl2\nl3\nl4\nl5\nl6\n".len())
+        );
+
+        // Past EOF clamps to last line.
+        move_page(&mut document, &mut view_state, 1, false);
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("l0\nl1\nl2\nl3\nl4\nl5\nl6\n".len())
+        );
+
+        move_page(&mut document, &mut view_state, -1, false);
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("l0\nl1\nl2\n".len())
+        );
+    }
+
+    #[test]
+    fn page_motion_preserves_preferred_column() {
+        let text = "abcdefgh\nx\nlong line\n12345678";
+        let mut document = document(text);
+        // Start at column 6 of line 0.
+        set_primary_selection(&mut document, Selection::caret(6));
+        let mut view_state = EditorViewState {
+            visible_rows: Some(3),
+            ..Default::default()
+        };
+
+        // Step = 2; lands on line 2 ("long line"), column 6.
+        move_page(&mut document, &mut view_state, 1, false);
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("abcdefgh\nx\nlong l".len())
+        );
+        assert_eq!(view_state.preferred_column, Some(6));
+
+        // Step back 2; lands on line 0 column 6 with preferred column intact.
+        move_page(&mut document, &mut view_state, -1, false);
+        assert_eq!(primary_selection(&document), Selection::caret(6));
+        assert_eq!(view_state.preferred_column, Some(6));
+    }
+
+    #[test]
+    fn page_motion_extends_selection() {
+        let text = "a\nb\nc\nd\ne";
+        let mut document = document(text);
+        set_primary_selection(&mut document, Selection::caret(0));
+        let mut view_state = EditorViewState {
+            visible_rows: Some(3),
+            ..Default::default()
+        };
+
+        move_page(&mut document, &mut view_state, 1, true);
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 0,
+                head: "a\nb\n".len()
+            }
         );
     }
 }
