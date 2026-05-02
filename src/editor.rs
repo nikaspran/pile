@@ -252,6 +252,7 @@ fn handle_input(ui: &egui::Ui, document: &mut Document, view_state: &mut EditorV
                 let extend = modifiers.shift;
                 let word = modifiers.alt || modifiers.ctrl;
                 let plain = !modifiers.shift && !modifiers.alt && !modifiers.ctrl;
+                let indentation = !modifiers.alt && !modifiers.ctrl;
                 match key {
                     egui::Key::Backspace if plain => {
                         changed |= backspace(document);
@@ -262,7 +263,15 @@ fn handle_input(ui: &egui::Ui, document: &mut Document, view_state: &mut EditorV
                         view_state.preferred_column = None;
                     }
                     egui::Key::Enter if plain => {
-                        changed |= replace_selection_with(document, "\n");
+                        changed |= insert_newline_with_auto_indent(document);
+                        view_state.preferred_column = None;
+                    }
+                    egui::Key::Tab if indentation => {
+                        changed |= if modifiers.shift {
+                            outdent_selection(document)
+                        } else {
+                            indent_selection(document)
+                        };
                         view_state.preferred_column = None;
                     }
                     egui::Key::ArrowLeft => {
@@ -349,6 +358,146 @@ pub fn replace_selection_with(document: &mut Document, text: &str) -> bool {
     set_primary_selection(document, Selection::caret(caret));
     document.revision += 1;
     true
+}
+
+pub fn insert_newline_with_auto_indent(document: &mut Document) -> bool {
+    clamp_primary_selection(document);
+    let selection = primary_selection(document);
+    let (start, _) = selection_range(selection);
+    let line = line_index_of_byte(&document.rope, start);
+    let line_start = byte_of_visual_line(&document.rope, line);
+    let indent = leading_whitespace(&document.rope, line_start, start);
+    let text = format!("\n{indent}");
+
+    replace_selection_with(document, &text)
+}
+
+pub fn indent_selection(document: &mut Document) -> bool {
+    change_line_indentation(document, IndentChange::Indent)
+}
+
+pub fn outdent_selection(document: &mut Document) -> bool {
+    change_line_indentation(document, IndentChange::Outdent)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IndentChange {
+    Indent,
+    Outdent,
+}
+
+fn change_line_indentation(document: &mut Document, change: IndentChange) -> bool {
+    clamp_primary_selection(document);
+    let selection = primary_selection(document);
+    let (start, end) = selection_range(selection);
+    let (first_line, last_line) = selected_line_range(&document.rope, start, end);
+
+    match change {
+        IndentChange::Indent => {
+            let line_starts = (first_line..=last_line)
+                .map(|line| byte_of_visual_line(&document.rope, line))
+                .collect::<Vec<_>>();
+            if line_starts.is_empty() {
+                return false;
+            }
+
+            let mut adjusted_selection = selection;
+            let mut shift = 0;
+            for line_start in line_starts {
+                let insert_at = line_start + shift;
+                document.rope.insert(insert_at, "    ");
+                adjusted_selection.anchor =
+                    adjust_offset_after_insert(adjusted_selection.anchor, insert_at, 4);
+                adjusted_selection.head =
+                    adjust_offset_after_insert(adjusted_selection.head, insert_at, 4);
+                shift += 4;
+            }
+
+            set_primary_selection(document, adjusted_selection);
+            document.revision += 1;
+            true
+        }
+        IndentChange::Outdent => {
+            let deletions = (first_line..=last_line)
+                .filter_map(|line| outdent_range_for_line(&document.rope, line))
+                .collect::<Vec<_>>();
+            if deletions.is_empty() {
+                return false;
+            }
+
+            let mut adjusted_selection = selection;
+            for (delete_start, delete_end) in deletions.into_iter().rev() {
+                document.rope.delete(delete_start..delete_end);
+                adjusted_selection.anchor =
+                    adjust_offset_after_delete(adjusted_selection.anchor, delete_start, delete_end);
+                adjusted_selection.head =
+                    adjust_offset_after_delete(adjusted_selection.head, delete_start, delete_end);
+            }
+
+            set_primary_selection(document, adjusted_selection);
+            document.revision += 1;
+            true
+        }
+    }
+}
+
+fn selected_line_range(rope: &Rope, start: usize, end: usize) -> (usize, usize) {
+    let first_line = line_index_of_byte(rope, start);
+    let mut last_line = line_index_of_byte(rope, end);
+    if end > start && end == byte_of_visual_line(rope, last_line) {
+        last_line = last_line.saturating_sub(1);
+    }
+    (first_line, last_line.max(first_line))
+}
+
+fn leading_whitespace(rope: &Rope, line_start: usize, limit: usize) -> String {
+    let mut indent = String::new();
+    for char in rope.byte_slice(line_start..limit).chars() {
+        if char == ' ' || char == '\t' {
+            indent.push(char);
+        } else {
+            break;
+        }
+    }
+    indent
+}
+
+fn outdent_range_for_line(rope: &Rope, line_index: usize) -> Option<(usize, usize)> {
+    let line_start = byte_of_visual_line(rope, line_index);
+    let (_, line_end) = visual_line_bounds(rope, line_index);
+    let mut delete_end = line_start;
+    let mut spaces = 0;
+
+    for char in rope.byte_slice(line_start..line_end).chars() {
+        if char == '\t' {
+            return Some((line_start, line_start + char.len_utf8()));
+        }
+        if char != ' ' || spaces == 4 {
+            break;
+        }
+        spaces += 1;
+        delete_end += char.len_utf8();
+    }
+
+    (delete_end > line_start).then_some((line_start, delete_end))
+}
+
+fn adjust_offset_after_insert(offset: usize, insert_at: usize, inserted_len: usize) -> usize {
+    if offset >= insert_at {
+        offset + inserted_len
+    } else {
+        offset
+    }
+}
+
+fn adjust_offset_after_delete(offset: usize, delete_start: usize, delete_end: usize) -> usize {
+    if offset <= delete_start {
+        offset
+    } else if offset >= delete_end {
+        offset - (delete_end - delete_start)
+    } else {
+        delete_start
+    }
 }
 
 pub fn replace_match(
@@ -993,6 +1142,131 @@ mod tests {
     }
 
     #[test]
+    fn newline_preserves_current_line_indent() {
+        let mut document = document("fn main() {\n    let value = 1;");
+        let end = document.rope.byte_len();
+        set_primary_selection(&mut document, Selection::caret(end));
+
+        assert!(insert_newline_with_auto_indent(&mut document));
+
+        assert_eq!(document.text(), "fn main() {\n    let value = 1;\n    ");
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret(document.rope.byte_len())
+        );
+    }
+
+    #[test]
+    fn newline_replaces_selection_and_uses_selection_start_indent() {
+        let mut document = document("    first selected\n    second selected");
+        let start = "    fi".len();
+        let end = "    first selected\n    second sele".len();
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: start,
+                head: end,
+            },
+        );
+
+        assert!(insert_newline_with_auto_indent(&mut document));
+
+        assert_eq!(document.text(), "    fi\n    cted");
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("    fi\n    ".len())
+        );
+    }
+
+    #[test]
+    fn indent_at_caret_indents_current_line() {
+        let mut document = document("alpha\nbeta");
+        set_primary_selection(&mut document, Selection::caret("alpha\nbe".len()));
+
+        assert!(indent_selection(&mut document));
+
+        assert_eq!(document.text(), "alpha\n    beta");
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("alpha\n    be".len())
+        );
+    }
+
+    #[test]
+    fn indent_selection_indents_touched_lines() {
+        let mut document = document("one\ntwo\nthree");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 1,
+                head: "one\ntwo".len(),
+            },
+        );
+
+        assert!(indent_selection(&mut document));
+
+        assert_eq!(document.text(), "    one\n    two\nthree");
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 5,
+                head: "    one\n    two".len()
+            }
+        );
+    }
+
+    #[test]
+    fn indent_selection_excludes_line_at_selection_end_boundary() {
+        let mut document = document("one\ntwo\nthree");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 0,
+                head: "one\ntwo\n".len(),
+            },
+        );
+
+        assert!(indent_selection(&mut document));
+
+        assert_eq!(document.text(), "    one\n    two\nthree");
+    }
+
+    #[test]
+    fn outdent_selection_removes_tabs_or_up_to_four_spaces() {
+        let mut document = document("    one\n  two\n\tthree\nfour");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 0,
+                head: "    one\n  two\n\tthree".len(),
+            },
+        );
+
+        assert!(outdent_selection(&mut document));
+
+        assert_eq!(document.text(), "one\ntwo\nthree\nfour");
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 0,
+                head: "one\ntwo\nthree".len()
+            }
+        );
+    }
+
+    #[test]
+    fn outdent_without_leading_whitespace_is_noop() {
+        let mut document = document("alpha\nbeta");
+        let revision_before = document.revision;
+        set_primary_selection(&mut document, Selection::caret(2));
+
+        assert!(!outdent_selection(&mut document));
+
+        assert_eq!(document.text(), "alpha\nbeta");
+        assert_eq!(document.revision, revision_before);
+    }
+
+    #[test]
     fn backspace_and_delete_handle_boundaries_and_lines() {
         let mut document = document("ab\ncd");
         set_primary_selection(&mut document, Selection::caret(3));
@@ -1507,11 +1781,7 @@ mod tests {
         let mut document = document("hello world hello");
         let revision_before = document.revision;
 
-        let caret = replace_match(
-            &mut document,
-            SearchMatch { start: 6, end: 11 },
-            "earth",
-        );
+        let caret = replace_match(&mut document, SearchMatch { start: 6, end: 11 }, "earth");
 
         assert_eq!(document.text(), "hello earth hello");
         assert_eq!(caret, 11);

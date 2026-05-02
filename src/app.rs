@@ -398,7 +398,11 @@ impl PileApp {
                 .on_hover_text("Whole word")
                 .changed();
 
-            let replace_label = if self.search.replace_visible { "v" } else { ">" };
+            let replace_label = if self.search.replace_visible {
+                "v"
+            } else {
+                ">"
+            };
             if ui
                 .button(replace_label)
                 .on_hover_text("Toggle replace")

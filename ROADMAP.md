@@ -18,8 +18,9 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
   split-selection-into-lines, and rectangular/column selection.
 - Add undo/redo backed by an edit history that understands grouped typing,
   paste, replace, and multi-cursor transactions.
-- Add indentation commands: indent, outdent, auto-indent on newline, tab width
-  settings, soft tabs, and whitespace normalization.
+- Completed: add indentation commands for Tab, Shift-Tab, and auto-indent on
+  newline.
+- Add tab width settings, soft tabs, and whitespace normalization.
 - Add bracket and quote pairing with overwrite, skip-over, and delete-pair
   behavior.
 - Add line operations: duplicate line, move line up/down, delete line, join
