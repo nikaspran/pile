@@ -33,6 +33,7 @@ pub fn show_editor(
     focus_pending: &mut bool,
     reveal_selection: Option<Selection>,
     search_highlights: &[SearchHighlight],
+    extra_selections: &[Selection],
 ) -> EditorResponse {
     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
     clamp_primary_selection(document);
@@ -189,6 +190,18 @@ pub fn show_editor(
                     char_width,
                     ui.visuals().selection.bg_fill,
                 );
+                for sel in extra_selections {
+                    paint_selection_for_line(
+                        &painter,
+                        document,
+                        *sel,
+                        line_index,
+                        text_pos,
+                        row_height,
+                        char_width,
+                        ui.visuals().selection.bg_fill.gamma_multiply(0.6),
+                    );
+                }
                 paint_search_highlights_for_line(
                     &painter,
                     &document.rope,
@@ -293,6 +306,14 @@ fn handle_input(ui: &egui::Ui, document: &mut Document, view_state: &mut EditorV
                 }
                 egui::Key::S => {
                     changed |= sort_selected_lines(document);
+                    view_state.preferred_column = None;
+                }
+                egui::Key::R => {
+                    changed |= reverse_selected_lines(document);
+                    view_state.preferred_column = None;
+                }
+                egui::Key::T => {
+                    changed |= trim_trailing_whitespace(document);
                     view_state.preferred_column = None;
                 }
                 _ => {}
@@ -638,6 +659,67 @@ pub fn sort_selected_lines(document: &mut Document) -> bool {
     transform_selected_lines(document, |lines| {
         lines.sort_by(|left, right| left.cmp(right))
     })
+}
+
+pub fn reverse_selected_lines(document: &mut Document) -> bool {
+    transform_selected_lines(document, |lines| {
+        lines.reverse();
+    })
+}
+
+pub fn trim_trailing_whitespace(document: &mut Document) -> bool {
+    clamp_primary_selection(document);
+    if document.rope.byte_len() == 0 {
+        return false;
+    }
+
+    let selection = primary_selection(document);
+    let (selection_start, selection_end) = selection_range(selection);
+    let (start, end) = selected_full_line_bounds(&document.rope, selection_start, selection_end);
+
+    let original = document.rope.byte_slice(start..end).to_string();
+    let has_trailing_newline = original.ends_with('\n');
+    let body = original.strip_suffix('\n').unwrap_or(&original);
+
+    let lines: Vec<&str> = body.split('\n').collect();
+    let trimmed_lines: Vec<String> = lines.iter().map(|line| line.trim_end().to_string()).collect();
+
+    let changed = lines
+        .iter()
+        .zip(trimmed_lines.iter())
+        .any(|(orig, trimmed)| *orig != trimmed);
+
+    if !changed {
+        return false;
+    }
+
+    let mut replacement = trimmed_lines.join("\n");
+    if has_trailing_newline {
+        replacement.push('\n');
+    }
+
+    document.rope.delete(start..end);
+    document.rope.insert(start, &replacement);
+
+    document.commit_and_start_new_undo_group();
+    document.push_undo(EditTransaction {
+        start,
+        end,
+        deleted_text: original,
+        inserted_text: replacement.clone(),
+        selection_before: selection,
+    });
+    document.commit_undo_group();
+
+    set_primary_selection(
+        document,
+        Selection {
+            anchor: start,
+            head: start + replacement.len(),
+        },
+    );
+    document.revision += 1;
+    true
 }
 
 fn transform_selected_lines<F>(document: &mut Document, transform: F) -> bool
@@ -1364,6 +1446,62 @@ fn selection_range(selection: Selection) -> (usize, usize) {
         (selection.anchor, selection.head)
     } else {
         (selection.head, selection.anchor)
+    }
+}
+
+pub fn word_at_selection(rope: &Rope, selection: Selection) -> Option<(usize, usize)> {
+    let (start, end) = selection_range(selection);
+    if start != end {
+        return Some((start, end));
+    }
+
+    let offset = start;
+    if offset >= rope.byte_len() {
+        return None;
+    }
+
+    let char_at_caret = rope.byte_slice(offset..).chars().next();
+    let Some(char_at_caret) = char_at_caret else {
+        return None;
+    };
+
+    if classify_char(char_at_caret) == CharClass::NonWord {
+        return None;
+    }
+
+    let mut word_start = offset;
+    let mut search_offset = offset;
+    loop {
+        if search_offset == 0 {
+            break;
+        }
+        let prev_char = rope.byte_slice(..search_offset).chars().next_back();
+        match prev_char {
+            Some(c) if classify_char(c) == CharClass::Word => {
+                search_offset -= c.len_utf8();
+                word_start = search_offset;
+            }
+            _ => break,
+        }
+    }
+
+    let mut word_end = offset;
+    let mut chars_after = rope.byte_slice(offset..).chars();
+    if let Some(c) = chars_after.next() {
+        word_end += c.len_utf8();
+    }
+    for c in chars_after {
+        if classify_char(c) == CharClass::Word {
+            word_end += c.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    if word_start < word_end {
+        Some((word_start, word_end))
+    } else {
+        None
     }
 }
 
@@ -3074,5 +3212,40 @@ mod tests {
 
         assert!(document.undo());
         assert_eq!(document.text(), "    one\n  two\n\tthree\nfour");
+    }
+
+    #[test]
+    fn word_at_selection_finds_word_under_caret() {
+        let rope = Rope::from("hello world");
+        let sel = Selection::caret(3); // inside "hello"
+        let result = word_at_selection(&rope, sel);
+        assert_eq!(result, Some((0, 5)));
+    }
+
+    #[test]
+    fn word_at_selection_uses_existing_selection() {
+        let rope = Rope::from("hello world");
+        let sel = Selection {
+            anchor: 0,
+            head: 5,
+        };
+        let result = word_at_selection(&rope, sel);
+        assert_eq!(result, Some((0, 5)));
+    }
+
+    #[test]
+    fn word_at_selection_returns_none_for_whitespace() {
+        let rope = Rope::from("hello world");
+        let sel = Selection::caret(5); // space between words
+        let result = word_at_selection(&rope, sel);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn word_at_selection_handles_non_alphanumeric_word() {
+        let rope = Rope::from("hello_world test");
+        let sel = Selection::caret(8); // inside "hello_world"
+        let result = word_at_selection(&rope, sel);
+        assert_eq!(result, Some((0, 11)));
     }
 }

@@ -7,7 +7,7 @@ use tracing::{info, warn};
 
 use crate::{
     editor::{EditorViewState, SearchHighlight, replace_all_matches, replace_match, show_editor},
-    model::{AppState, DocumentId, SessionSnapshot},
+    model::{AppState, DocumentId, Selection, SessionSnapshot},
     native_menu::{NativeMenu, NativeMenuCommand},
     persistence::{
         SaveMsg, SaveWorker, default_session_path, load_session, quarantine_corrupt_session,
@@ -28,6 +28,7 @@ struct SearchState {
     current_match: Option<usize>,
     focus_pending: bool,
     selection_pending: bool,
+    occurrence_selections: Vec<Selection>,
 }
 
 impl SearchState {
@@ -69,6 +70,72 @@ impl SearchState {
             (Some(index), total) => format!("{} / {total}", index + 1),
             (None, total) => format!("0 / {total}"),
         }
+    }
+
+    fn select_next_occurrence(&mut self, rope: &Rope, primary: Selection) {
+        let (query, _) = if let Some((start, end)) =
+            crate::editor::word_at_selection(rope, primary)
+        {
+            let text = rope.byte_slice(start..end).to_string();
+            if text.is_empty() {
+                return;
+            }
+            (text, Selection { anchor: start, head: end })
+        } else {
+            return;
+        };
+
+        if self.occurrence_selections.is_empty() {
+            self.occurrence_selections.push(primary);
+            self.query = query.clone();
+        }
+
+        let options = SearchOptions {
+            case_sensitive: self.case_sensitive,
+            whole_word: self.whole_word,
+        };
+        let matches = find_matches(rope, &query, options);
+
+        let all_selected: std::collections::HashSet<_> = self
+            .occurrence_selections
+            .iter()
+            .map(|s| (s.anchor.min(s.head), s.anchor.max(s.head)))
+            .collect();
+
+        let next = matches
+            .iter()
+            .find(|m| !all_selected.contains(&(m.start, m.end)))
+            .copied();
+
+        if let Some(m) = next {
+            let sel = Selection {
+                anchor: m.start,
+                head: m.end,
+            };
+            self.occurrence_selections.push(sel);
+        }
+    }
+
+    fn find_under_cursor(&mut self, rope: &Rope, primary: Selection) {
+        self.occurrence_selections.clear();
+        let (start, end) = if let Some((s, e)) =
+            crate::editor::word_at_selection(rope, primary)
+        {
+            (s, e)
+        } else {
+            return;
+        };
+        if start == end {
+            return;
+        }
+        let text = rope.byte_slice(start..end).to_string();
+        if text.is_empty() {
+            return;
+        }
+        self.query = text;
+        self.recompute(rope);
+        self.occurrence_selections
+            .push(Selection { anchor: start, head: end });
     }
 }
 
@@ -319,6 +386,23 @@ impl PileApp {
         if rename_tab {
             self.begin_rename(self.state.active_document);
         }
+
+        let select_next = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND,
+                logical_key: egui::Key::D,
+            })
+        });
+        if select_next {
+            self.select_next_occurrence();
+        }
+
+        let find_under_cursor = ctx.input_mut(|input| {
+            input.consume_key(egui::Modifiers::NONE, egui::Key::F3)
+        });
+        if find_under_cursor {
+            self.find_under_cursor();
+        }
     }
 
     fn close_active_scratch(&mut self) {
@@ -335,6 +419,26 @@ impl PileApp {
         if let Some(document) = self.state.active_document() {
             self.search.recompute(&document.rope);
         }
+    }
+
+    fn select_next_occurrence(&mut self) {
+        let Some(document) = self.state.active_document() else {
+            return;
+        };
+        let primary = crate::editor::primary_selection(document);
+        let rope = document.rope.clone();
+        self.search.select_next_occurrence(&rope, primary);
+        self.document_edited();
+    }
+
+    fn find_under_cursor(&mut self) {
+        let Some(document) = self.state.active_document() else {
+            return;
+        };
+        let primary = crate::editor::primary_selection(document);
+        let rope = document.rope.clone();
+        self.search.find_under_cursor(&rope, primary);
+        self.document_edited();
     }
 
     fn close_search(&mut self) {
@@ -549,6 +653,21 @@ impl PileApp {
             Vec::new()
         };
 
+        let extra_selections: Vec<Selection> = self
+            .search
+            .occurrence_selections
+            .iter()
+            .filter(|s| {
+                let (start, end) = if s.anchor <= s.head {
+                    (s.anchor, s.head)
+                } else {
+                    (s.head, s.anchor)
+                };
+                start != end
+            })
+            .copied()
+            .collect();
+
         let Some(document) = self.state.active_document_mut() else {
             return;
         };
@@ -560,6 +679,7 @@ impl PileApp {
             &mut self.editor_focus_pending,
             reveal_selection,
             &search_highlights,
+            &extra_selections,
         );
 
         if response.changed {
@@ -624,5 +744,92 @@ impl eframe::App for PileApp {
         if let Some(worker) = self.save_worker.take() {
             worker.shutdown();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crop::Rope;
+    use crate::model::Selection;
+
+    #[test]
+    fn select_next_occurrence_adds_first_word() {
+        let rope = Rope::from("hello world hello");
+        let primary = Selection {
+            anchor: 0,
+            head: 5,
+        };
+        let mut state = super::SearchState {
+            visible: false,
+            replace_visible: false,
+            query: String::new(),
+            replacement: String::new(),
+            case_sensitive: false,
+            whole_word: false,
+            matches: vec![],
+            current_match: None,
+            focus_pending: false,
+            selection_pending: false,
+            occurrence_selections: vec![],
+        };
+
+        state.select_next_occurrence(&rope, primary);
+
+        assert_eq!(state.occurrence_selections.len(), 2);
+        assert_eq!(state.occurrence_selections[0], primary);
+        assert_eq!(state.occurrence_selections[1].anchor, 12);
+        assert_eq!(state.occurrence_selections[1].head, 17);
+    }
+
+    #[test]
+    fn find_under_cursor_selects_word() {
+        let rope = Rope::from("hello world hello");
+        let primary = Selection::caret(0);
+        let mut state = super::SearchState {
+            visible: false,
+            replace_visible: false,
+            query: String::new(),
+            replacement: String::new(),
+            case_sensitive: false,
+            whole_word: false,
+            matches: vec![],
+            current_match: None,
+            focus_pending: false,
+            selection_pending: false,
+            occurrence_selections: vec![],
+        };
+
+        state.find_under_cursor(&rope, primary);
+
+        assert_eq!(state.occurrence_selections.len(), 1);
+        let sel = state.occurrence_selections[0];
+        assert_eq!((sel.anchor, sel.head), (0, 5));
+        assert_eq!(state.query, "hello");
+    }
+
+    #[test]
+    fn find_under_cursor_clears_previous() {
+        let rope = Rope::from("hello world");
+        let primary = Selection::caret(6);
+        let mut state = super::SearchState {
+            visible: false,
+            replace_visible: false,
+            query: "previous".to_owned(),
+            replacement: String::new(),
+            case_sensitive: false,
+            whole_word: false,
+            matches: vec![],
+            current_match: None,
+            focus_pending: false,
+            selection_pending: false,
+            occurrence_selections: vec![Selection { anchor: 0, head: 5 }],
+        };
+
+        state.find_under_cursor(&rope, primary);
+
+        assert_eq!(state.occurrence_selections.len(), 1);
+        let sel = state.occurrence_selections[0];
+        assert_eq!((sel.anchor, sel.head), (6, 11));
+        assert_eq!(state.query, "world");
     }
 }
