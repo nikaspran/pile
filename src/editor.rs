@@ -268,6 +268,10 @@ fn handle_input(ui: &egui::Ui, document: &mut Document, view_state: &mut EditorV
                     changed |= delete_selected_lines(document);
                     view_state.preferred_column = None;
                 }
+                egui::Key::S => {
+                    changed |= sort_selected_lines(document);
+                    view_state.preferred_column = None;
+                }
                 _ => {}
             },
             egui::Event::Key {
@@ -547,6 +551,61 @@ pub fn join_selected_lines(document: &mut Document) -> bool {
     document.rope.insert(start, &joined);
     let caret = start + joined.len() - suffix.len();
     set_primary_selection(document, Selection::caret(caret));
+    document.revision += 1;
+    true
+}
+
+pub fn sort_selected_lines(document: &mut Document) -> bool {
+    transform_selected_lines(document, |lines| {
+        lines.sort_by(|left, right| left.cmp(right))
+    })
+}
+
+fn transform_selected_lines<F>(document: &mut Document, transform: F) -> bool
+where
+    F: FnOnce(&mut Vec<String>),
+{
+    clamp_primary_selection(document);
+    if document.rope.byte_len() == 0 {
+        return false;
+    }
+
+    let selection = primary_selection(document);
+    let (selection_start, selection_end) = selection_range(selection);
+    let (first_line, last_line) =
+        selected_line_range(&document.rope, selection_start, selection_end);
+    if first_line == last_line {
+        return false;
+    }
+
+    let (start, end) = selected_full_line_bounds(&document.rope, selection_start, selection_end);
+    let original = document.rope.byte_slice(start..end).to_string();
+    let has_trailing_newline = original.ends_with('\n');
+    let body = original.strip_suffix('\n').unwrap_or(&original);
+    let mut lines = body.split('\n').map(ToOwned::to_owned).collect::<Vec<_>>();
+    if lines.len() <= 1 {
+        return false;
+    }
+
+    transform(&mut lines);
+
+    let mut replacement = lines.join("\n");
+    if has_trailing_newline {
+        replacement.push('\n');
+    }
+    if replacement == original {
+        return false;
+    }
+
+    document.rope.delete(start..end);
+    document.rope.insert(start, &replacement);
+    set_primary_selection(
+        document,
+        Selection {
+            anchor: start,
+            head: start + replacement.len(),
+        },
+    );
     document.revision += 1;
     true
 }
@@ -1904,6 +1963,90 @@ mod tests {
             primary_selection(&document),
             Selection::caret("one\nt".len())
         );
+    }
+
+    #[test]
+    fn sort_selected_lines_orders_touched_lines() {
+        let mut document = document("gamma\nalpha\nbeta\nomega");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 1,
+                head: "gamma\nalpha\nbe".len(),
+            },
+        );
+
+        assert!(sort_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "alpha\nbeta\ngamma\nomega");
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 0,
+                head: "alpha\nbeta\ngamma\n".len()
+            }
+        );
+    }
+
+    #[test]
+    fn sort_selected_lines_excludes_line_at_selection_end_boundary() {
+        let mut document = document("b\na\nc");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 0,
+                head: "b\na\n".len(),
+            },
+        );
+
+        assert!(sort_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "a\nb\nc");
+    }
+
+    #[test]
+    fn sort_selected_lines_without_trailing_newline_keeps_none() {
+        let mut document = document("b\na");
+        let end = document.rope.byte_len();
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 0,
+                head: end,
+            },
+        );
+
+        assert!(sort_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "a\nb");
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 0,
+                head: "a\nb".len()
+            }
+        );
+    }
+
+    #[test]
+    fn sort_selected_lines_noops_for_single_or_already_sorted_lines() {
+        let mut document = document("a\nb\nc");
+        let revision_before = document.revision;
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 0,
+                head: "a\nb\n".len(),
+            },
+        );
+
+        assert!(!sort_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "a\nb\nc");
+        assert_eq!(document.revision, revision_before);
+
+        set_primary_selection(&mut document, Selection::caret(1));
+        assert!(!sort_selected_lines(&mut document));
     }
 
     #[test]
