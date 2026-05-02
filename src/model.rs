@@ -189,10 +189,12 @@ impl Document {
             return false;
         };
         let group = group.clone();
-        for txn in group.into_iter().rev() {
+        for txn in group.iter().rev() {
             self.rope.delete(txn.start..txn.start + txn.inserted_text.len());
             self.rope.insert(txn.start, &txn.deleted_text);
-            self.set_selection_without_undo(txn.selection_before);
+        }
+        if let Some(txn) = group.first() {
+            self.selections = txn.selections_before.clone();
         }
         self.revision += 1;
         true
@@ -203,30 +205,19 @@ impl Document {
             return false;
         };
         let group = group.clone();
-        for txn in group.into_iter() {
+        for txn in group.iter() {
             self.rope.delete(txn.start..txn.end);
             self.rope.insert(txn.start, &txn.inserted_text);
+        }
+        if let Some(txn) = group.last() {
             let new_caret = txn.start + txn.inserted_text.len();
-            self.set_selection_without_undo(Selection::caret(new_caret));
+            self.selections = vec![Selection::caret(new_caret)];
         }
         self.revision += 1;
         true
     }
 
-    fn set_selection_without_undo(&mut self, selection: Selection) {
-        let rope_len = self.rope.byte_len();
-        let selection = Selection {
-            anchor: selection.anchor.min(rope_len),
-            head: selection.head.min(rope_len),
-        };
-        if let Some(primary) = self.selections.first_mut() {
-            *primary = selection;
-        } else {
-            self.selections.push(selection);
-        }
-    }
 }
-
 fn title_from_line(line: RopeSlice<'_>) -> Option<String> {
     let mut chars = line.chars().skip_while(|char| char.is_whitespace());
     let mut title: String = chars.by_ref().take(MAX_AUTO_TITLE_CHARS).collect();
@@ -278,7 +269,7 @@ pub struct EditTransaction {
     pub end: usize,
     pub deleted_text: String,
     pub inserted_text: String,
-    pub selection_before: Selection,
+    pub selections_before: Vec<Selection>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -438,7 +429,7 @@ mod tests {
             end: 0,
             deleted_text: String::new(),
             inserted_text: "a".to_owned(),
-            selection_before: Selection::caret(0),
+            selections_before: vec![Selection::caret(0)],
         });
         undo.begin_group();
         undo.record(EditTransaction {
@@ -446,7 +437,7 @@ mod tests {
             end: 1,
             deleted_text: String::new(),
             inserted_text: "b".to_owned(),
-            selection_before: Selection::caret(1),
+            selections_before: vec![Selection::caret(1)],
         });
         undo.commit_group();
 
@@ -464,7 +455,7 @@ mod tests {
             end: 0,
             deleted_text: String::new(),
             inserted_text: "a".to_owned(),
-            selection_before: Selection::caret(0),
+            selections_before: vec![Selection::caret(0)],
         });
 
         // commit_and_start_new_group for a discrete operation should commit the typing group
@@ -474,7 +465,7 @@ mod tests {
             end: 0,
             deleted_text: String::new(),
             inserted_text: "b".to_owned(),
-            selection_before: Selection::caret(0),
+            selections_before: vec![Selection::caret(0)],
         });
         undo.commit_group();
 
@@ -494,7 +485,7 @@ mod tests {
             end: 0,
             deleted_text: String::new(),
             inserted_text: "hello".to_owned(),
-            selection_before: Selection::caret(0),
+            selections_before: vec![Selection::caret(0)],
         });
         undo.commit_group();
 
@@ -507,7 +498,7 @@ mod tests {
             end: 0,
             deleted_text: String::new(),
             inserted_text: "world".to_owned(),
-            selection_before: Selection::caret(0),
+            selections_before: vec![Selection::caret(0)],
         });
         undo.commit_group();
 
@@ -524,7 +515,7 @@ mod tests {
             end: 0,
             deleted_text: String::new(),
             inserted_text: "a".to_owned(),
-            selection_before: Selection::caret(0),
+            selections_before: vec![Selection::caret(0)],
         });
 
         undo.discard_group();
@@ -541,7 +532,7 @@ mod tests {
             end: 0,
             deleted_text: String::new(),
             inserted_text: "hello".to_owned(),
-            selection_before: Selection::caret(0),
+            selections_before: vec![Selection::caret(0)],
         });
         undo.commit_group();
         undo.undo();

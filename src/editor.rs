@@ -454,7 +454,7 @@ pub fn replace_selection_with(document: &mut Document, text: &str) -> bool {
         end,
         deleted_text,
         inserted_text: text.to_owned(),
-        selection_before: selection,
+        selections_before: vec![selection],
     });
 
     if start != end {
@@ -503,7 +503,7 @@ pub fn duplicate_selected_lines(document: &mut Document) -> bool {
             end: 0,
             deleted_text: before_text,
             inserted_text: "\n".to_owned(),
-            selection_before: before_selection,
+            selections_before: vec![before_selection],
         });
         document.commit_undo_group();
         document.revision += 1;
@@ -539,7 +539,7 @@ pub fn duplicate_selected_lines(document: &mut Document) -> bool {
         end: original_text.len(),
         deleted_text: original_text,
         inserted_text: document.text(),
-        selection_before: selection,
+        selections_before: vec![selection],
     });
     document.commit_undo_group();
 
@@ -583,7 +583,7 @@ pub fn delete_selected_lines(document: &mut Document) -> bool {
         end: original_text.len(),
         deleted_text: original_text,
         inserted_text: new_text,
-        selection_before: selection,
+        selections_before: vec![selection],
     });
     document.commit_undo_group();
 
@@ -646,7 +646,7 @@ pub fn join_selected_lines(document: &mut Document) -> bool {
         end,
         deleted_text: original,
         inserted_text: joined.clone(),
-        selection_before: selection,
+        selections_before: vec![selection],
     });
     document.commit_undo_group();
 
@@ -707,7 +707,7 @@ pub fn trim_trailing_whitespace(document: &mut Document) -> bool {
         end,
         deleted_text: original,
         inserted_text: replacement.clone(),
-        selection_before: selection,
+        selections_before: vec![selection],
     });
     document.commit_undo_group();
 
@@ -767,7 +767,7 @@ where
         end,
         deleted_text: original,
         inserted_text: replacement.clone(),
-        selection_before: selection,
+        selections_before: vec![selection],
     });
     document.commit_undo_group();
 
@@ -891,7 +891,7 @@ fn move_selected_lines(document: &mut Document, direction: LineMoveDirection) ->
         end: original_text.len(),
         deleted_text: original_text,
         inserted_text: document.text(),
-        selection_before: selection,
+        selections_before: vec![selection],
     });
     document.commit_undo_group();
 
@@ -965,7 +965,7 @@ fn change_line_indentation(document: &mut Document, change: IndentChange) -> boo
                 end: original_text.len(),
                 deleted_text: original_text,
                 inserted_text: document.text(),
-                selection_before: selection,
+                selections_before: vec![selection],
             });
             document.commit_undo_group();
 
@@ -997,7 +997,7 @@ fn change_line_indentation(document: &mut Document, change: IndentChange) -> boo
                 end: original_text.len(),
                 deleted_text: original_text,
                 inserted_text: document.text(),
-                selection_before: selection,
+                selections_before: vec![selection],
             });
             document.commit_undo_group();
 
@@ -1119,7 +1119,7 @@ pub fn replace_match(
         end,
         deleted_text,
         inserted_text: replacement.to_owned(),
-        selection_before,
+        selections_before: vec![selection_before],
     });
     document.commit_undo_group();
 
@@ -1166,7 +1166,7 @@ pub fn replace_all_matches(
             end: original_text.len(),
             deleted_text: original_text,
             inserted_text: document.text(),
-            selection_before,
+            selections_before: vec![selection_before],
         });
         document.commit_undo_group();
 
@@ -1197,7 +1197,7 @@ pub fn backspace(document: &mut Document) -> bool {
         end: start,
         deleted_text,
         inserted_text: String::new(),
-        selection_before: selection,
+        selections_before: vec![selection],
     });
 
     document.rope.delete(delete_start..start);
@@ -1226,7 +1226,7 @@ pub fn delete(document: &mut Document) -> bool {
         end: delete_end,
         deleted_text,
         inserted_text: String::new(),
-        selection_before: selection,
+        selections_before: vec![selection],
     });
 
     document.rope.delete(start..delete_end);
