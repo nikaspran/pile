@@ -275,6 +275,22 @@ fn handle_input(ui: &egui::Ui, document: &mut Document, view_state: &mut EditorV
                 pressed: true,
                 modifiers,
                 ..
+            } if modifiers.command && modifiers.alt && !modifiers.shift => match key {
+                egui::Key::ArrowUp => {
+                    changed |= move_selected_lines_up(document);
+                    view_state.preferred_column = None;
+                }
+                egui::Key::ArrowDown => {
+                    changed |= move_selected_lines_down(document);
+                    view_state.preferred_column = None;
+                }
+                _ => {}
+            },
+            egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
             } if !modifiers.command => {
                 let extend = modifiers.shift;
                 let word = modifiers.alt || modifiers.ctrl;
@@ -469,6 +485,122 @@ pub fn delete_selected_lines(document: &mut Document) -> bool {
     set_primary_selection(document, Selection::caret(caret));
     document.revision += 1;
     true
+}
+
+pub fn move_selected_lines_up(document: &mut Document) -> bool {
+    move_selected_lines(document, LineMoveDirection::Up)
+}
+
+pub fn move_selected_lines_down(document: &mut Document) -> bool {
+    move_selected_lines(document, LineMoveDirection::Down)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LineMoveDirection {
+    Up,
+    Down,
+}
+
+fn move_selected_lines(document: &mut Document, direction: LineMoveDirection) -> bool {
+    clamp_primary_selection(document);
+    if document.rope.byte_len() == 0 {
+        return false;
+    }
+
+    let selection = primary_selection(document);
+    let (selection_start, selection_end) = selection_range(selection);
+    let (first_line, last_line) =
+        selected_line_range(&document.rope, selection_start, selection_end);
+    let (selected_start, selected_end) =
+        selected_full_line_bounds(&document.rope, selection_start, selection_end);
+
+    match direction {
+        LineMoveDirection::Up => {
+            if first_line == 0 {
+                return false;
+            }
+
+            let previous_start = byte_of_visual_line(&document.rope, first_line - 1);
+            let previous_text = document
+                .rope
+                .byte_slice(previous_start..selected_start)
+                .to_string();
+            let selected_text = document
+                .rope
+                .byte_slice(selected_start..selected_end)
+                .to_string();
+            let replacement = swap_line_text_up(&selected_text, &previous_text);
+            let shift = selected_start - previous_start;
+
+            document.rope.delete(previous_start..selected_end);
+            document.rope.insert(previous_start, &replacement);
+            set_primary_selection(
+                document,
+                Selection {
+                    anchor: selection.anchor.saturating_sub(shift),
+                    head: selection.head.saturating_sub(shift),
+                },
+            );
+        }
+        LineMoveDirection::Down => {
+            let next_line = last_line + 1;
+            if next_line >= document.rope.line_len() {
+                return false;
+            }
+
+            let next_end = if next_line + 1 < document.rope.line_len() {
+                byte_of_visual_line(&document.rope, next_line + 1)
+            } else {
+                document.rope.byte_len()
+            };
+            let selected_text = document
+                .rope
+                .byte_slice(selected_start..selected_end)
+                .to_string();
+            let next_text = document.rope.byte_slice(selected_end..next_end).to_string();
+            let shift = moved_down_selection_shift(&selected_text, &next_text);
+            let replacement = swap_line_text_down(&selected_text, &next_text);
+
+            document.rope.delete(selected_start..next_end);
+            document.rope.insert(selected_start, &replacement);
+            set_primary_selection(
+                document,
+                Selection {
+                    anchor: selection.anchor + shift,
+                    head: selection.head + shift,
+                },
+            );
+        }
+    }
+
+    document.revision += 1;
+    true
+}
+
+fn swap_line_text_up(selected_text: &str, previous_text: &str) -> String {
+    if !selected_text.ends_with('\n') && previous_text.ends_with('\n') {
+        let previous_without_break = previous_text.strip_suffix('\n').unwrap_or(previous_text);
+        format!("{selected_text}\n{previous_without_break}")
+    } else {
+        format!("{selected_text}{previous_text}")
+    }
+}
+
+fn swap_line_text_down(selected_text: &str, next_text: &str) -> String {
+    if selected_text.ends_with('\n') && !next_text.ends_with('\n') {
+        let selected_without_break = selected_text.strip_suffix('\n').unwrap_or(selected_text);
+        format!("{next_text}\n{selected_without_break}")
+    } else {
+        format!("{next_text}{selected_text}")
+    }
+}
+
+fn moved_down_selection_shift(selected_text: &str, next_text: &str) -> usize {
+    if selected_text.ends_with('\n') && !next_text.ends_with('\n') {
+        next_text.len() + 1
+    } else {
+        next_text.len()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1488,6 +1620,131 @@ mod tests {
 
         assert_eq!(document.text(), "three");
         assert_eq!(primary_selection(&document), Selection::caret(0));
+    }
+
+    #[test]
+    fn move_line_up_swaps_with_previous_line() {
+        let mut document = document("one\ntwo\nthree");
+        set_primary_selection(&mut document, Selection::caret("one\ntw".len()));
+
+        assert!(move_selected_lines_up(&mut document));
+
+        assert_eq!(document.text(), "two\none\nthree");
+        assert_eq!(primary_selection(&document), Selection::caret("tw".len()));
+    }
+
+    #[test]
+    fn move_line_up_at_document_start_is_noop() {
+        let mut document = document("one\ntwo");
+        let revision_before = document.revision;
+        set_primary_selection(&mut document, Selection::caret(1));
+
+        assert!(!move_selected_lines_up(&mut document));
+
+        assert_eq!(document.text(), "one\ntwo");
+        assert_eq!(document.revision, revision_before);
+        assert_eq!(primary_selection(&document), Selection::caret(1));
+    }
+
+    #[test]
+    fn move_last_line_up_preserves_line_break_between_lines() {
+        let mut document = document("one\ntwo");
+        set_primary_selection(&mut document, Selection::caret("one\ntw".len()));
+
+        assert!(move_selected_lines_up(&mut document));
+
+        assert_eq!(document.text(), "two\none");
+        assert_eq!(primary_selection(&document), Selection::caret("tw".len()));
+    }
+
+    #[test]
+    fn move_selected_lines_up_preserves_selection_shape() {
+        let mut document = document("zero\none\ntwo\nthree");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: "zero\no".len(),
+                head: "zero\none\ntw".len(),
+            },
+        );
+
+        assert!(move_selected_lines_up(&mut document));
+
+        assert_eq!(document.text(), "one\ntwo\nzero\nthree");
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: "o".len(),
+                head: "one\ntw".len()
+            }
+        );
+    }
+
+    #[test]
+    fn move_line_down_swaps_with_next_line() {
+        let mut document = document("one\ntwo\nthree");
+        set_primary_selection(&mut document, Selection::caret("on".len()));
+
+        assert!(move_selected_lines_down(&mut document));
+
+        assert_eq!(document.text(), "two\none\nthree");
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("two\non".len())
+        );
+    }
+
+    #[test]
+    fn move_line_down_at_document_end_is_noop() {
+        let mut document = document("one\ntwo");
+        let revision_before = document.revision;
+        set_primary_selection(&mut document, Selection::caret("one\nt".len()));
+
+        assert!(!move_selected_lines_down(&mut document));
+
+        assert_eq!(document.text(), "one\ntwo");
+        assert_eq!(document.revision, revision_before);
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("one\nt".len())
+        );
+    }
+
+    #[test]
+    fn move_line_down_over_last_line_preserves_line_break_between_lines() {
+        let mut document = document("one\ntwo");
+        set_primary_selection(&mut document, Selection::caret("on".len()));
+
+        assert!(move_selected_lines_down(&mut document));
+
+        assert_eq!(document.text(), "two\none");
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("two\non".len())
+        );
+    }
+
+    #[test]
+    fn move_selected_lines_down_preserves_selection_shape() {
+        let mut document = document("zero\none\ntwo\nthree");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: "zero\no".len(),
+                head: "zero\none\ntw".len(),
+            },
+        );
+
+        assert!(move_selected_lines_down(&mut document));
+
+        assert_eq!(document.text(), "zero\nthree\none\ntwo");
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: "zero\nthree\no".len(),
+                head: "zero\nthree\none\ntw".len()
+            }
+        );
     }
 
     #[test]

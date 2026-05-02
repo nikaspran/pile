@@ -24,8 +24,9 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Add bracket and quote pairing with overwrite, skip-over, and delete-pair
   behavior.
 - Completed: add duplicate-line and delete-line commands.
-- Add remaining line operations: move line up/down, join lines, sort lines,
-  reverse lines, and trim trailing whitespace.
+- Completed: add move-line-up and move-line-down commands.
+- Add remaining line operations: join lines, sort lines, reverse lines, and trim
+  trailing whitespace.
 - Add case conversion commands for selections and cursors.
 - Add comment toggling for detected code regions.
 
