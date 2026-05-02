@@ -259,6 +259,22 @@ fn handle_input(ui: &egui::Ui, document: &mut Document, view_state: &mut EditorV
                 pressed: true,
                 modifiers,
                 ..
+            } if modifiers.command && modifiers.shift && !modifiers.alt => match key {
+                egui::Key::D => {
+                    changed |= duplicate_selected_lines(document);
+                    view_state.preferred_column = None;
+                }
+                egui::Key::K => {
+                    changed |= delete_selected_lines(document);
+                    view_state.preferred_column = None;
+                }
+                _ => {}
+            },
+            egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
             } if !modifiers.command => {
                 let extend = modifiers.shift;
                 let word = modifiers.alt || modifiers.ctrl;
@@ -391,6 +407,70 @@ pub fn outdent_selection(document: &mut Document) -> bool {
     change_line_indentation(document, IndentChange::Outdent)
 }
 
+pub fn duplicate_selected_lines(document: &mut Document) -> bool {
+    clamp_primary_selection(document);
+    if document.rope.byte_len() == 0 {
+        document.rope.insert(0, "\n");
+        set_primary_selection(document, Selection::caret(1));
+        document.revision += 1;
+        return true;
+    }
+
+    let selection = primary_selection(document);
+    let (selection_start, selection_end) = selection_range(selection);
+    let (line_start, line_end) =
+        selected_full_line_bounds(&document.rope, selection_start, selection_end);
+    let text = document.rope.byte_slice(line_start..line_end).to_string();
+    if text.is_empty() {
+        return false;
+    }
+
+    let prefix = if text.ends_with('\n') { "" } else { "\n" };
+    let insert_at = line_end;
+    document.rope.insert(insert_at, &format!("{prefix}{text}"));
+
+    let duplicate_start = insert_at + prefix.len();
+    let anchor = duplicate_start + selection.anchor.saturating_sub(line_start);
+    let head = duplicate_start + selection.head.saturating_sub(line_start);
+    let selection = Selection {
+        anchor: anchor.min(duplicate_start + text.len()),
+        head: head.min(duplicate_start + text.len()),
+    };
+    set_primary_selection(document, selection);
+    document.revision += 1;
+    true
+}
+
+pub fn delete_selected_lines(document: &mut Document) -> bool {
+    clamp_primary_selection(document);
+    if document.rope.byte_len() == 0 {
+        return false;
+    }
+
+    let selection = primary_selection(document);
+    let (selection_start, selection_end) = selection_range(selection);
+    let (mut delete_start, delete_end) =
+        selected_full_line_bounds(&document.rope, selection_start, selection_end);
+
+    if delete_start == delete_end {
+        return false;
+    }
+
+    if delete_end == document.rope.byte_len() && delete_start > 0 {
+        delete_start = previous_line_break_offset(&document.rope, delete_start)
+            .map_or(delete_start, |offset| offset + 1);
+        if delete_start > 0 {
+            delete_start -= 1;
+        }
+    }
+
+    document.rope.delete(delete_start..delete_end);
+    let caret = delete_start.min(document.rope.byte_len());
+    set_primary_selection(document, Selection::caret(caret));
+    document.revision += 1;
+    true
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum IndentChange {
     Indent,
@@ -459,6 +539,30 @@ fn selected_line_range(rope: &Rope, start: usize, end: usize) -> (usize, usize) 
         last_line = last_line.saturating_sub(1);
     }
     (first_line, last_line.max(first_line))
+}
+
+fn selected_full_line_bounds(rope: &Rope, start: usize, end: usize) -> (usize, usize) {
+    let (first_line, last_line) = selected_line_range(rope, start, end);
+    let line_start = byte_of_visual_line(rope, first_line);
+    let next_line = last_line + 1;
+    let line_end = if next_line < rope.line_len() {
+        byte_of_visual_line(rope, next_line)
+    } else {
+        rope.byte_len()
+    };
+    (line_start, line_end)
+}
+
+fn previous_line_break_offset(rope: &Rope, before: usize) -> Option<usize> {
+    let before = before.min(rope.byte_len());
+    rope.byte_slice(..before)
+        .chars()
+        .rev()
+        .scan(before, |offset, char| {
+            *offset -= char.len_utf8();
+            Some((*offset, char))
+        })
+        .find_map(|(offset, char)| (char == '\n').then_some(offset))
 }
 
 fn leading_whitespace(rope: &Rope, line_start: usize, limit: usize) -> String {
@@ -1275,6 +1379,115 @@ mod tests {
 
         assert_eq!(document.text(), "alpha\nbeta");
         assert_eq!(document.revision, revision_before);
+    }
+
+    #[test]
+    fn duplicate_line_at_caret_copies_current_line_below() {
+        let mut document = document("one\ntwo");
+        set_primary_selection(&mut document, Selection::caret("one\nt".len()));
+
+        assert!(duplicate_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "one\ntwo\ntwo");
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("one\ntwo\nt".len())
+        );
+    }
+
+    #[test]
+    fn duplicate_selected_lines_preserves_selection_shape() {
+        let mut document = document("one\ntwo\nthree");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 1,
+                head: "one\ntw".len(),
+            },
+        );
+
+        assert!(duplicate_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "one\ntwo\none\ntwo\nthree");
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: "one\ntwo\n".len() + 1,
+                head: "one\ntwo\none\ntw".len()
+            }
+        );
+    }
+
+    #[test]
+    fn duplicate_empty_document_creates_blank_line() {
+        let mut document = document("");
+
+        assert!(duplicate_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "\n");
+        assert_eq!(primary_selection(&document), Selection::caret(1));
+    }
+
+    #[test]
+    fn delete_line_at_caret_removes_current_line() {
+        let mut document = document("one\ntwo\nthree");
+        set_primary_selection(&mut document, Selection::caret("one\nt".len()));
+
+        assert!(delete_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "one\nthree");
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("one\n".len())
+        );
+    }
+
+    #[test]
+    fn delete_selected_lines_removes_touched_lines() {
+        let mut document = document("one\ntwo\nthree\nfour");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: "one\n".len(),
+                head: "one\ntwo\nthr".len(),
+            },
+        );
+
+        assert!(delete_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "one\nfour");
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("one\n".len())
+        );
+    }
+
+    #[test]
+    fn delete_last_line_removes_preceding_line_break() {
+        let mut document = document("one\ntwo");
+        set_primary_selection(&mut document, Selection::caret("one\nt".len()));
+
+        assert!(delete_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "one");
+        assert_eq!(primary_selection(&document), Selection::caret("one".len()));
+    }
+
+    #[test]
+    fn delete_line_excludes_line_at_selection_end_boundary() {
+        let mut document = document("one\ntwo\nthree");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 0,
+                head: "one\ntwo\n".len(),
+            },
+        );
+
+        assert!(delete_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "three");
+        assert_eq!(primary_selection(&document), Selection::caret(0));
     }
 
     #[test]
