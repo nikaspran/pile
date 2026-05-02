@@ -1,7 +1,7 @@
 use crop::Rope;
 use eframe::egui;
 
-use crate::model::{Document, Selection};
+use crate::model::{Document, EditTransaction, Selection};
 use crate::search::SearchMatch;
 
 const LINE_GUTTER_MIN_WIDTH: f32 = 44.0;
@@ -243,23 +243,46 @@ pub fn show_editor(
 fn handle_input(ui: &egui::Ui, document: &mut Document, view_state: &mut EditorViewState) -> bool {
     let events = ui.input(|input| input.events.clone());
     let mut changed = false;
+    let mut had_typing_event = false;
 
     for event in events {
         match event {
             egui::Event::Paste(text) if !text.is_empty() => {
                 changed |= replace_selection_with(document, &text);
                 view_state.preferred_column = None;
+                had_typing_event = true;
             }
             egui::Event::Text(text) if !text.is_empty() && text != "\n" && text != "\r" => {
                 changed |= replace_selection_with(document, &text);
                 view_state.preferred_column = None;
+                had_typing_event = true;
             }
             egui::Event::Key {
                 key,
                 pressed: true,
                 modifiers,
                 ..
+            } if modifiers.command && !modifiers.shift && !modifiers.alt => match key {
+                egui::Key::Z => {
+                    changed |= document.undo();
+                    view_state.preferred_column = None;
+                }
+                egui::Key::J => {
+                    changed |= join_selected_lines(document);
+                    view_state.preferred_column = None;
+                }
+                _ => {}
+            },
+            egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
             } if modifiers.command && modifiers.shift && !modifiers.alt => match key {
+                egui::Key::Z => {
+                    changed |= document.redo();
+                    view_state.preferred_column = None;
+                }
                 egui::Key::D => {
                     changed |= duplicate_selected_lines(document);
                     view_state.preferred_column = None;
@@ -270,18 +293,6 @@ fn handle_input(ui: &egui::Ui, document: &mut Document, view_state: &mut EditorV
                 }
                 egui::Key::S => {
                     changed |= sort_selected_lines(document);
-                    view_state.preferred_column = None;
-                }
-                _ => {}
-            },
-            egui::Event::Key {
-                key,
-                pressed: true,
-                modifiers,
-                ..
-            } if modifiers.command && !modifiers.shift && !modifiers.alt => match key {
-                egui::Key::J => {
-                    changed |= join_selected_lines(document);
                     view_state.preferred_column = None;
                 }
                 _ => {}
@@ -316,14 +327,17 @@ fn handle_input(ui: &egui::Ui, document: &mut Document, view_state: &mut EditorV
                     egui::Key::Backspace if plain => {
                         changed |= backspace(document);
                         view_state.preferred_column = None;
+                        had_typing_event = true;
                     }
                     egui::Key::Delete if plain => {
                         changed |= delete(document);
                         view_state.preferred_column = None;
+                        had_typing_event = true;
                     }
                     egui::Key::Enter if plain => {
                         changed |= insert_newline_with_auto_indent(document);
                         view_state.preferred_column = None;
+                        had_typing_event = true;
                     }
                     egui::Key::Tab if indentation => {
                         changed |= if modifiers.shift {
@@ -394,6 +408,12 @@ fn handle_input(ui: &egui::Ui, document: &mut Document, view_state: &mut EditorV
         }
     }
 
+    if changed || had_typing_event {
+        document.commit_undo_group();
+    } else {
+        document.discard_undo_group();
+    }
+
     changed
 }
 
@@ -405,6 +425,16 @@ pub fn replace_selection_with(document: &mut Document, text: &str) -> bool {
     if start == end && text.is_empty() {
         return false;
     }
+
+    let deleted_text = document.rope.byte_slice(start..end).to_string();
+    document.begin_undo_group();
+    document.push_undo(EditTransaction {
+        start,
+        end,
+        deleted_text,
+        inserted_text: text.to_owned(),
+        selection_before: selection,
+    });
 
     if start != end {
         document.rope.delete(start..end);
@@ -442,8 +472,19 @@ pub fn outdent_selection(document: &mut Document) -> bool {
 pub fn duplicate_selected_lines(document: &mut Document) -> bool {
     clamp_primary_selection(document);
     if document.rope.byte_len() == 0 {
+        let before_text = String::new();
+        let before_selection = primary_selection(document);
         document.rope.insert(0, "\n");
         set_primary_selection(document, Selection::caret(1));
+        document.commit_and_start_new_undo_group();
+        document.push_undo(EditTransaction {
+            start: 0,
+            end: 0,
+            deleted_text: before_text,
+            inserted_text: "\n".to_owned(),
+            selection_before: before_selection,
+        });
+        document.commit_undo_group();
         document.revision += 1;
         return true;
     }
@@ -459,16 +500,29 @@ pub fn duplicate_selected_lines(document: &mut Document) -> bool {
 
     let prefix = if text.ends_with('\n') { "" } else { "\n" };
     let insert_at = line_end;
+    let original_text = document.text();
+
     document.rope.insert(insert_at, &format!("{prefix}{text}"));
 
     let duplicate_start = insert_at + prefix.len();
     let anchor = duplicate_start + selection.anchor.saturating_sub(line_start);
     let head = duplicate_start + selection.head.saturating_sub(line_start);
-    let selection = Selection {
+    let new_selection = Selection {
         anchor: anchor.min(duplicate_start + text.len()),
         head: head.min(duplicate_start + text.len()),
     };
-    set_primary_selection(document, selection);
+
+    document.commit_and_start_new_undo_group();
+    document.push_undo(EditTransaction {
+        start: 0,
+        end: original_text.len(),
+        deleted_text: original_text,
+        inserted_text: document.text(),
+        selection_before: selection,
+    });
+    document.commit_undo_group();
+
+    set_primary_selection(document, new_selection);
     document.revision += 1;
     true
 }
@@ -496,8 +550,22 @@ pub fn delete_selected_lines(document: &mut Document) -> bool {
         }
     }
 
+    let original_text = document.text();
+
     document.rope.delete(delete_start..delete_end);
     let caret = delete_start.min(document.rope.byte_len());
+    let new_text = document.text();
+
+    document.commit_and_start_new_undo_group();
+    document.push_undo(EditTransaction {
+        start: 0,
+        end: original_text.len(),
+        deleted_text: original_text,
+        inserted_text: new_text,
+        selection_before: selection,
+    });
+    document.commit_undo_group();
+
     set_primary_selection(document, Selection::caret(caret));
     document.revision += 1;
     true
@@ -550,6 +618,17 @@ pub fn join_selected_lines(document: &mut Document) -> bool {
     document.rope.delete(start..end);
     document.rope.insert(start, &joined);
     let caret = start + joined.len() - suffix.len();
+
+    document.commit_and_start_new_undo_group();
+    document.push_undo(EditTransaction {
+        start,
+        end,
+        deleted_text: original,
+        inserted_text: joined.clone(),
+        selection_before: selection,
+    });
+    document.commit_undo_group();
+
     set_primary_selection(document, Selection::caret(caret));
     document.revision += 1;
     true
@@ -599,6 +678,17 @@ where
 
     document.rope.delete(start..end);
     document.rope.insert(start, &replacement);
+
+    document.commit_and_start_new_undo_group();
+    document.push_undo(EditTransaction {
+        start,
+        end,
+        deleted_text: original,
+        inserted_text: replacement.clone(),
+        selection_before: selection,
+    });
+    document.commit_undo_group();
+
     set_primary_selection(
         document,
         Selection {
@@ -651,6 +741,8 @@ fn move_selected_lines(document: &mut Document, direction: LineMoveDirection) ->
         selected_line_range(&document.rope, selection_start, selection_end);
     let (selected_start, selected_end) =
         selected_full_line_bounds(&document.rope, selection_start, selection_end);
+
+    let original_text = document.text();
 
     match direction {
         LineMoveDirection::Up => {
@@ -711,6 +803,16 @@ fn move_selected_lines(document: &mut Document, direction: LineMoveDirection) ->
         }
     }
 
+    document.commit_and_start_new_undo_group();
+    document.push_undo(EditTransaction {
+        start: 0,
+        end: original_text.len(),
+        deleted_text: original_text,
+        inserted_text: document.text(),
+        selection_before: selection,
+    });
+    document.commit_undo_group();
+
     document.revision += 1;
     true
 }
@@ -750,8 +852,8 @@ enum IndentChange {
 fn change_line_indentation(document: &mut Document, change: IndentChange) -> bool {
     clamp_primary_selection(document);
     let selection = primary_selection(document);
-    let (start, end) = selection_range(selection);
-    let (first_line, last_line) = selected_line_range(&document.rope, start, end);
+    let (sel_start, sel_end) = selection_range(selection);
+    let (first_line, last_line) = selected_line_range(&document.rope, sel_start, sel_end);
 
     match change {
         IndentChange::Indent => {
@@ -762,6 +864,7 @@ fn change_line_indentation(document: &mut Document, change: IndentChange) -> boo
                 return false;
             }
 
+            let original_text = document.text();
             let mut adjusted_selection = selection;
             let mut shift = 0;
             for line_start in line_starts {
@@ -773,6 +876,16 @@ fn change_line_indentation(document: &mut Document, change: IndentChange) -> boo
                     adjust_offset_after_insert(adjusted_selection.head, insert_at, 4);
                 shift += 4;
             }
+
+            document.commit_and_start_new_undo_group();
+            document.push_undo(EditTransaction {
+                start: 0,
+                end: original_text.len(),
+                deleted_text: original_text,
+                inserted_text: document.text(),
+                selection_before: selection,
+            });
+            document.commit_undo_group();
 
             set_primary_selection(document, adjusted_selection);
             document.revision += 1;
@@ -786,6 +899,7 @@ fn change_line_indentation(document: &mut Document, change: IndentChange) -> boo
                 return false;
             }
 
+            let original_text = document.text();
             let mut adjusted_selection = selection;
             for (delete_start, delete_end) in deletions.into_iter().rev() {
                 document.rope.delete(delete_start..delete_end);
@@ -794,6 +908,16 @@ fn change_line_indentation(document: &mut Document, change: IndentChange) -> boo
                 adjusted_selection.head =
                     adjust_offset_after_delete(adjusted_selection.head, delete_start, delete_end);
             }
+
+            document.commit_and_start_new_undo_group();
+            document.push_undo(EditTransaction {
+                start: 0,
+                end: original_text.len(),
+                deleted_text: original_text,
+                inserted_text: document.text(),
+                selection_before: selection,
+            });
+            document.commit_undo_group();
 
             set_primary_selection(document, adjusted_selection);
             document.revision += 1;
@@ -895,6 +1019,9 @@ pub fn replace_match(
         return start.min(document.rope.byte_len());
     }
 
+    let deleted_text = document.rope.byte_slice(start..end).to_string();
+    let selection_before = primary_selection(document);
+
     if start != end {
         document.rope.delete(start..end);
     }
@@ -903,6 +1030,17 @@ pub fn replace_match(
     }
 
     let caret = start + replacement.len();
+
+    document.commit_and_start_new_undo_group();
+    document.push_undo(EditTransaction {
+        start,
+        end,
+        deleted_text,
+        inserted_text: replacement.to_owned(),
+        selection_before,
+    });
+    document.commit_undo_group();
+
     set_primary_selection(document, Selection::caret(caret));
     document.revision += 1;
     caret
@@ -918,6 +1056,8 @@ pub fn replace_all_matches(
     }
 
     let rope_len = document.rope.byte_len();
+    let original_text = document.text();
+    let selection_before = primary_selection(document);
     let mut count = 0;
     for search_match in matches.iter().rev() {
         let SearchMatch { start, end } = *search_match;
@@ -934,11 +1074,22 @@ pub fn replace_all_matches(
     }
 
     if count > 0 {
-        document.revision += 1;
         let first_start = matches.first().map(|m| m.start).unwrap_or(0);
         let caret = first_start + replacement.len();
         let caret = caret.min(document.rope.byte_len());
+
+        document.commit_and_start_new_undo_group();
+        document.push_undo(EditTransaction {
+            start: 0,
+            end: original_text.len(),
+            deleted_text: original_text,
+            inserted_text: document.text(),
+            selection_before,
+        });
+        document.commit_undo_group();
+
         set_primary_selection(document, Selection::caret(caret));
+        document.revision += 1;
     }
 
     count
@@ -956,6 +1107,17 @@ pub fn backspace(document: &mut Document) -> bool {
     }
 
     let delete_start = previous_char_boundary(&document.rope, start);
+    let deleted_text = document.rope.byte_slice(delete_start..start).to_string();
+
+    document.begin_undo_group();
+    document.push_undo(EditTransaction {
+        start: delete_start,
+        end: start,
+        deleted_text,
+        inserted_text: String::new(),
+        selection_before: selection,
+    });
+
     document.rope.delete(delete_start..start);
     set_primary_selection(document, Selection::caret(delete_start));
     document.revision += 1;
@@ -974,6 +1136,17 @@ pub fn delete(document: &mut Document) -> bool {
     }
 
     let delete_end = next_char_boundary(&document.rope, start);
+    let deleted_text = document.rope.byte_slice(start..delete_end).to_string();
+
+    document.begin_undo_group();
+    document.push_undo(EditTransaction {
+        start,
+        end: delete_end,
+        deleted_text,
+        inserted_text: String::new(),
+        selection_before: selection,
+    });
+
     document.rope.delete(start..delete_end);
     set_primary_selection(document, Selection::caret(start));
     document.revision += 1;
@@ -2649,5 +2822,257 @@ mod tests {
         assert_eq!(count, 0);
         assert_eq!(document.text(), "untouched");
         assert_eq!(document.revision, revision_before);
+    }
+
+    #[test]
+    fn undo_restores_text_after_typing() {
+        let mut document = document("");
+        replace_selection_with(&mut document, "hello");
+        document.commit_undo_group();
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "");
+        assert_eq!(primary_selection(&document), Selection::caret(0));
+    }
+
+    #[test]
+    fn undo_restores_text_after_backspace() {
+        let mut document = document("hello");
+        set_primary_selection(&mut document, Selection::caret(5));
+        backspace(&mut document);
+        document.commit_undo_group();
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "hello");
+        assert_eq!(primary_selection(&document), Selection::caret(5));
+    }
+
+    #[test]
+    fn undo_restores_text_after_delete() {
+        let mut document = document("hello");
+        set_primary_selection(&mut document, Selection::caret(0));
+        delete(&mut document);
+        document.commit_undo_group();
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "hello");
+        assert_eq!(primary_selection(&document), Selection::caret(0));
+    }
+
+    #[test]
+    fn undo_restores_text_after_delete_line() {
+        let mut document = document("one\ntwo\nthree");
+        set_primary_selection(&mut document, Selection::caret("one\nt".len()));
+        delete_selected_lines(&mut document);
+        document.commit_undo_group();
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "one\ntwo\nthree");
+    }
+
+    #[test]
+    fn undo_restores_text_after_duplicate_line() {
+        let mut document = document("one\ntwo");
+        set_primary_selection(&mut document, Selection::caret("one\nt".len()));
+        duplicate_selected_lines(&mut document);
+        document.commit_undo_group();
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "one\ntwo");
+    }
+
+    #[test]
+    fn undo_restores_text_after_indent() {
+        let mut document = document("alpha\nbeta");
+        set_primary_selection(&mut document, Selection::caret("alpha\nbe".len()));
+        indent_selection(&mut document);
+        document.commit_undo_group();
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "alpha\nbeta");
+    }
+
+    #[test]
+    fn undo_restores_text_after_sort_lines() {
+        let mut document = document("gamma\nalpha\nbeta\nomega");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 1,
+                head: "gamma\nalpha\nbe".len(),
+            },
+        );
+        sort_selected_lines(&mut document);
+        document.commit_undo_group();
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "gamma\nalpha\nbeta\nomega");
+    }
+
+    #[test]
+    fn redo_reapplies_undone_edit() {
+        let mut document = document("");
+        replace_selection_with(&mut document, "hello");
+        document.commit_undo_group();
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "");
+
+        assert!(document.redo());
+        assert_eq!(document.text(), "hello");
+    }
+
+    #[test]
+    fn redo_is_cleared_after_new_edit() {
+        let mut document = document("");
+        replace_selection_with(&mut document, "hello");
+        document.commit_undo_group();
+
+        assert!(document.undo());
+        assert!(document.can_redo());
+
+        replace_selection_with(&mut document, "world");
+        document.commit_undo_group();
+        assert!(!document.can_redo());
+    }
+
+    #[test]
+    fn undo_noop_when_empty() {
+        let mut document = document("hello");
+        assert!(!document.undo());
+        assert_eq!(document.text(), "hello");
+    }
+
+    #[test]
+    fn redo_noop_when_empty() {
+        let mut document = document("hello");
+        assert!(!document.redo());
+        assert_eq!(document.text(), "hello");
+    }
+
+    #[test]
+    fn undo_replaces_selection_text_and_restores_selection() {
+        let mut document = document("hello world");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 6,
+                head: 11,
+            },
+        );
+        replace_selection_with(&mut document, "pile");
+        document.commit_undo_group();
+
+        assert_eq!(document.text(), "hello pile");
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "hello world");
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 6,
+                head: 11,
+            }
+        );
+    }
+
+    #[test]
+    fn multiple_undo_steps_chain_correctly() {
+        let mut document = document("");
+        replace_selection_with(&mut document, "a");
+        document.commit_undo_group();
+        replace_selection_with(&mut document, "b");
+        document.commit_undo_group();
+        replace_selection_with(&mut document, "c");
+        document.commit_undo_group();
+
+        assert_eq!(document.text(), "abc");
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "ab");
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "a");
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "");
+
+        assert!(!document.undo());
+    }
+
+    #[test]
+    fn replace_all_can_be_undone() {
+        let mut document = document("foo bar foo");
+        replace_all_matches(
+            &mut document,
+            &[
+                SearchMatch { start: 0, end: 3 },
+                SearchMatch { start: 8, end: 11 },
+            ],
+            "baz",
+        );
+        document.commit_undo_group();
+
+        assert_eq!(document.text(), "baz bar baz");
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "foo bar foo");
+    }
+
+    #[test]
+    fn replace_match_can_be_undone() {
+        let mut document = document("hello world");
+        replace_match(&mut document, SearchMatch { start: 6, end: 11 }, "earth");
+        document.commit_undo_group();
+
+        assert_eq!(document.text(), "hello earth");
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "hello world");
+    }
+
+    #[test]
+    fn move_line_up_can_be_undone() {
+        let mut document = document("one\ntwo\nthree");
+        set_primary_selection(&mut document, Selection::caret("one\ntw".len()));
+        move_selected_lines_up(&mut document);
+        document.commit_undo_group();
+
+        assert_eq!(document.text(), "two\none\nthree");
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "one\ntwo\nthree");
+    }
+
+    #[test]
+    fn join_lines_can_be_undone() {
+        let mut document = document("one\n  two\nthree");
+        set_primary_selection(&mut document, Selection::caret("on".len()));
+        join_selected_lines(&mut document);
+        document.commit_undo_group();
+
+        assert_eq!(document.text(), "one two\nthree");
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "one\n  two\nthree");
+    }
+
+    #[test]
+    fn outdent_can_be_undone() {
+        let mut document = document("    one\n  two\n\tthree\nfour");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 0,
+                head: "    one\n  two\n\tthree".len(),
+            },
+        );
+        outdent_selection(&mut document);
+        document.commit_undo_group();
+
+        assert_eq!(document.text(), "one\ntwo\nthree\nfour");
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "    one\n  two\n\tthree\nfour");
     }
 }

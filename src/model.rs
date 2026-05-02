@@ -90,6 +90,8 @@ pub struct Document {
     pub revision: u64,
     pub selections: Vec<Selection>,
     pub scroll: ScrollState,
+    #[serde(skip, default = "UndoState::default")]
+    undo: UndoState,
 }
 
 mod rope_serde {
@@ -120,6 +122,7 @@ impl Document {
             revision: 0,
             selections: vec![Selection::caret(0)],
             scroll: ScrollState::default(),
+            undo: UndoState::default(),
         }
     }
 
@@ -130,6 +133,7 @@ impl Document {
     pub fn replace_text(&mut self, text: &str) {
         self.rope = Rope::from(text);
         self.revision += 1;
+        self.undo.clear();
     }
 
     pub fn display_title(&self) -> String {
@@ -150,6 +154,76 @@ impl Document {
     pub fn has_manual_title(&self) -> bool {
         let trimmed = self.title_hint.trim();
         !trimmed.is_empty() && !is_generated_title_hint(trimmed)
+    }
+
+    pub fn begin_undo_group(&mut self) {
+        self.undo.begin_group();
+    }
+
+    pub fn commit_undo_group(&mut self) {
+        self.undo.commit_group();
+    }
+
+    pub fn discard_undo_group(&mut self) {
+        self.undo.discard_group();
+    }
+
+    pub fn commit_and_start_new_undo_group(&mut self) {
+        self.undo.commit_and_start_new_group();
+    }
+
+    pub fn push_undo(&mut self, txn: EditTransaction) {
+        self.undo.record(txn);
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.undo.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.undo.can_redo()
+    }
+
+    pub fn undo(&mut self) -> bool {
+        let Some(group) = self.undo.undo() else {
+            return false;
+        };
+        let group = group.clone();
+        for txn in group.into_iter().rev() {
+            self.rope.delete(txn.start..txn.start + txn.inserted_text.len());
+            self.rope.insert(txn.start, &txn.deleted_text);
+            self.set_selection_without_undo(txn.selection_before);
+        }
+        self.revision += 1;
+        true
+    }
+
+    pub fn redo(&mut self) -> bool {
+        let Some(group) = self.undo.redo() else {
+            return false;
+        };
+        let group = group.clone();
+        for txn in group.into_iter() {
+            self.rope.delete(txn.start..txn.end);
+            self.rope.insert(txn.start, &txn.inserted_text);
+            let new_caret = txn.start + txn.inserted_text.len();
+            self.set_selection_without_undo(Selection::caret(new_caret));
+        }
+        self.revision += 1;
+        true
+    }
+
+    fn set_selection_without_undo(&mut self, selection: Selection) {
+        let rope_len = self.rope.byte_len();
+        let selection = Selection {
+            anchor: selection.anchor.min(rope_len),
+            head: selection.head.min(rope_len),
+        };
+        if let Some(primary) = self.selections.first_mut() {
+            *primary = selection;
+        } else {
+            self.selections.push(selection);
+        }
     }
 }
 
@@ -196,6 +270,104 @@ impl Selection {
 pub struct ScrollState {
     pub x: f32,
     pub y: f32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EditTransaction {
+    pub start: usize,
+    pub end: usize,
+    pub deleted_text: String,
+    pub inserted_text: String,
+    pub selection_before: Selection,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct UndoState {
+    undo_stack: Vec<Vec<EditTransaction>>,
+    redo_stack: Vec<Vec<EditTransaction>>,
+    typing_group: Vec<EditTransaction>,
+    is_typing: bool,
+}
+
+impl UndoState {
+    pub fn begin_group(&mut self) {
+        if !self.is_typing {
+            self.is_typing = true;
+            self.typing_group.clear();
+        }
+    }
+
+    pub fn commit_and_start_new_group(&mut self) {
+        if self.is_typing {
+            self.is_typing = false;
+            if !self.typing_group.is_empty() {
+                self.undo_stack.push(std::mem::take(&mut self.typing_group));
+                self.redo_stack.clear();
+            }
+        }
+        self.is_typing = true;
+        self.typing_group.clear();
+    }
+
+    pub fn record(&mut self, txn: EditTransaction) {
+        if self.is_typing {
+            self.typing_group.push(txn);
+        } else {
+            self.undo_stack.push(vec![txn]);
+            self.redo_stack.clear();
+        }
+    }
+
+    pub fn commit_group(&mut self) {
+        if self.is_typing {
+            self.is_typing = false;
+            if !self.typing_group.is_empty() {
+                self.undo_stack.push(std::mem::take(&mut self.typing_group));
+                self.redo_stack.clear();
+            }
+        }
+    }
+
+    pub fn discard_group(&mut self) {
+        if self.is_typing {
+            self.is_typing = false;
+            self.typing_group.clear();
+        }
+    }
+
+    pub fn undo(&mut self) -> Option<&Vec<EditTransaction>> {
+        self.commit_group();
+        if let Some(group) = self.undo_stack.pop() {
+            self.redo_stack.push(group.clone());
+            Some(self.redo_stack.last().unwrap())
+        } else {
+            None
+        }
+    }
+
+    pub fn redo(&mut self) -> Option<&Vec<EditTransaction>> {
+        if let Some(group) = self.redo_stack.pop() {
+            self.undo_stack.push(group.clone());
+            Some(self.undo_stack.last().unwrap())
+        } else {
+            None
+        }
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty() || self.is_typing && !self.typing_group.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.typing_group.clear();
+        self.is_typing = false;
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -254,5 +426,128 @@ mod tests {
 
         document.rename("");
         assert_eq!(document.display_title(), "Different first line");
+    }
+
+    #[test]
+    fn undo_state_groups_typing_into_single_step() {
+        let mut undo = UndoState::default();
+
+        undo.begin_group();
+        undo.record(EditTransaction {
+            start: 0,
+            end: 0,
+            deleted_text: String::new(),
+            inserted_text: "a".to_owned(),
+            selection_before: Selection::caret(0),
+        });
+        undo.begin_group();
+        undo.record(EditTransaction {
+            start: 1,
+            end: 1,
+            deleted_text: String::new(),
+            inserted_text: "b".to_owned(),
+            selection_before: Selection::caret(1),
+        });
+        undo.commit_group();
+
+        let group = undo.undo().unwrap();
+        assert_eq!(group.len(), 2);
+    }
+
+    #[test]
+    fn undo_state_begins_new_group_commits_previous_typing() {
+        let mut undo = UndoState::default();
+
+        undo.begin_group();
+        undo.record(EditTransaction {
+            start: 0,
+            end: 0,
+            deleted_text: String::new(),
+            inserted_text: "a".to_owned(),
+            selection_before: Selection::caret(0),
+        });
+
+        // commit_and_start_new_group for a discrete operation should commit the typing group
+        undo.commit_and_start_new_group();
+        undo.record(EditTransaction {
+            start: 0,
+            end: 0,
+            deleted_text: String::new(),
+            inserted_text: "b".to_owned(),
+            selection_before: Selection::caret(0),
+        });
+        undo.commit_group();
+
+        // Two separate undo steps: "b" and "a"
+        assert!(undo.undo().is_some());
+        assert!(undo.undo().is_some());
+        assert!(undo.undo().is_none());
+    }
+
+    #[test]
+    fn undo_state_clears_redo_on_new_edit() {
+        let mut undo = UndoState::default();
+
+        undo.begin_group();
+        undo.record(EditTransaction {
+            start: 0,
+            end: 0,
+            deleted_text: String::new(),
+            inserted_text: "hello".to_owned(),
+            selection_before: Selection::caret(0),
+        });
+        undo.commit_group();
+
+        undo.undo();
+        assert!(undo.can_redo());
+
+        undo.begin_group();
+        undo.record(EditTransaction {
+            start: 0,
+            end: 0,
+            deleted_text: String::new(),
+            inserted_text: "world".to_owned(),
+            selection_before: Selection::caret(0),
+        });
+        undo.commit_group();
+
+        assert!(!undo.can_redo());
+    }
+
+    #[test]
+    fn undo_state_discard_group_clears_pending_typing() {
+        let mut undo = UndoState::default();
+
+        undo.begin_group();
+        undo.record(EditTransaction {
+            start: 0,
+            end: 0,
+            deleted_text: String::new(),
+            inserted_text: "a".to_owned(),
+            selection_before: Selection::caret(0),
+        });
+
+        undo.discard_group();
+        assert!(!undo.can_undo());
+    }
+
+    #[test]
+    fn undo_state_clear_resets_all_stacks() {
+        let mut undo = UndoState::default();
+
+        undo.begin_group();
+        undo.record(EditTransaction {
+            start: 0,
+            end: 0,
+            deleted_text: String::new(),
+            inserted_text: "hello".to_owned(),
+            selection_before: Selection::caret(0),
+        });
+        undo.commit_group();
+        undo.undo();
+
+        undo.clear();
+        assert!(!undo.can_undo());
+        assert!(!undo.can_redo());
     }
 }
