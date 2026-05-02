@@ -40,6 +40,9 @@ thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "0.19.1", default-features = false }
+
 [profile.release]
 codegen-units = 1
 lto = "thin"

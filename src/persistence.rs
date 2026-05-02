@@ -188,7 +188,10 @@ mod tests {
             .sender()
             .send(SaveMsg::Flush(snapshot.clone(), ack_tx))
             .unwrap();
-        ack_rx.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
+        ack_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
 
         let loaded = load_session(&path).unwrap().unwrap();
         assert_eq!(loaded.schema_version, snapshot.schema_version);
