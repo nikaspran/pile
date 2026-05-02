@@ -1,4 +1,5 @@
 mod app;
+mod editor;
 mod model;
 mod native_menu;
 mod persistence;

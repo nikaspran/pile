@@ -5,6 +5,7 @@ use eframe::egui;
 use tracing::{info, warn};
 
 use crate::{
+    editor::{EditorViewState, show_editor},
     model::{AppState, DocumentId, SessionSnapshot},
     native_menu::{NativeMenu, NativeMenuCommand},
     persistence::{
@@ -12,9 +13,6 @@ use crate::{
     },
     syntax::{LanguageDetection, LanguageRegistry},
 };
-
-const LINE_GUTTER_MIN_WIDTH: f32 = 44.0;
-const LINE_GUTTER_PADDING: f32 = 10.0;
 
 #[derive(Clone, Debug, Default)]
 struct SearchState {
@@ -87,8 +85,7 @@ pub struct PileApp {
     save_tx: Sender<SaveMsg>,
     save_worker: Option<SaveWorker>,
     syntax: LanguageRegistry,
-    editor_text: String,
-    last_loaded_document: DocumentId,
+    editor_view: EditorViewState,
     last_detection: LanguageDetection,
     renaming_document: Option<DocumentId>,
     rename_text: String,
@@ -113,13 +110,12 @@ impl PileApp {
 
         let save_worker = SaveWorker::spawn(session_path);
         let save_tx = save_worker.sender();
-        let editor_text = state
+        let active_text = state
             .active_document()
             .map(|document| document.text())
             .unwrap_or_default();
-        let last_loaded_document = state.active_document;
         let syntax = LanguageRegistry;
-        let last_detection = syntax.detect(&editor_text);
+        let last_detection = syntax.detect(&active_text);
 
         info!(documents = state.documents.len(), "pile started");
 
@@ -128,8 +124,7 @@ impl PileApp {
             save_tx,
             save_worker: Some(save_worker),
             syntax,
-            editor_text,
-            last_loaded_document,
+            editor_view: EditorViewState::default(),
             last_detection,
             renaming_document: None,
             rename_text: String::new(),
@@ -152,30 +147,22 @@ impl PileApp {
         let _ = ack_rx.recv_timeout(Duration::from_secs(2));
     }
 
-    fn sync_editor_text_from_active_document(&mut self) {
-        if self.last_loaded_document == self.state.active_document {
-            return;
-        }
-
-        self.editor_text = self
-            .state
+    fn active_document_text(&self) -> String {
+        self.state
             .active_document()
             .map(|document| document.text())
-            .unwrap_or_default();
-        self.last_loaded_document = self.state.active_document;
-        self.last_detection = self.syntax.detect(&self.editor_text);
-        self.search.recompute(&self.editor_text);
+            .unwrap_or_default()
     }
 
-    fn commit_editor_text(&mut self) {
-        if let Some(document) = self.state.active_document_mut()
-            && document.text() != self.editor_text
-        {
-            document.replace_text(&self.editor_text);
-            self.last_detection = self.syntax.detect(&self.editor_text);
-            self.search.recompute(&self.editor_text);
-            self.mark_changed();
-        }
+    fn refresh_active_document_metadata(&mut self) {
+        let text = self.active_document_text();
+        self.last_detection = self.syntax.detect(&text);
+        self.search.recompute(&text);
+    }
+
+    fn document_edited(&mut self) {
+        self.refresh_active_document_metadata();
+        self.mark_changed();
     }
 
     fn begin_rename(&mut self, document_id: DocumentId) {
@@ -255,10 +242,9 @@ impl PileApp {
             .on_hover_text("Double-click to rename");
 
         if response.clicked() {
-            self.commit_editor_text();
             self.state.set_active(document_id);
             self.mark_changed();
-            self.sync_editor_text_from_active_document();
+            self.refresh_active_document_metadata();
             self.editor_focus_pending = true;
         }
 
@@ -269,10 +255,9 @@ impl PileApp {
 
     fn new_scratch(&mut self) {
         self.commit_rename();
-        self.commit_editor_text();
         self.state.open_untitled();
         self.mark_changed();
-        self.sync_editor_text_from_active_document();
+        self.refresh_active_document_metadata();
         self.editor_focus_pending = true;
     }
 
@@ -333,17 +318,17 @@ impl PileApp {
 
     fn close_active_scratch(&mut self) {
         self.commit_rename();
-        self.commit_editor_text();
         self.state.close_active();
         self.mark_changed();
-        self.sync_editor_text_from_active_document();
+        self.refresh_active_document_metadata();
         self.editor_focus_pending = true;
     }
 
     fn open_search(&mut self) {
         self.search.visible = true;
         self.search.focus_pending = true;
-        self.search.recompute(&self.editor_text);
+        let text = self.active_document_text();
+        self.search.recompute(&text);
     }
 
     fn close_search(&mut self) {
@@ -411,7 +396,8 @@ impl PileApp {
         });
 
         if changed {
-            self.search.recompute(&self.editor_text);
+            let text = self.active_document_text();
+            self.search.recompute(&text);
         }
         if go_next {
             self.search.next_match();
@@ -422,82 +408,39 @@ impl PileApp {
     }
 
     fn render_editor(&mut self, ui: &mut egui::Ui) {
-        ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+        let reveal_selection = if self.search.selection_pending {
+            self.search
+                .current_match
+                .and_then(|index| self.search.matches.get(index))
+                .map(|search_match| crate::model::Selection {
+                    anchor: search_match.start,
+                    head: search_match.end,
+                })
+        } else {
+            None
+        };
+        self.search.selection_pending = false;
 
-        let line_count = line_count(&self.editor_text);
-        let line_digits = decimal_digits(line_count);
-        let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
-        let rows_for_height = (ui.available_height() / row_height).ceil() as usize;
-        let gutter_width =
-            (line_digits as f32 * 8.0 + LINE_GUTTER_PADDING * 2.0).max(LINE_GUTTER_MIN_WIDTH);
+        let Some(document) = self.state.active_document_mut() else {
+            return;
+        };
 
-        egui::ScrollArea::both()
-            .id_salt("editor-scroll")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.horizontal_top(|ui| {
-                    ui.vertical(|ui| {
-                        ui.set_width(gutter_width);
-                        for line in 1..=line_count {
-                            ui.add_sized(
-                                [gutter_width, row_height],
-                                egui::Label::new(
-                                    egui::RichText::new(line.to_string())
-                                        .monospace()
-                                        .color(ui.visuals().weak_text_color()),
-                                )
-                                .selectable(false),
-                            );
-                        }
-                    });
+        let response = show_editor(
+            ui,
+            document,
+            &mut self.editor_view,
+            &mut self.editor_focus_pending,
+            reveal_selection,
+        );
 
-                    ui.separator();
-
-                    let available_width = ui.available_width().max(320.0);
-                    let mut response = egui::TextEdit::multiline(&mut self.editor_text)
-                        .desired_width(available_width)
-                        .desired_rows(line_count.max(rows_for_height).max(1))
-                        .font(egui::TextStyle::Monospace)
-                        .code_editor()
-                        .frame(false)
-                        .show(ui);
-
-                    if self.editor_focus_pending {
-                        response.response.request_focus();
-                        self.editor_focus_pending = false;
-                    }
-
-                    if response.response.changed() {
-                        self.commit_editor_text();
-                    }
-
-                    if self.search.selection_pending {
-                        if let Some(search_match) = self
-                            .search
-                            .current_match
-                            .and_then(|index| self.search.matches.get(index))
-                        {
-                            let start = byte_to_char_index(&self.editor_text, search_match.start);
-                            let end = byte_to_char_index(&self.editor_text, search_match.end);
-                            response.state.cursor.set_char_range(Some(
-                                egui::text::CCursorRange::two(
-                                    egui::text::CCursor::new(start),
-                                    egui::text::CCursor::new(end),
-                                ),
-                            ));
-                            response.state.store(ui.ctx(), response.response.id);
-                            response.response.request_focus();
-                        }
-                        self.search.selection_pending = false;
-                    }
-                });
-            });
+        if response.changed {
+            self.document_edited();
+        }
     }
 }
 
 impl eframe::App for PileApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.sync_editor_text_from_active_document();
         self.handle_native_menu_commands();
         self.handle_keyboard_shortcuts(ctx);
 
@@ -531,7 +474,12 @@ impl eframe::App for PileApp {
                     self.last_detection.confidence * 100.0
                 ));
                 ui.separator();
-                ui.label(format!("{} bytes", self.editor_text.len()));
+                let byte_len = self
+                    .state
+                    .active_document()
+                    .map(|document| document.rope.byte_len())
+                    .unwrap_or_default();
+                ui.label(format!("{byte_len} bytes"));
             });
         });
 
@@ -543,22 +491,11 @@ impl eframe::App for PileApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.commit_editor_text();
         self.flush_session();
         if let Some(worker) = self.save_worker.take() {
             worker.shutdown();
         }
     }
-}
-
-fn line_count(text: &str) -> usize {
-    text.lines().count().max(1)
-}
-
-fn decimal_digits(value: usize) -> usize {
-    value
-        .checked_ilog10()
-        .map_or(1, |digits| digits as usize + 1)
 }
 
 fn find_matches(text: &str, query: &str, options: SearchOptions) -> Vec<SearchMatch> {
@@ -611,28 +548,9 @@ fn advance_match(current: Option<usize>, total: usize, delta: isize) -> Option<u
     Some((current + delta).rem_euclid(total) as usize)
 }
 
-fn byte_to_char_index(text: &str, byte_index: usize) -> usize {
-    text[..byte_index].chars().count()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn line_count_has_a_minimum_of_one() {
-        assert_eq!(line_count(""), 1);
-        assert_eq!(line_count("one"), 1);
-        assert_eq!(line_count("one\ntwo"), 2);
-    }
-
-    #[test]
-    fn decimal_digits_tracks_gutter_growth() {
-        assert_eq!(decimal_digits(1), 1);
-        assert_eq!(decimal_digits(9), 1);
-        assert_eq!(decimal_digits(10), 2);
-        assert_eq!(decimal_digits(100), 3);
-    }
 
     #[test]
     fn search_returns_non_overlapping_matches() {
@@ -709,13 +627,5 @@ mod tests {
         assert_eq!(advance_match(Some(2), 3, 1), Some(0));
         assert_eq!(advance_match(Some(0), 3, -1), Some(2));
         assert_eq!(advance_match(Some(0), 0, 1), None);
-    }
-
-    #[test]
-    fn byte_to_char_index_handles_multibyte_text() {
-        assert_eq!(byte_to_char_index("aé日", 0), 0);
-        assert_eq!(byte_to_char_index("aé日", 1), 1);
-        assert_eq!(byte_to_char_index("aé日", 3), 2);
-        assert_eq!(byte_to_char_index("aé日", 6), 3);
     }
 }

@@ -1,4 +1,4 @@
-use crop::Rope;
+use crop::{Rope, RopeSlice};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
@@ -138,11 +138,8 @@ impl Document {
         }
 
         self.rope
-            .to_string()
             .lines()
-            .map(str::trim)
-            .find(|line| !line.is_empty())
-            .map(truncate_title)
+            .find_map(title_from_line)
             .unwrap_or_else(|| FALLBACK_TITLE.to_owned())
     }
 
@@ -156,15 +153,22 @@ impl Document {
     }
 }
 
-fn truncate_title(title: &str) -> String {
-    let mut chars = title.chars();
-    let truncated: String = chars.by_ref().take(MAX_AUTO_TITLE_CHARS).collect();
+fn title_from_line(line: RopeSlice<'_>) -> Option<String> {
+    let mut chars = line.chars().skip_while(|char| char.is_whitespace());
+    let mut title: String = chars.by_ref().take(MAX_AUTO_TITLE_CHARS).collect();
 
-    if chars.next().is_some() {
-        format!("{truncated}...")
-    } else {
-        truncated
+    if title.trim_end().is_empty() {
+        return None;
     }
+
+    let truncated = chars.next().is_some();
+    title = title.trim_end().to_owned();
+
+    if truncated {
+        title.push_str("...");
+    }
+
+    Some(title)
 }
 
 fn is_generated_title_hint(title: &str) -> bool {
@@ -173,7 +177,7 @@ fn is_generated_title_hint(title: &str) -> bool {
         .is_some_and(|suffix| suffix.chars().all(|char| char.is_ascii_digit()))
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Selection {
     pub anchor: usize,
     pub head: usize,

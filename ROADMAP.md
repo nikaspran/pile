@@ -6,10 +6,12 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 ## Editing Core
 
-- Replace the temporary `egui::TextEdit` surface with a custom rope-native editor
-  view that does not materialize the full buffer for routine rendering.
+- Completed: replace the temporary `egui::TextEdit` surface with a v1 custom
+  rope-native editor view that renders visible lines without routine full-buffer
+  materialization.
 - Implement cursor movement by grapheme cluster, word, line, paragraph, document
   boundary, and page.
+- Add mouse drag selection and richer selection rendering for the custom editor.
 - Add robust selection expansion and contraction for character, word, line,
   bracket pair, and indentation block scopes.
 - Add multiple cursors as a first-class model with add-next-match, add-all-match,
@@ -29,8 +31,8 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 - Completed: add incremental in-buffer search with match counts and current-match
   navigation.
-- Add match highlighting for all visible search results once the custom editor
-  renderer replaces the temporary text widget.
+- Add match highlighting for all visible search results in the custom editor
+  renderer.
 - Add replace and replace-all with undo grouping.
 - Add regular expression search and replace.
 - Completed: add case-sensitive, whole-word, and wrap-around modes for in-buffer
@@ -56,6 +58,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 - Build a custom text layout pipeline with stable line heights, fast viewport
   measurement, and no nested editor frame.
+- Persist and restore custom editor scroll offsets per document.
 - Add line wrapping modes: no wrap, viewport wrap, and ruler wrap.
 - Add configurable rulers.
 - Add current-line highlight.
