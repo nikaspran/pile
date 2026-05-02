@@ -3,6 +3,7 @@ mod editor;
 mod model;
 mod native_menu;
 mod persistence;
+mod search;
 mod syntax;
 
 use anyhow::Result;

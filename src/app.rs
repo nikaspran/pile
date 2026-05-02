@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crop::Rope;
 use crossbeam_channel::{Sender, bounded};
 use eframe::egui;
 use tracing::{info, warn};
@@ -11,6 +12,7 @@ use crate::{
     persistence::{
         SaveMsg, SaveWorker, default_session_path, load_session, quarantine_corrupt_session,
     },
+    search::{SearchMatch, SearchOptions, advance_match, find_matches},
     syntax::{LanguageDetection, LanguageRegistry},
 };
 
@@ -27,7 +29,7 @@ struct SearchState {
 }
 
 impl SearchState {
-    fn recompute(&mut self, text: &str) {
+    fn recompute(&mut self, rope: &Rope) {
         let old_range = self
             .current_match
             .and_then(|index| self.matches.get(index).copied());
@@ -36,7 +38,7 @@ impl SearchState {
             whole_word: self.whole_word,
         };
 
-        self.matches = find_matches(text, &self.query, options);
+        self.matches = find_matches(rope, &self.query, options);
         self.current_match = if self.matches.is_empty() {
             None
         } else if let Some(old_range) = old_range {
@@ -66,18 +68,6 @@ impl SearchState {
             (None, total) => format!("0 / {total}"),
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct SearchOptions {
-    case_sensitive: bool,
-    whole_word: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct SearchMatch {
-    start: usize,
-    end: usize,
 }
 
 pub struct PileApp {
@@ -157,7 +147,9 @@ impl PileApp {
     fn refresh_active_document_metadata(&mut self) {
         let text = self.active_document_text();
         self.last_detection = self.syntax.detect(&text);
-        self.search.recompute(&text);
+        if let Some(document) = self.state.active_document() {
+            self.search.recompute(&document.rope);
+        }
     }
 
     fn document_edited(&mut self) {
@@ -327,8 +319,9 @@ impl PileApp {
     fn open_search(&mut self) {
         self.search.visible = true;
         self.search.focus_pending = true;
-        let text = self.active_document_text();
-        self.search.recompute(&text);
+        if let Some(document) = self.state.active_document() {
+            self.search.recompute(&document.rope);
+        }
     }
 
     fn close_search(&mut self) {
@@ -396,8 +389,9 @@ impl PileApp {
         });
 
         if changed {
-            let text = self.active_document_text();
-            self.search.recompute(&text);
+            if let Some(document) = self.state.active_document() {
+                self.search.recompute(&document.rope);
+            }
         }
         if go_next {
             self.search.next_match();
@@ -511,137 +505,5 @@ impl eframe::App for PileApp {
         if let Some(worker) = self.save_worker.take() {
             worker.shutdown();
         }
-    }
-}
-
-fn find_matches(text: &str, query: &str, options: SearchOptions) -> Vec<SearchMatch> {
-    if query.is_empty() {
-        return Vec::new();
-    }
-
-    let (haystack, needle) = if options.case_sensitive {
-        (text.to_owned(), query.to_owned())
-    } else {
-        (text.to_ascii_lowercase(), query.to_ascii_lowercase())
-    };
-
-    let mut matches = Vec::new();
-    let mut search_from = 0;
-    while let Some(relative_start) = haystack[search_from..].find(&needle) {
-        let start = search_from + relative_start;
-        let end = start + needle.len();
-        if !options.whole_word || is_whole_word_match(text, start, end) {
-            matches.push(SearchMatch { start, end });
-        }
-        search_from = end;
-    }
-
-    matches
-}
-
-fn is_whole_word_match(text: &str, start: usize, end: usize) -> bool {
-    let before = text[..start].chars().next_back();
-    let after = text[end..].chars().next();
-
-    !before.is_some_and(is_word_char) && !after.is_some_and(is_word_char)
-}
-
-fn is_word_char(char: char) -> bool {
-    char.is_alphanumeric() || char == '_'
-}
-
-fn advance_match(current: Option<usize>, total: usize, delta: isize) -> Option<usize> {
-    if total == 0 {
-        return None;
-    }
-
-    let Some(current) = current else {
-        return Some(if delta < 0 { total - 1 } else { 0 });
-    };
-
-    let current = current as isize;
-    let total = total as isize;
-    Some((current + delta).rem_euclid(total) as usize)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn search_returns_non_overlapping_matches() {
-        let matches = find_matches(
-            "aaaa",
-            "aa",
-            SearchOptions {
-                case_sensitive: true,
-                whole_word: false,
-            },
-        );
-
-        assert_eq!(
-            matches,
-            vec![
-                SearchMatch { start: 0, end: 2 },
-                SearchMatch { start: 2, end: 4 }
-            ]
-        );
-    }
-
-    #[test]
-    fn search_handles_case_sensitivity() {
-        assert_eq!(
-            find_matches(
-                "Hello hello",
-                "hello",
-                SearchOptions {
-                    case_sensitive: true,
-                    whole_word: false,
-                },
-            )
-            .len(),
-            1
-        );
-        assert_eq!(
-            find_matches(
-                "Hello hello",
-                "hello",
-                SearchOptions {
-                    case_sensitive: false,
-                    whole_word: false,
-                },
-            )
-            .len(),
-            2
-        );
-    }
-
-    #[test]
-    fn search_can_restrict_to_whole_words() {
-        let matches = find_matches(
-            "cat concatenate cat_ cat",
-            "cat",
-            SearchOptions {
-                case_sensitive: true,
-                whole_word: true,
-            },
-        );
-
-        assert_eq!(
-            matches,
-            vec![
-                SearchMatch { start: 0, end: 3 },
-                SearchMatch { start: 21, end: 24 }
-            ]
-        );
-    }
-
-    #[test]
-    fn search_navigation_wraps() {
-        assert_eq!(advance_match(None, 3, 1), Some(0));
-        assert_eq!(advance_match(None, 3, -1), Some(2));
-        assert_eq!(advance_match(Some(2), 3, 1), Some(0));
-        assert_eq!(advance_match(Some(0), 3, -1), Some(2));
-        assert_eq!(advance_match(Some(0), 0, 1), None);
     }
 }
