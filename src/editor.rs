@@ -275,6 +275,18 @@ fn handle_input(ui: &egui::Ui, document: &mut Document, view_state: &mut EditorV
                 pressed: true,
                 modifiers,
                 ..
+            } if modifiers.command && !modifiers.shift && !modifiers.alt => match key {
+                egui::Key::J => {
+                    changed |= join_selected_lines(document);
+                    view_state.preferred_column = None;
+                }
+                _ => {}
+            },
+            egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
             } if modifiers.command && modifiers.alt && !modifiers.shift => match key {
                 egui::Key::ArrowUp => {
                     changed |= move_selected_lines_up(document);
@@ -493,6 +505,73 @@ pub fn move_selected_lines_up(document: &mut Document) -> bool {
 
 pub fn move_selected_lines_down(document: &mut Document) -> bool {
     move_selected_lines(document, LineMoveDirection::Down)
+}
+
+pub fn join_selected_lines(document: &mut Document) -> bool {
+    clamp_primary_selection(document);
+    if document.rope.byte_len() == 0 {
+        return false;
+    }
+
+    let selection = primary_selection(document);
+    let (selection_start, selection_end) = selection_range(selection);
+    let (first_line, selected_last_line) =
+        selected_line_range(&document.rope, selection_start, selection_end);
+    let last_line = if first_line == selected_last_line {
+        first_line + 1
+    } else {
+        selected_last_line
+    };
+
+    if last_line >= document.rope.line_len() {
+        return false;
+    }
+
+    let start = byte_of_visual_line(&document.rope, first_line);
+    let end = if last_line + 1 < document.rope.line_len() {
+        byte_of_visual_line(&document.rope, last_line + 1)
+    } else {
+        document.rope.byte_len()
+    };
+    let original = document.rope.byte_slice(start..end).to_string();
+    let (body, suffix) = original
+        .strip_suffix('\n')
+        .map_or((original.as_str(), ""), |body| (body, "\n"));
+    let mut joined = join_lines_text(body);
+    joined.push_str(suffix);
+    if joined == original {
+        return false;
+    }
+
+    document.rope.delete(start..end);
+    document.rope.insert(start, &joined);
+    let caret = start + joined.len() - suffix.len();
+    set_primary_selection(document, Selection::caret(caret));
+    document.revision += 1;
+    true
+}
+
+fn join_lines_text(text: &str) -> String {
+    let mut lines = text.split('\n');
+    let Some(first) = lines.next() else {
+        return String::new();
+    };
+
+    let mut joined = first.trim_end_matches([' ', '\t']).to_owned();
+    for line in lines {
+        let next = line.trim_start_matches([' ', '\t']);
+        if joined.is_empty()
+            || next.is_empty()
+            || joined.chars().next_back().is_some_and(char::is_whitespace)
+        {
+            joined.push_str(next);
+        } else {
+            joined.push(' ');
+            joined.push_str(next);
+        }
+    }
+
+    joined
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1744,6 +1823,86 @@ mod tests {
                 anchor: "zero\nthree\no".len(),
                 head: "zero\nthree\none\ntw".len()
             }
+        );
+    }
+
+    #[test]
+    fn join_line_at_caret_merges_with_next_line() {
+        let mut document = document("one\n  two\nthree");
+        set_primary_selection(&mut document, Selection::caret("on".len()));
+
+        assert!(join_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "one two\nthree");
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("one two".len())
+        );
+    }
+
+    #[test]
+    fn join_selected_lines_merges_all_touched_lines() {
+        let mut document = document("one\n  two\n\tthree\nfour");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 1,
+                head: "one\n  two\n\tthr".len(),
+            },
+        );
+
+        assert!(join_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "one two three\nfour");
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("one two three".len())
+        );
+    }
+
+    #[test]
+    fn join_line_avoids_extra_space_for_empty_sides() {
+        let mut document = document("one\n\n  two");
+        set_primary_selection(
+            &mut document,
+            Selection {
+                anchor: 0,
+                head: "one\n\n  tw".len(),
+            },
+        );
+
+        assert!(join_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "one two");
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("one two".len())
+        );
+    }
+
+    #[test]
+    fn join_line_trims_trailing_horizontal_whitespace() {
+        let mut document = document("one   \n\t two");
+        set_primary_selection(&mut document, Selection::caret(1));
+
+        assert!(join_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "one two");
+    }
+
+    #[test]
+    fn join_last_line_is_noop() {
+        let mut document = document("one\ntwo");
+        let revision_before = document.revision;
+        set_primary_selection(&mut document, Selection::caret("one\nt".len()));
+
+        assert!(!join_selected_lines(&mut document));
+
+        assert_eq!(document.text(), "one\ntwo");
+        assert_eq!(document.revision, revision_before);
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret("one\nt".len())
         );
     }
 

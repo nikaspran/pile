@@ -25,8 +25,9 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
   behavior.
 - Completed: add duplicate-line and delete-line commands.
 - Completed: add move-line-up and move-line-down commands.
-- Add remaining line operations: join lines, sort lines, reverse lines, and trim
-  trailing whitespace.
+- Completed: add join-lines command.
+- Add remaining line operations: sort lines, reverse lines, and trim trailing
+  whitespace.
 - Add case conversion commands for selections and cursors.
 - Add comment toggling for detected code regions.
 
