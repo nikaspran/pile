@@ -210,43 +210,56 @@ fn handle_input(ui: &egui::Ui, document: &mut Document, view_state: &mut EditorV
                 pressed: true,
                 modifiers,
                 ..
-            } if !modifiers.command && !modifiers.ctrl && !modifiers.alt => match key {
-                egui::Key::Backspace => {
-                    changed |= backspace(document);
-                    view_state.preferred_column = None;
+            } if !modifiers.command => {
+                let extend = modifiers.shift;
+                let word = modifiers.alt || modifiers.ctrl;
+                let plain = !modifiers.shift && !modifiers.alt && !modifiers.ctrl;
+                match key {
+                    egui::Key::Backspace if plain => {
+                        changed |= backspace(document);
+                        view_state.preferred_column = None;
+                    }
+                    egui::Key::Delete if plain => {
+                        changed |= delete(document);
+                        view_state.preferred_column = None;
+                    }
+                    egui::Key::Enter if plain => {
+                        changed |= replace_selection_with(document, "\n");
+                        view_state.preferred_column = None;
+                    }
+                    egui::Key::ArrowLeft => {
+                        if word {
+                            move_word_left(document, extend);
+                        } else {
+                            move_left(document, extend);
+                        }
+                        view_state.preferred_column = None;
+                    }
+                    egui::Key::ArrowRight => {
+                        if word {
+                            move_word_right(document, extend);
+                        } else {
+                            move_right(document, extend);
+                        }
+                        view_state.preferred_column = None;
+                    }
+                    egui::Key::ArrowUp if !word => {
+                        move_vertical(document, view_state, -1, extend);
+                    }
+                    egui::Key::ArrowDown if !word => {
+                        move_vertical(document, view_state, 1, extend);
+                    }
+                    egui::Key::Home if !word => {
+                        move_home(document, extend);
+                        view_state.preferred_column = None;
+                    }
+                    egui::Key::End if !word => {
+                        move_end(document, extend);
+                        view_state.preferred_column = None;
+                    }
+                    _ => {}
                 }
-                egui::Key::Delete => {
-                    changed |= delete(document);
-                    view_state.preferred_column = None;
-                }
-                egui::Key::Enter => {
-                    changed |= replace_selection_with(document, "\n");
-                    view_state.preferred_column = None;
-                }
-                egui::Key::ArrowLeft => {
-                    move_left(document);
-                    view_state.preferred_column = None;
-                }
-                egui::Key::ArrowRight => {
-                    move_right(document);
-                    view_state.preferred_column = None;
-                }
-                egui::Key::ArrowUp => {
-                    move_vertical(document, view_state, -1);
-                }
-                egui::Key::ArrowDown => {
-                    move_vertical(document, view_state, 1);
-                }
-                egui::Key::Home => {
-                    move_home(document);
-                    view_state.preferred_column = None;
-                }
-                egui::Key::End => {
-                    move_end(document);
-                    view_state.preferred_column = None;
-                }
-                _ => {}
-            },
+            }
             _ => {}
         }
     }
@@ -312,45 +325,72 @@ pub fn delete(document: &mut Document) -> bool {
     true
 }
 
-pub fn move_left(document: &mut Document) {
+pub fn move_left(document: &mut Document, extend: bool) {
     clamp_primary_selection(document);
     let selection = primary_selection(document);
-    let offset = if selection.anchor != selection.head {
+    let target = if !extend && selection.anchor != selection.head {
         selection_range(selection).0
     } else {
         previous_char_boundary(&document.rope, selection.head)
     };
-    set_primary_selection(document, Selection::caret(offset));
+    apply_motion(document, target, extend);
 }
 
-pub fn move_right(document: &mut Document) {
+pub fn move_right(document: &mut Document, extend: bool) {
     clamp_primary_selection(document);
     let selection = primary_selection(document);
-    let offset = if selection.anchor != selection.head {
+    let target = if !extend && selection.anchor != selection.head {
         selection_range(selection).1
     } else {
         next_char_boundary(&document.rope, selection.head)
     };
-    set_primary_selection(document, Selection::caret(offset));
+    apply_motion(document, target, extend);
 }
 
-pub fn move_home(document: &mut Document) {
+pub fn move_word_left(document: &mut Document, extend: bool) {
+    clamp_primary_selection(document);
+    let selection = primary_selection(document);
+    let from = if !extend && selection.anchor != selection.head {
+        selection_range(selection).0
+    } else {
+        selection.head
+    };
+    let target = previous_word_boundary(&document.rope, from);
+    apply_motion(document, target, extend);
+}
+
+pub fn move_word_right(document: &mut Document, extend: bool) {
+    clamp_primary_selection(document);
+    let selection = primary_selection(document);
+    let from = if !extend && selection.anchor != selection.head {
+        selection_range(selection).1
+    } else {
+        selection.head
+    };
+    let target = next_word_boundary(&document.rope, from);
+    apply_motion(document, target, extend);
+}
+
+pub fn move_home(document: &mut Document, extend: bool) {
     clamp_primary_selection(document);
     let line = line_index_of_byte(&document.rope, primary_selection(document).head);
-    set_primary_selection(
-        document,
-        Selection::caret(byte_of_visual_line(&document.rope, line)),
-    );
+    let target = byte_of_visual_line(&document.rope, line);
+    apply_motion(document, target, extend);
 }
 
-pub fn move_end(document: &mut Document) {
+pub fn move_end(document: &mut Document, extend: bool) {
     clamp_primary_selection(document);
     let line = line_index_of_byte(&document.rope, primary_selection(document).head);
     let (_, end) = visual_line_bounds(&document.rope, line);
-    set_primary_selection(document, Selection::caret(end));
+    apply_motion(document, end, extend);
 }
 
-pub fn move_vertical(document: &mut Document, view_state: &mut EditorViewState, delta: isize) {
+pub fn move_vertical(
+    document: &mut Document,
+    view_state: &mut EditorViewState,
+    delta: isize,
+    extend: bool,
+) {
     clamp_primary_selection(document);
     let selection = primary_selection(document);
     let current_line = line_index_of_byte(&document.rope, selection.head);
@@ -361,7 +401,20 @@ pub fn move_vertical(document: &mut Document, view_state: &mut EditorViewState, 
         .unwrap_or_else(|| column_of_byte(&document.rope, selection.head));
     view_state.preferred_column = Some(column);
     let target = byte_for_line_column(&document.rope, target_line, column);
-    set_primary_selection(document, Selection::caret(target));
+    apply_motion(document, target, extend);
+}
+
+fn apply_motion(document: &mut Document, target: usize, extend: bool) {
+    let selection = primary_selection(document);
+    let new = if extend {
+        Selection {
+            anchor: selection.anchor,
+            head: target,
+        }
+    } else {
+        Selection::caret(target)
+    };
+    set_primary_selection(document, new);
 }
 
 pub fn set_primary_selection(document: &mut Document, selection: Selection) {
@@ -443,6 +496,71 @@ fn next_char_boundary(rope: &Rope, offset: usize) -> usize {
         .chars()
         .next()
         .map_or(rope.byte_len(), |char| offset + char.len_utf8())
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum CharClass {
+    Word,
+    NonWord,
+}
+
+fn classify_char(c: char) -> CharClass {
+    if c.is_alphanumeric() || c == '_' {
+        CharClass::Word
+    } else {
+        CharClass::NonWord
+    }
+}
+
+fn next_word_boundary(rope: &Rope, start: usize) -> usize {
+    let total = rope.byte_len();
+    let mut offset = clamp_to_char_boundary(rope, start.min(total));
+    if offset >= total {
+        return total;
+    }
+
+    let mut chars = rope.byte_slice(offset..).chars();
+    let lead = loop {
+        match chars.next() {
+            Some(c) if c.is_whitespace() => offset += c.len_utf8(),
+            Some(c) => break c,
+            None => return total,
+        }
+    };
+    let class = classify_char(lead);
+    offset += lead.len_utf8();
+    for c in chars {
+        if c.is_whitespace() || classify_char(c) != class {
+            break;
+        }
+        offset += c.len_utf8();
+    }
+    offset
+}
+
+fn previous_word_boundary(rope: &Rope, start: usize) -> usize {
+    let mut offset = clamp_to_char_boundary(rope, start.min(rope.byte_len()));
+    if offset == 0 {
+        return 0;
+    }
+
+    let mut chars = rope.byte_slice(..offset).chars();
+    let lead = loop {
+        match chars.next_back() {
+            Some(c) if c.is_whitespace() => offset -= c.len_utf8(),
+            Some(c) => break c,
+            None => return 0,
+        }
+    };
+    let class = classify_char(lead);
+    offset -= lead.len_utf8();
+    while let Some(c) = chars.next_back() {
+        if c.is_whitespace() || classify_char(c) != class {
+            break;
+        }
+        offset -= c.len_utf8();
+    }
+    offset
 }
 
 fn has_trailing_newline(rope: &Rope) -> bool {
@@ -699,11 +817,11 @@ mod tests {
         let end = document.rope.byte_len();
         set_primary_selection(&mut document, Selection::caret(end));
 
-        move_left(&mut document);
+        move_left(&mut document, false);
         assert_eq!(primary_selection(&document), Selection::caret(3));
-        move_left(&mut document);
+        move_left(&mut document, false);
         assert_eq!(primary_selection(&document), Selection::caret(1));
-        move_right(&mut document);
+        move_right(&mut document, false);
         assert_eq!(primary_selection(&document), Selection::caret(3));
     }
 
@@ -713,17 +831,191 @@ mod tests {
         let mut view_state = EditorViewState::default();
         set_primary_selection(&mut document, Selection::caret(3));
 
-        move_vertical(&mut document, &mut view_state, 1);
+        move_vertical(&mut document, &mut view_state, 1, false);
         assert_eq!(primary_selection(&document), Selection::caret(6));
 
-        move_vertical(&mut document, &mut view_state, 1);
+        move_vertical(&mut document, &mut view_state, 1, false);
         assert_eq!(primary_selection(&document), Selection::caret(10));
 
-        move_home(&mut document);
+        move_home(&mut document, false);
         assert_eq!(primary_selection(&document), Selection::caret(7));
 
-        move_end(&mut document);
+        move_end(&mut document, false);
         assert_eq!(primary_selection(&document), Selection::caret(11));
+    }
+
+    #[test]
+    fn shift_arrow_extends_selection() {
+        let mut document = document("hello world");
+        set_primary_selection(&mut document, Selection::caret(3));
+
+        move_right(&mut document, true);
+        move_right(&mut document, true);
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 3,
+                head: 5
+            }
+        );
+
+        move_left(&mut document, true);
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 3,
+                head: 4
+            }
+        );
+    }
+
+    #[test]
+    fn shift_home_end_extend_to_line_bounds() {
+        let mut document = document("hello world");
+        set_primary_selection(&mut document, Selection::caret(6));
+
+        move_home(&mut document, true);
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 6,
+                head: 0
+            }
+        );
+
+        set_primary_selection(&mut document, Selection::caret(6));
+        move_end(&mut document, true);
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 6,
+                head: 11
+            }
+        );
+    }
+
+    #[test]
+    fn shift_vertical_preserves_anchor_and_preferred_column() {
+        let mut document = document("abcd\nef\nghij");
+        let mut view_state = EditorViewState::default();
+        set_primary_selection(&mut document, Selection::caret(3));
+
+        move_vertical(&mut document, &mut view_state, 1, true);
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 3,
+                head: 7
+            }
+        );
+        assert_eq!(view_state.preferred_column, Some(3));
+
+        move_vertical(&mut document, &mut view_state, 1, true);
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 3,
+                head: 11
+            }
+        );
+    }
+
+    #[test]
+    fn move_word_right_skips_whitespace_then_word() {
+        let mut document = document("  foo bar");
+        set_primary_selection(&mut document, Selection::caret(0));
+
+        move_word_right(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(5));
+
+        move_word_right(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(9));
+    }
+
+    #[test]
+    fn move_word_right_stops_at_punctuation() {
+        let mut document = document("foo, bar");
+        set_primary_selection(&mut document, Selection::caret(0));
+
+        move_word_right(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(3));
+
+        move_word_right(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(4));
+
+        move_word_right(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(8));
+    }
+
+    #[test]
+    fn move_word_left_symmetric() {
+        let mut document = document("  foo bar");
+        let end = document.rope.byte_len();
+        set_primary_selection(&mut document, Selection::caret(end));
+
+        move_word_left(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(6));
+
+        move_word_left(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(2));
+
+        move_word_left(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(0));
+    }
+
+    #[test]
+    fn move_word_right_unicode_lands_on_char_boundary() {
+        let text = "héllo wörld";
+        let mut document = document(text);
+        set_primary_selection(&mut document, Selection::caret(0));
+
+        move_word_right(&mut document, false);
+        let after_first = "héllo".len();
+        assert_eq!(primary_selection(&document), Selection::caret(after_first));
+        assert!(document.rope.is_char_boundary(after_first));
+
+        move_word_right(&mut document, false);
+        assert_eq!(
+            primary_selection(&document),
+            Selection::caret(text.len())
+        );
+    }
+
+    #[test]
+    fn move_word_extends_selection() {
+        let mut document = document("foo bar baz");
+        set_primary_selection(&mut document, Selection::caret(0));
+
+        move_word_right(&mut document, true);
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 0,
+                head: 3
+            }
+        );
+
+        move_word_right(&mut document, true);
+        assert_eq!(
+            primary_selection(&document),
+            Selection {
+                anchor: 0,
+                head: 7
+            }
+        );
+    }
+
+    #[test]
+    fn word_motion_at_document_edges_is_noop() {
+        let mut document = document("foo");
+        set_primary_selection(&mut document, Selection::caret(0));
+        move_word_left(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(0));
+
+        let end = document.rope.byte_len();
+        set_primary_selection(&mut document, Selection::caret(end));
+        move_word_right(&mut document, false);
+        assert_eq!(primary_selection(&document), Selection::caret(end));
     }
 
     #[test]
