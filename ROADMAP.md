@@ -44,8 +44,8 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: add regular expression search and replace.
 - Completed: add case-sensitive, whole-word, and wrap-around modes for in-buffer
   search.
-- Move in-buffer search from active-document string materialization to a
-  rope-native or bounded-window search engine.
+- Completed: move in-buffer search from active-document string materialization to a
+  rope-native bounded-window search engine.
 - Completed: add search-in-tabs across all open scratch buffers.
 - Add search result previews with quick navigation.
 - Add find-under-cursor and select-next-occurrence commands.

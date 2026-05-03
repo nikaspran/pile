@@ -303,15 +303,52 @@ fn find_regex_matches(rope: &Rope, query: &str, options: SearchOptions) -> Vec<S
         return Vec::new();
     };
 
-    let text = rope.to_string();
-    let rope_len = text.len();
+    let rope_len = rope.byte_len();
+    let window_size = SEARCH_WINDOW_BYTES;
+    let overlap_size = window_size / 2;
     let mut matches = Vec::new();
+    let mut window_start = 0;
+    let mut last_emitted_start = 0;
 
-    for capture in regex.find_iter(&text) {
-        let start = capture.start();
-        let end = capture.end();
-        if (!options.whole_word || is_whole_word_match(rope, start, end)) && end <= rope_len {
-            matches.push(SearchMatch { start, end });
+    while window_start < rope_len {
+        let window_end = floor_char_boundary(rope, (window_start + window_size).min(rope_len));
+        let window_end = if window_end <= window_start {
+            next_char_boundary(rope, window_start)
+        } else {
+            window_end
+        };
+
+        let window_text = rope.byte_slice(window_start..window_end).to_string();
+
+        let mut search_start = 0;
+        while let Some(capture) = regex.find_at(&window_text, search_start) {
+            let local_start = capture.start();
+            let local_end = capture.end();
+            let abs_start = window_start + local_start;
+            let abs_end = window_start + local_end;
+
+            if abs_start >= last_emitted_start
+                && (!options.whole_word || is_whole_word_match(rope, abs_start, abs_end))
+            {
+                matches.push(SearchMatch {
+                    start: abs_start,
+                    end: abs_end,
+                });
+                last_emitted_start = abs_start + 1;
+            }
+
+            if local_end <= search_start {
+                break;
+            }
+            search_start = local_end;
+        }
+
+        if window_end >= rope_len {
+            break;
+        }
+        window_start = floor_char_boundary(rope, (window_end - overlap_size).max(window_start));
+        if window_start >= window_end {
+            window_start = next_char_boundary(rope, window_end);
         }
     }
 
