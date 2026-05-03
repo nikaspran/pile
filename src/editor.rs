@@ -37,7 +37,7 @@ const LINE_GUTTER_PADDING: f32 = 10.0;
 const EDITOR_MIN_WIDTH: f32 = 320.0;
 const TRIPLE_CLICK_DURATION: f32 = 0.4;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct EditorViewState {
     preferred_column: Option<usize>,
     visible_rows: Option<usize>,

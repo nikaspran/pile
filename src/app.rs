@@ -39,6 +39,21 @@ impl From<NativeMenuCommand> for AppCommand {
     }
 }
 
+#[derive(Clone, Debug)]
+struct EditorPane {
+    document_id: DocumentId,
+    view_state: EditorViewState,
+}
+
+impl EditorPane {
+    fn new(document_id: DocumentId) -> Self {
+        Self {
+            document_id,
+            view_state: EditorViewState::default(),
+        }
+    }
+}
+
 pub struct PileApp {
     state: AppState,
     save_tx: Sender<SaveMsg>,
@@ -54,6 +69,8 @@ pub struct PileApp {
     search: SearchState,
     command_palette: CommandPalette,
     tab_switcher: TabSwitcher,
+    panes: Vec<EditorPane>,
+    active_pane: usize,
 }
 
 impl PileApp {
@@ -77,6 +94,7 @@ impl PileApp {
             .map(|document| syntax.detect_rope(&document.rope))
             .unwrap_or_else(|| syntax.detect(""));
 
+        let active_doc = state.active_document;
         info!(documents = state.documents.len(), "pile started");
 
         Self {
@@ -94,6 +112,8 @@ impl PileApp {
             search: SearchState::default(),
             command_palette: CommandPalette::new(),
             tab_switcher: TabSwitcher::new(),
+            panes: vec![EditorPane::new(active_doc)],
+            active_pane: 0,
         }
     }
 
@@ -286,6 +306,31 @@ impl PileApp {
                 self.state.tab_order.swap(pos, pos + 1);
                 self.mark_changed();
             }
+        }
+    }
+
+    fn split_pane_horizontal(&mut self) {
+        let active_doc = self.state.active_document;
+        self.panes.push(EditorPane::new(active_doc));
+        self.active_pane = self.panes.len() - 1;
+        self.mark_changed();
+    }
+
+    fn split_pane_vertical(&mut self) {
+        // For now, vertical split is the same as horizontal (UI limitation)
+        self.split_pane_horizontal();
+    }
+
+    fn close_pane(&mut self) {
+        if self.panes.len() <= 1 {
+            return;
+        }
+        if self.active_pane < self.panes.len() {
+            self.panes.remove(self.active_pane);
+            if self.active_pane >= self.panes.len() {
+                self.active_pane = self.panes.len() - 1;
+            }
+            self.mark_changed();
         }
     }
 
@@ -645,6 +690,38 @@ impl PileApp {
         if toggle_pin {
             let active = self.state.active_document;
             self.toggle_pin_tab(active);
+        }
+
+        // Split pane shortcuts (Cmd+Shift+H/V)
+        let split_h = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::H,
+            })
+        });
+        if split_h {
+            self.split_pane_horizontal();
+        }
+
+        let split_v = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::V,
+            })
+        });
+        if split_v {
+            self.split_pane_vertical();
+        }
+
+        // Close pane shortcut (Cmd+Shift+W)
+        let close_pane = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::W,
+            })
+        });
+        if close_pane {
+            self.close_pane();
         }
     }
 
@@ -1107,7 +1184,13 @@ impl PileApp {
         }
     }
 
-    fn render_editor(&mut self, ui: &mut egui::Ui) {
+    fn render_pane(&mut self, ui: &mut egui::Ui, pane_index: usize) {
+        let Some(pane) = self.panes.get(pane_index) else {
+            ui.label("Invalid pane index");
+            return;
+        };
+        let document_id = pane.document_id;
+
         let reveal_selection = if self.search.selection_pending {
             if self.search.search_all_tabs {
                 self.search.current_global_result().cloned().map(|result| {
@@ -1160,14 +1243,16 @@ impl PileApp {
             .copied()
             .collect();
 
-        let Some(document) = self.state.active_document_mut() else {
+        let Some(document) = self.state.document_mut(document_id) else {
+            ui.label("Document not found");
             return;
         };
 
+        let pane = &mut self.panes[pane_index];
         let response = show_editor(
             ui,
             document,
-            &mut self.editor_view,
+            &mut pane.view_state,
             &mut self.editor_focus_pending,
             reveal_selection,
             &search_highlights,
@@ -1270,7 +1355,46 @@ impl eframe::App for PileApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0.0))
             .show(ctx, |ui| {
-                self.render_editor(ui);
+                let pane_count = self.panes.len();
+                if pane_count == 1 {
+                    self.render_pane(ui, 0);
+                } else {
+                    // Horizontal split for 2+ panes
+                    let available = ui.available_rect_before_wrap();
+                    let pane_width = available.width() / pane_count as f32;
+
+                    ui.horizontal(|ui| {
+                        let pane_data: Vec<(usize, DocumentId)> = self
+                            .panes
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, pane)| (idx, pane.document_id))
+                            .collect();
+
+                        for (idx, document_id) in pane_data {
+                            let pane_rect = egui::Rect::from_min_size(
+                                egui::pos2(
+                                    available.left() + pane_width * idx as f32,
+                                    available.top(),
+                                ),
+                                egui::vec2(pane_width, available.height()),
+                            );
+
+                            ui.scope_builder(
+                                egui::UiBuilder::new()
+                                    .max_rect(pane_rect)
+                                    .layout(*ui.layout()),
+                                |ui| {
+                                    self.render_pane(ui, idx);
+                                },
+                            );
+
+                            if idx < pane_count - 1 {
+                                ui.separator();
+                            }
+                        }
+                    });
+                }
             });
 
         let mut cmd = None;
