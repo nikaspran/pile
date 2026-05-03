@@ -3,18 +3,22 @@ use eframe::egui;
 use crate::model::Document;
 
 use super::{
-    EditorViewState, backspace, contract_selection_by_bracket_pair,
+    EditorViewState, add_all_matches, add_next_match, backspace,
+    clear_secondary_cursors, contract_selection_by_bracket_pair,
     contract_selection_by_indent_block, contract_selection_by_line,
-    contract_selection_by_word, delete, delete_selected_lines, duplicate_selected_lines,
-    expand_selection_by_bracket_pair, expand_selection_by_indent_block,
-    expand_selection_by_line, expand_selection_by_word, indent_selection,
-    insert_newline_with_auto_indent, join_selected_lines, move_document_end,
-    move_document_start, move_end, move_home, move_left, move_page, move_paragraph_down,
-    move_paragraph_up, move_right, move_selected_lines_down, move_selected_lines_up,
-    move_vertical, move_word_left, move_word_right, outdent_selection,
+    contract_selection_by_word, delete, delete_all, delete_selected_lines,
+    duplicate_selected_lines, expand_selection_by_bracket_pair,
+    expand_selection_by_indent_block, expand_selection_by_line,
+    expand_selection_by_word, indent_selection, insert_newline_with_auto_indent,
+    join_selected_lines, move_document_end, move_document_start, move_end,
+    move_home, move_left, move_page, move_paragraph_down,
+    move_paragraph_up, move_right, move_selected_lines_down,
+    move_selected_lines_up, move_vertical, move_word_left,
+    move_word_right, outdent_selection, replace_selection_all,
     replace_selection_with, reverse_selected_lines, sort_selected_lines,
-    trim_trailing_whitespace,
+    split_selection_into_lines, trim_trailing_whitespace,
 };
+use super::multicursor::backspace_all;
 
 pub(super) fn handle_input(
     ui: &egui::Ui,
@@ -28,12 +32,20 @@ pub(super) fn handle_input(
     for event in events {
         match event {
             egui::Event::Paste(text) if !text.is_empty() => {
-                changed |= replace_selection_with(document, &text);
+                if document.selections.len() > 1 {
+                    changed |= replace_selection_all(document, &text);
+                } else {
+                    changed |= replace_selection_with(document, &text);
+                }
                 view_state.preferred_column = None;
                 had_typing_event = true;
             }
             egui::Event::Text(text) if !text.is_empty() && text != "\n" && text != "\r" => {
-                changed |= replace_selection_with(document, &text);
+                if document.selections.len() > 1 {
+                    changed |= replace_selection_all(document, &text);
+                } else {
+                    changed |= replace_selection_with(document, &text);
+                }
                 view_state.preferred_column = None;
                 had_typing_event = true;
             }
@@ -45,6 +57,11 @@ pub(super) fn handle_input(
             } if modifiers.command && !modifiers.shift && !modifiers.alt => match key {
                 egui::Key::Z => {
                     changed |= document.undo();
+                    view_state.preferred_column = None;
+                }
+                egui::Key::D => {
+                    add_next_match(document);
+                    changed = true;
                     view_state.preferred_column = None;
                 }
                 egui::Key::J => {
@@ -64,11 +81,17 @@ pub(super) fn handle_input(
                     view_state.preferred_column = None;
                 }
                 egui::Key::D => {
-                    changed |= duplicate_selected_lines(document);
+                    add_all_matches(document);
+                    changed = true;
                     view_state.preferred_column = None;
                 }
                 egui::Key::K => {
                     changed |= delete_selected_lines(document);
+                    view_state.preferred_column = None;
+                }
+                egui::Key::L => {
+                    split_selection_into_lines(document);
+                    changed = true;
                     view_state.preferred_column = None;
                 }
                 egui::Key::S => {
@@ -113,12 +136,20 @@ pub(super) fn handle_input(
                 let indentation = !modifiers.alt && !modifiers.ctrl;
                 match key {
                     egui::Key::Backspace if plain => {
-                        changed |= backspace(document);
+                        changed |= if document.selections.len() > 1 {
+                            backspace_all(document)
+                        } else {
+                            backspace(document)
+                        };
                         view_state.preferred_column = None;
                         had_typing_event = true;
                     }
                     egui::Key::Delete if plain => {
-                        changed |= delete(document);
+                        changed |= if document.selections.len() > 1 {
+                            delete_all(document)
+                        } else {
+                            delete(document)
+                        };
                         view_state.preferred_column = None;
                         had_typing_event = true;
                     }
@@ -134,6 +165,10 @@ pub(super) fn handle_input(
                             indent_selection(document)
                         };
                         view_state.preferred_column = None;
+                    }
+                    egui::Key::Escape => {
+                        clear_secondary_cursors(document);
+                        changed = true;
                     }
                     egui::Key::ArrowLeft => {
                         if word {

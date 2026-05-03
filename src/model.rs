@@ -101,6 +101,10 @@ pub struct Document {
     pub revision: u64,
     pub selections: Vec<Selection>,
     pub scroll: ScrollState,
+    #[serde(skip)]
+    pub occurrence_selections: Vec<Selection>,
+    #[serde(skip)]
+    pub multi_cursor_query: Option<String>,
     #[serde(skip, default = "UndoState::default")]
     undo: UndoState,
 }
@@ -133,6 +137,8 @@ impl Document {
             revision: 0,
             selections: vec![Selection::caret(0)],
             scroll: ScrollState::default(),
+            occurrence_selections: Vec::new(),
+            multi_cursor_query: None,
             undo: UndoState::default(),
         }
     }

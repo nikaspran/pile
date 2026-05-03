@@ -7,6 +7,7 @@ mod geometry;
 mod input;
 mod line_ops;
 mod motion;
+mod multicursor;
 mod ops;
 mod replace;
 
@@ -18,6 +19,10 @@ pub use geometry::{
 use input::handle_input;
 use line_ops::*;
 use motion::*;
+pub use multicursor::{
+    add_all_matches, add_next_match, clear_secondary_cursors, delete_all,
+    replace_selection_all, split_selection_into_lines,
+};
 use ops::*;
 pub use replace::{replace_all_matches, replace_match};
 
@@ -32,6 +37,10 @@ pub struct EditorViewState {
     visible_rows: Option<usize>,
     last_click_time: Option<Instant>,
     click_count: u32,
+    /// Set to true when Alt+click or Alt+drag is used for column selection
+    pub column_selection: bool,
+    /// The anchor column for column selection
+    pub column_selection_anchor_col: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -98,7 +107,7 @@ pub fn show_editor(
                     let now = Instant::now();
                     let is_multi = view_state
                         .last_click_time
-                        .map_or(false, |t| now.duration_since(t).as_secs_f32() < TRIPLE_CLICK_DURATION);
+                        .is_some_and(|t| now.duration_since(t).as_secs_f32() < TRIPLE_CLICK_DURATION);
                     view_state.last_click_time = Some(now);
                     if is_multi {
                         view_state.click_count = (view_state.click_count % 3) + 1;
@@ -116,12 +125,30 @@ pub fn show_editor(
                         line_count,
                     );
 
-                    if view_state.click_count == 3 {
+                    let column = column_of_byte(&document.rope, offset);
+                    let is_alt = ui.input(|i| i.modifiers.alt);
+
+                    if is_alt {
+                        // Column (rectangular) selection
+                        if view_state.column_selection_anchor_col.is_none() {
+                            view_state.column_selection_anchor_col = Some(column);
+                        }
+                        view_state.column_selection = true;
+                        let anchor_col = view_state.column_selection_anchor_col.unwrap_or(column);
+                        let start_line = line_index_of_byte(&document.rope, offset);
+                        create_column_selection(document, anchor_col, column, start_line, start_line);
+                    } else if view_state.click_count == 3 {
                         set_primary_selection(document, select_line_at_offset(&document.rope, offset));
+                        view_state.column_selection = false;
+                        view_state.column_selection_anchor_col = None;
                     } else if view_state.click_count == 2 {
                         set_primary_selection(document, select_word_at_offset(&document.rope, offset));
+                        view_state.column_selection = false;
+                        view_state.column_selection_anchor_col = None;
                     } else {
                         set_primary_selection(document, Selection::caret(offset));
+                        view_state.column_selection = false;
+                        view_state.column_selection_anchor_col = None;
                     }
                     view_state.preferred_column = None;
                 }
@@ -136,12 +163,32 @@ pub fn show_editor(
                         char_width,
                         line_count,
                     );
-                    let mut selection = primary_selection(document);
-                    if selection.anchor == selection.head {
-                        selection.anchor = offset;
+                    let column = column_of_byte(&document.rope, offset);
+                    let line = line_index_of_byte(&document.rope, offset);
+                    let is_alt = ui.input(|i| i.modifiers.alt);
+
+                    if is_alt || view_state.column_selection {
+                        // Column (rectangular) selection
+                        if view_state.column_selection_anchor_col.is_none() {
+                            let anchor = primary_selection(document).anchor;
+                            view_state.column_selection_anchor_col =
+                                Some(column_of_byte(&document.rope, anchor));
+                        }
+                        view_state.column_selection = true;
+                        let anchor_col = view_state.column_selection_anchor_col.unwrap_or(column);
+                        let anchor_line = line_index_of_byte(
+                            &document.rope,
+                            primary_selection(document).anchor,
+                        );
+                        create_column_selection(document, anchor_col, column, anchor_line, line);
+                    } else {
+                        let mut selection = primary_selection(document);
+                        if selection.anchor == selection.head {
+                            selection.anchor = offset;
+                        }
+                        selection.head = offset;
+                        set_primary_selection(document, selection);
                     }
-                    selection.head = offset;
-                    set_primary_selection(document, selection);
                     view_state.preferred_column = None;
 
                     let viewport_top_abs = rect.top() + viewport.min.y;
@@ -184,8 +231,8 @@ pub fn show_editor(
             let painter = ui.painter_at(rect);
             let first_line = (viewport.min.y / row_height).floor().max(0.0) as usize;
             let last_line = ((viewport.max.y / row_height).ceil() as usize + 1).min(line_count);
-            let selection = primary_selection(document);
-            let caret_line = line_index_of_byte(&document.rope, selection.head);
+            let primary = primary_selection(document);
+            let caret_line = line_index_of_byte(&document.rope, primary.head);
 
             for line_index in first_line..last_line {
                 let y = rect.top() + line_index as f32 * row_height;
@@ -212,6 +259,8 @@ pub fn show_editor(
                 );
 
                 let text_pos = egui::pos2(rect.left() + text_origin_x, y);
+
+                // Draw search highlights first (behind selections)
                 paint_search_highlights_for_line(
                     &painter,
                     &document.rope,
@@ -223,16 +272,28 @@ pub fn show_editor(
                     char_width,
                     ui.visuals(),
                 );
-                paint_selection_for_line(
-                    &painter,
-                    document,
-                    selection,
-                    line_index,
-                    text_pos,
-                    row_height,
-                    char_width,
-                    ui.visuals().selection.bg_fill,
-                );
+
+                // Draw all selections with different colors for primary vs secondary
+                for (i, sel) in document.selections.iter().enumerate() {
+                    let is_primary = i == 0;
+                    let color = if is_primary {
+                        ui.visuals().selection.bg_fill
+                    } else {
+                        ui.visuals().selection.bg_fill.gamma_multiply(0.6)
+                    };
+                    paint_selection_for_line(
+                        &painter,
+                        document,
+                        *sel,
+                        line_index,
+                        text_pos,
+                        row_height,
+                        char_width,
+                        color,
+                    );
+                }
+
+                // Draw extra selections (from search) with yet another color
                 for sel in extra_selections {
                     paint_selection_for_line(
                         &painter,
@@ -242,9 +303,11 @@ pub fn show_editor(
                         text_pos,
                         row_height,
                         char_width,
-                        ui.visuals().selection.bg_fill.gamma_multiply(0.6),
+                        ui.visuals().selection.bg_fill.gamma_multiply(0.4),
                     );
                 }
+
+                // Draw search highlights on top for current match
                 paint_search_highlights_for_line(
                     &painter,
                     &document.rope,
@@ -267,29 +330,37 @@ pub fn show_editor(
                 );
             }
 
-            let caret_position = caret_position(
-                &document.rope,
-                selection.head,
-                rect.left() + text_origin_x,
-                rect.top(),
-                row_height,
-                char_width,
-            );
-            let current_caret_rect =
-                egui::Rect::from_min_size(caret_position, egui::vec2(1.0, row_height));
-
-            if reveal_selection.is_some() {
-                ui.scroll_to_rect(current_caret_rect.expand(24.0), Some(egui::Align::Center));
-            }
-
-            if response.has_focus() {
-                painter.line_segment(
-                    [
-                        current_caret_rect.left_top(),
-                        current_caret_rect.left_bottom(),
-                    ],
-                    egui::Stroke::new(1.5, ui.visuals().text_color()),
+            // Draw carets for all selections
+            for (i, sel) in document.selections.iter().enumerate() {
+                let caret_pos = caret_position(
+                    &document.rope,
+                    sel.head,
+                    rect.left() + text_origin_x,
+                    rect.top(),
+                    row_height,
+                    char_width,
                 );
+                let caret_rect =
+                    egui::Rect::from_min_size(caret_pos, egui::vec2(1.0, row_height));
+
+                let is_primary = i == 0;
+                let stroke_width = if is_primary { 1.5 } else { 1.0 };
+                let color = if response.has_focus() {
+                    ui.visuals().text_color()
+                } else {
+                    ui.visuals().text_color().gamma_multiply(0.5)
+                };
+
+                if is_primary && reveal_selection.is_some() {
+                    ui.scroll_to_rect(caret_rect.expand(24.0), Some(egui::Align::Center));
+                }
+
+                if response.has_focus() || !is_primary {
+                    painter.line_segment(
+                        [caret_rect.left_top(), caret_rect.left_bottom()],
+                        egui::Stroke::new(stroke_width, color),
+                    );
+                }
             }
         });
 

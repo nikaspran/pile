@@ -14,7 +14,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: add mouse drag selection and richer selection rendering for the custom editor.
 - Completed: add robust selection expansion and contraction for character, word, line,
   bracket pair, and indentation block scopes.
-- Add multiple cursors as a first-class model with add-next-match, add-all-match,
+- Completed: add multiple cursors as a first-class model with add-next-match, add-all-match,
   split-selection-into-lines, and rectangular/column selection.
 - In progress: add undo/redo backed by an edit history that understands grouped
   typing, paste, replace, and multi-cursor transactions. A single-range

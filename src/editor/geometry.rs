@@ -341,7 +341,7 @@ pub(super) fn paint_selection_for_line(
         text_pos.y + row_height,
     );
     let rect = egui::Rect::from_min_max(min, max);
-    let rounding = egui::Rounding::same(2);
+    let rounding = egui::CornerRadius::same(2);
     painter.rect_filled(rect, rounding, color);
     painter.rect_stroke(rect, rounding, egui::Stroke::new(1.0, color.gamma_multiply(1.3)), egui::StrokeKind::Inside);
 }
@@ -439,6 +439,59 @@ pub(super) fn paint_search_highlights_for_line(
         } else {
             painter.rect_filled(rect, 0.0, normal_fill);
         }
+    }
+}
+
+/// Creates rectangular (column) selections between two column positions across lines.
+/// This creates a separate selection for each line between the anchor line and current line.
+pub fn create_column_selection(
+    document: &mut Document,
+    anchor_col: usize,
+    current_col: usize,
+    anchor_line: usize,
+    current_line: usize,
+) {
+    let rope = &document.rope;
+    let min_line = anchor_line.min(current_line);
+    let max_line = anchor_line.max(current_line);
+    let min_col = anchor_col.min(current_col);
+    let max_col = anchor_col.max(current_col);
+
+    let mut new_selections = Vec::new();
+
+    for line in min_line..=max_line {
+        let line_start = byte_of_visual_line(rope, line);
+        let (_, line_end) = visual_line_bounds(rope, line);
+        let line_text = rope.byte_slice(line_start..line_end).to_string();
+
+        // Count characters to find byte positions for the column range
+        let mut char_count = 0usize;
+        let mut sel_start = line_start;
+        let mut sel_end = line_start;
+
+        for _char in line_text.chars() {
+            if char_count == min_col {
+                sel_start = line_start + line_text.chars().take(min_col).map(|c| c.len_utf8()).sum::<usize>();
+            }
+            if char_count == max_col {
+                sel_end = line_start + line_text.chars().take(max_col).map(|c| c.len_utf8()).sum::<usize>();
+                break;
+            }
+            char_count += 1;
+        }
+        if char_count < max_col {
+            // If we didn't reach max_col, use end of line
+            sel_end = line_end;
+        }
+
+        new_selections.push(Selection {
+            anchor: sel_start,
+            head: sel_end,
+        });
+    }
+
+    if !new_selections.is_empty() {
+        document.selections = new_selections;
     }
 }
 
