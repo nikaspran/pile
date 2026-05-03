@@ -40,7 +40,15 @@ impl TabSwitcher {
 
     fn build_tab_list(&mut self, state: &AppState) {
         self.tabs.clear();
-        for &doc_id in &state.tab_order {
+
+        // Use recent_order if available, otherwise fall back to tab_order
+        let order = if !state.recent_order().is_empty() {
+            state.recent_order()
+        } else {
+            &state.tab_order
+        };
+
+        for &doc_id in order {
             if let Some(doc) = state.document(doc_id) {
                 self.tabs.push(TabItem {
                     id: doc_id,

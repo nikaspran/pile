@@ -15,6 +15,11 @@ pub struct AppState {
     pub tab_order: Vec<DocumentId>,
     pub active_document: DocumentId,
     pub next_untitled_index: u64,
+    #[serde(
+        serialize_with = "serialize_recent_order",
+        deserialize_with = "deserialize_recent_order"
+    )]
+    recent_order: Vec<DocumentId>,
 }
 
 impl AppState {
@@ -27,6 +32,7 @@ impl AppState {
             tab_order: vec![active_document],
             active_document,
             next_untitled_index: 2,
+            recent_order: vec![active_document],
         }
     }
 
@@ -60,6 +66,7 @@ impl AppState {
         self.documents.push(document);
         self.tab_order.push(id);
         self.active_document = id;
+        self.update_recent_order(id);
         id
     }
 
@@ -74,24 +81,55 @@ impl AppState {
         let old_active = self.active_document;
         self.documents.retain(|document| document.id != old_active);
         self.tab_order.retain(|id| *id != old_active);
+        self.recent_order.retain(|id| *id != old_active);
         self.active_document = self.tab_order.first().copied().unwrap_or_else(|| {
             let document = Document::new_untitled(self.next_untitled_index);
             let id = document.id;
             self.next_untitled_index += 1;
             self.documents.push(document);
             self.tab_order.push(id);
+            self.recent_order.push(id);
             id
         });
+        self.update_recent_order(self.active_document);
     }
 
     pub fn set_active(&mut self, document_id: DocumentId) -> bool {
         if self.tab_order.contains(&document_id) && self.document(document_id).is_some() {
             self.active_document = document_id;
+            self.update_recent_order(document_id);
             true
         } else {
             false
         }
     }
+
+    pub fn recent_order(&self) -> &[DocumentId] {
+        &self.recent_order
+    }
+
+    fn update_recent_order(&mut self, document_id: DocumentId) {
+        // Remove if present and push to front (most recent)
+        self.recent_order.retain(|id| *id != document_id);
+        self.recent_order.insert(0, document_id);
+    }
+}
+
+fn serialize_recent_order<S>(order: &Vec<DocumentId>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    // Serialize as empty for now - will be populated on first use
+    let empty: Vec<DocumentId> = Vec::new();
+    empty.serialize(serializer)
+}
+
+fn deserialize_recent_order<'de, D>(deserializer: D) -> Result<Vec<DocumentId>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let vec: Vec<DocumentId> = Vec::deserialize(deserializer)?;
+    Ok(vec)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
