@@ -39,6 +39,22 @@ impl From<NativeMenuCommand> for AppCommand {
     }
 }
 
+struct GotoLineState {
+    visible: bool,
+    query: String,
+    focus_pending: bool,
+}
+
+impl GotoLineState {
+    fn new() -> Self {
+        Self {
+            visible: false,
+            query: String::new(),
+            focus_pending: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct EditorPane {
     document_id: DocumentId,
@@ -71,6 +87,7 @@ pub struct PileApp {
     tab_switcher: TabSwitcher,
     panes: Vec<EditorPane>,
     active_pane: usize,
+    goto_line: GotoLineState,
 }
 
 impl PileApp {
@@ -114,6 +131,7 @@ impl PileApp {
             tab_switcher: TabSwitcher::new(),
             panes: vec![EditorPane::new(active_doc)],
             active_pane: 0,
+            goto_line: GotoLineState::new(),
         }
     }
 
@@ -723,6 +741,18 @@ impl PileApp {
         if close_pane {
             self.close_pane();
         }
+
+        // Go to line shortcut (Cmd+G)
+        let goto_line = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND,
+                logical_key: egui::Key::G,
+            })
+        });
+        if goto_line {
+            self.goto_line.visible = true;
+            self.goto_line.focus_pending = true;
+        }
     }
 
     fn close_active_scratch(&mut self) {
@@ -959,6 +989,52 @@ impl PileApp {
         if do_replace_all {
             self.replace_all_in_active_document();
         }
+    }
+
+    fn render_goto_line_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Go to line:");
+            let response = ui.add_sized(
+                [100.0, ui.spacing().interact_size.y],
+                egui::TextEdit::singleline(&mut self.goto_line.query)
+                    .hint_text("Line number")
+                    .desired_width(100.0),
+            );
+
+            if self.goto_line.focus_pending {
+                response.request_focus();
+                self.goto_line.focus_pending = false;
+            }
+
+            let pressed_enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
+            let pressed_escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
+
+            if response.lost_focus() && pressed_enter {
+                self.execute_goto_line();
+            }
+
+            if pressed_escape {
+                self.goto_line.visible = false;
+                self.goto_line.query.clear();
+            }
+
+            if ui.button("Go").clicked() {
+                self.execute_goto_line();
+            }
+        });
+    }
+
+    fn execute_goto_line(&mut self) {
+        if let Ok(line_num) = self.goto_line.query.parse::<usize>() {
+            if line_num > 0 {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::move_to_line(document, line_num);
+                    self.document_edited();
+                }
+            }
+        }
+        self.goto_line.visible = false;
+        self.goto_line.query.clear();
     }
 
     fn render_search_preview(&mut self, ui: &mut egui::Ui) {
@@ -1333,6 +1409,11 @@ impl eframe::App for PileApp {
                     ui.separator();
                     self.render_search_preview(ui);
                 }
+                ui.separator();
+            }
+
+            if self.goto_line.visible {
+                self.render_goto_line_bar(ui);
                 ui.separator();
             }
 

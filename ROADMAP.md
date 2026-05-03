@@ -58,7 +58,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add virtualized tab list rendering for large sessions.
 - Completed: Add tab close buttons, tab reordering, and pinned tabs.
 - Completed: Add split editor panes with shared document backing.
-- Add go-to-line and go-to-symbol-like navigation for detected document
+- Completed: Add go-to-line and go-to-symbol-like navigation for detected document
   structure.
 - Add bookmarks or lightweight marks within scratch buffers.
 - Add session-level tab restore ordering, active pane restore, and focus restore.

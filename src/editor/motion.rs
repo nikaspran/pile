@@ -487,6 +487,14 @@ fn is_closing_bracket(c: char) -> bool {
     matches!(c, ')' | ']' | '}' | '>')
 }
 
+pub fn move_to_line(document: &mut Document, line_number: usize) {
+    clamp_primary_selection(document);
+    let line_count = visual_line_count(&document.rope);
+    let target_line = line_number.saturating_sub(1).min(line_count.saturating_sub(1));
+    let target = byte_of_visual_line(&document.rope, target_line);
+    apply_motion(document, target, false);
+}
+
 fn line_indent_level(rope: &Rope, line_index: usize) -> usize {
     if line_index >= rope.line_len() {
         return 0;
