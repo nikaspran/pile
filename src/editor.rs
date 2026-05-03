@@ -162,18 +162,17 @@ pub fn show_editor(
 
             for line_index in first_line..last_line {
                 let y = rect.top() + line_index as f32 * row_height;
-                let row_rect = egui::Rect::from_min_size(
-                    egui::pos2(rect.left(), y),
-                    egui::vec2(content_width, row_height),
-                );
-
                 if line_index == caret_line {
                     let line_highlight_color = if ui.visuals().dark_mode {
                         egui::Color32::from_rgba_premultiplied(255, 255, 255, 12)
                     } else {
                         egui::Color32::from_rgba_premultiplied(0, 0, 0, 12)
                     };
-                    painter.rect_filled(row_rect, 0.0, line_highlight_color);
+                    let gutter_rect = egui::Rect::from_min_size(
+                        egui::pos2(rect.left(), y),
+                        egui::vec2(gutter_width, row_height),
+                    );
+                    painter.rect_filled(gutter_rect, 0.0, line_highlight_color);
                 }
 
                 let line_number_pos = egui::pos2(rect.left() + LINE_GUTTER_PADDING, y);
