@@ -1092,7 +1092,7 @@ impl eframe::App for PileApp {
         self.handle_keyboard_shortcuts(ctx);
 
         egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
+            ui.horizontal(|ui| {
                 if ui.button("+").on_hover_text("New scratch").clicked() {
                     self.execute_command(AppCommand::NewScratch);
                 }
@@ -1100,12 +1100,51 @@ impl eframe::App for PileApp {
                 if ui.button("x").on_hover_text("Close scratch").clicked() {
                     self.execute_command(AppCommand::CloseScratch);
                 }
-
-                let tabs = self.state.tab_order.clone();
-                for document_id in tabs {
-                    self.render_tab(ui, document_id);
-                }
             });
+
+            // Virtualized horizontal tab list
+            let tab_count = self.state.tab_order.len();
+            if tab_count > 0 {
+                let tab_width = 150.0;
+                let tab_height = ui.spacing().interact_size.y;
+
+                egui::ScrollArea::horizontal()
+                    .id_salt("tab-scroll")
+                    .auto_shrink([false, true])
+                    .show_viewport(ui, |ui, viewport| {
+                        // Allocate space for all tabs (virtualized)
+                        let total_width = tab_width * tab_count as f32;
+                        ui.allocate_space(egui::vec2(total_width, tab_height));
+
+                        // Calculate visible range
+                        let first_visible = (viewport.min.x / tab_width)
+                            .floor()
+                            .max(0.0) as usize;
+                        let last_visible = ((viewport.max.x / tab_width)
+                            .ceil() as usize)
+                            .min(tab_count);
+
+                        // Only render visible tabs
+                        for i in first_visible..last_visible {
+                            let document_id = self.state.tab_order[i];
+                            let x_offset = i as f32 * tab_width;
+
+                            // Position the tab at its x offset
+                            let tab_rect = egui::Rect::from_min_size(
+                                egui::pos2(viewport.min.x + x_offset, viewport.min.y),
+                                egui::vec2(tab_width, tab_height),
+                            );
+                            ui.scope_builder(
+                                egui::UiBuilder::new()
+                                    .max_rect(tab_rect)
+                                    .layout(*ui.layout()),
+                                |ui| {
+                                    self.render_tab(ui, document_id);
+                                },
+                            );
+                        }
+                    });
+            }
         });
 
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
