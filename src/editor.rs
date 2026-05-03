@@ -1,6 +1,7 @@
 use crop::Rope;
 use eframe::egui;
 use regex::Regex;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::model::{Document, EditTransaction, Selection};
 use crate::search::SearchMatch;
@@ -1233,7 +1234,7 @@ pub fn backspace(document: &mut Document) -> bool {
         return false;
     }
 
-    let delete_start = previous_char_boundary(&document.rope, start);
+    let delete_start = previous_grapheme_boundary(&document.rope, start);
     let deleted_text = document.rope.byte_slice(delete_start..start).to_string();
 
     document.begin_undo_group();
@@ -1262,7 +1263,7 @@ pub fn delete(document: &mut Document) -> bool {
         return false;
     }
 
-    let delete_end = next_char_boundary(&document.rope, start);
+    let delete_end = next_grapheme_boundary(&document.rope, start);
     let deleted_text = document.rope.byte_slice(start..delete_end).to_string();
 
     document.begin_undo_group();
@@ -1286,7 +1287,7 @@ pub fn move_left(document: &mut Document, extend: bool) {
     let target = if !extend && selection.anchor != selection.head {
         selection_range(selection).0
     } else {
-        previous_char_boundary(&document.rope, selection.head)
+        previous_grapheme_boundary(&document.rope, selection.head)
     };
     apply_motion(document, target, extend);
 }
@@ -1297,7 +1298,7 @@ pub fn move_right(document: &mut Document, extend: bool) {
     let target = if !extend && selection.anchor != selection.head {
         selection_range(selection).1
     } else {
-        next_char_boundary(&document.rope, selection.head)
+        next_grapheme_boundary(&document.rope, selection.head)
     };
     apply_motion(document, target, extend);
 }
@@ -1550,26 +1551,28 @@ pub fn word_at_selection(rope: &Rope, selection: Selection) -> Option<(usize, us
     }
 }
 
-fn previous_char_boundary(rope: &Rope, offset: usize) -> usize {
+fn previous_grapheme_boundary(rope: &Rope, offset: usize) -> usize {
     if offset == 0 {
         return 0;
     }
-    let offset = clamp_to_char_boundary(rope, offset.min(rope.byte_len()));
-    rope.byte_slice(..offset)
-        .chars()
-        .next_back()
-        .map_or(0, |char| offset - char.len_utf8())
+    let offset = offset.min(rope.byte_len());
+    let prefix = rope.byte_slice(..offset).to_string();
+    prefix
+        .graphemes(true)
+        .last()
+        .map_or(0, |g| offset - g.len())
 }
 
-fn next_char_boundary(rope: &Rope, offset: usize) -> usize {
-    let offset = clamp_to_char_boundary(rope, offset.min(rope.byte_len()));
+fn next_grapheme_boundary(rope: &Rope, offset: usize) -> usize {
+    let offset = offset.min(rope.byte_len());
     if offset >= rope.byte_len() {
         return rope.byte_len();
     }
-    rope.byte_slice(offset..)
-        .chars()
+    let suffix = rope.byte_slice(offset..).to_string();
+    suffix
+        .graphemes(true)
         .next()
-        .map_or(rope.byte_len(), |char| offset + char.len_utf8())
+        .map_or(rope.byte_len(), |g| offset + g.len())
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -3296,5 +3299,53 @@ mod tests {
         let sel = Selection::caret(8); // inside "hello_world"
         let result = word_at_selection(&rope, sel);
         assert_eq!(result, Some((0, 11)));
+    }
+
+    #[test]
+    fn grapheme_movement_respects_clusters() {
+        // "café" where 'é' is e + combining acute (1+2=3 bytes, 1 grapheme)
+        let rope = Rope::from("café");
+        let text = rope.to_string();
+        // "c"=1, "a"=1, "f"=1, "e\u{0301}"=3 bytes
+        let c_len = "c".len();  // 1
+        let ca_len = "ca".len(); // 2
+        let caf_len = "caf".len(); // 3
+        let cafe_len = "café".len(); // 6
+
+        // Moving right grapheme by grapheme
+        let after_c = next_grapheme_boundary(&rope, 0);
+        assert_eq!(after_c, c_len);
+
+        let after_ca = next_grapheme_boundary(&rope, after_c);
+        assert_eq!(after_ca, ca_len);
+
+        let after_caf = next_grapheme_boundary(&rope, after_ca);
+        assert_eq!(after_caf, caf_len);
+
+        // The 'é' is one grapheme (e + combining acute = 3 bytes)
+        let after_e_acute = next_grapheme_boundary(&rope, after_caf);
+        assert_eq!(after_e_acute, cafe_len);
+
+        // Moving left from end
+        let before_e_acute = previous_grapheme_boundary(&rope, cafe_len);
+        assert_eq!(before_e_acute, caf_len);
+
+        let before_caf = previous_grapheme_boundary(&rope, before_e_acute);
+        assert_eq!(before_caf, ca_len);
+    }
+
+    #[test]
+    fn grapheme_movement_emoji() {
+        // Emoji with ZWJ are single graphemes
+        let rope = Rope::from("👨‍👩‍👧‍👦 family");
+        // Move right through emoji grapheme
+        let emoji_len = "👨‍👩‍👧‍👦".len();
+        let after_emoji = next_grapheme_boundary(&rope, 0);
+        assert_eq!(after_emoji, emoji_len);
+
+        // Moving left from after space
+        let space_pos = emoji_len + 1; // emoji + space
+        let before_space = previous_grapheme_boundary(&rope, space_pos);
+        assert_eq!(before_space, emoji_len);
     }
 }

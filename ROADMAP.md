@@ -9,8 +9,8 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: replace the temporary `egui::TextEdit` surface with a v1 custom
   rope-native editor view that renders visible lines without routine full-buffer
   materialization.
-- Implement cursor movement by grapheme cluster, word, line, paragraph, document
-  boundary, and page.
+- Completed: implement cursor movement by grapheme cluster.
+- Implement cursor movement by word, line, paragraph, document boundary, and page.
 - Add mouse drag selection and richer selection rendering for the custom editor.
 - Add robust selection expansion and contraction for character, word, line,
   bracket pair, and indentation block scopes.
