@@ -29,6 +29,16 @@ pub struct GlobalSearchResult {
     pub match_end: usize,
 }
 
+#[derive(Clone, Debug)]
+pub struct SearchResultPreview {
+    pub document_id: Option<DocumentId>,
+    pub document_title: Option<String>,
+    pub line_number: usize,
+    pub context_before: String,
+    pub matched_text: String,
+    pub context_after: String,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct SearchState {
     pub visible: bool,
@@ -46,6 +56,9 @@ pub struct SearchState {
     pub occurrence_selections: Vec<Selection>,
     pub global_results: Vec<GlobalSearchResult>,
     pub global_index: Option<usize>,
+    pub preview_items: Vec<SearchResultPreview>,
+    pub preview_index: Option<usize>,
+    pub preview_visible: bool,
 }
 
 impl SearchState {
@@ -57,6 +70,7 @@ impl SearchState {
 
         if self.search_all_tabs {
             self.global_results = find_matches_in_documents(documents, &self.query, options);
+            self.preview_items = build_global_preview_items(documents, &self.global_results, 40);
             self.matches.clear();
             self.current_match = None;
             self.global_index = if self.global_results.is_empty() {
@@ -71,6 +85,7 @@ impl SearchState {
             };
         } else {
             self.matches = find_matches(rope, &self.query, options);
+            self.preview_items = build_preview_items(rope, &self.matches, 40);
             self.global_results.clear();
             self.global_index = None;
             self.current_match = if self.matches.is_empty() {
@@ -83,6 +98,11 @@ impl SearchState {
             } else {
                 Some(0)
             };
+        }
+        if !self.preview_items.is_empty() {
+            self.preview_index = Some(0);
+        } else {
+            self.preview_index = None;
         }
     }
 
@@ -389,6 +409,77 @@ pub fn find_matches_in_documents(
     }
 
     results
+}
+
+pub fn build_preview_items(rope: &Rope, matches: &[SearchMatch], context_chars: usize) -> Vec<SearchResultPreview> {
+    let mut items = Vec::new();
+    let rope_len = rope.byte_len();
+
+    for m in matches {
+        let line_number = rope.byte_slice(..m.start).lines().count();
+
+        let context_start = m.start.saturating_sub(context_chars);
+        let context_start = floor_char_boundary(rope, context_start);
+        let context_end = (m.end + context_chars).min(rope_len);
+        let context_end = floor_char_boundary(rope, context_end);
+
+        let before = rope.byte_slice(context_start..m.start).to_string();
+        let matched = rope.byte_slice(m.start..m.end).to_string();
+        let after = rope.byte_slice(m.end..context_end).to_string();
+
+        items.push(SearchResultPreview {
+            document_id: None,
+            document_title: None,
+            line_number,
+            context_before: before,
+            matched_text: matched,
+            context_after: after,
+        });
+    }
+
+    items
+}
+
+pub fn build_global_preview_items(
+    documents: &[Document],
+    results: &[GlobalSearchResult],
+    context_chars: usize,
+) -> Vec<SearchResultPreview> {
+    use std::collections::HashMap;
+    let doc_map: HashMap<DocumentId, &Document> = documents
+        .iter()
+        .map(|d| (d.id, d))
+        .collect();
+    let mut items = Vec::new();
+
+    for r in results {
+        let Some(document) = doc_map.get(&r.document_id) else {
+            continue;
+        };
+        let rope = &document.rope;
+        let rope_len = rope.byte_len();
+        let line_number = rope.byte_slice(..r.match_start).lines().count();
+
+        let context_start = r.match_start.saturating_sub(context_chars);
+        let context_start = floor_char_boundary(rope, context_start);
+        let context_end = (r.match_end + context_chars).min(rope_len);
+        let context_end = floor_char_boundary(rope, context_end);
+
+        let before = rope.byte_slice(context_start..r.match_start).to_string();
+        let matched = rope.byte_slice(r.match_start..r.match_end).to_string();
+        let after = rope.byte_slice(r.match_end..context_end).to_string();
+
+        items.push(SearchResultPreview {
+            document_id: Some(r.document_id),
+            document_title: Some(r.document_title.clone()),
+            line_number,
+            context_before: before,
+            matched_text: matched,
+            context_after: after,
+        });
+    }
+
+    items
 }
 
 fn is_whole_word_match(rope: &Rope, start: usize, end: usize) -> bool {

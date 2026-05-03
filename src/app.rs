@@ -422,6 +422,9 @@ impl PileApp {
             let pressed_enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
             let pressed_escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
             let shift_down = ui.input(|input| input.modifiers.shift);
+            let pressed_up = ui.input(|input| input.key_pressed(egui::Key::ArrowUp));
+            let pressed_down = ui.input(|input| input.key_pressed(egui::Key::ArrowDown));
+
             if response.has_focus() && pressed_enter {
                 if shift_down {
                     go_previous = true;
@@ -431,6 +434,31 @@ impl PileApp {
             }
             if response.has_focus() && pressed_escape {
                 self.close_search();
+            }
+
+            if self.search.preview_visible && !self.search.preview_items.is_empty() {
+                if pressed_up {
+                    let len = self.search.preview_items.len();
+                    if len > 0 {
+                        let new_index = self
+                            .search
+                            .preview_index
+                            .map(|i| (i + len - 1) % len)
+                            .unwrap_or(0);
+                        self.jump_to_preview_item(new_index);
+                    }
+                }
+                if pressed_down {
+                    let len = self.search.preview_items.len();
+                    if len > 0 {
+                        let new_index = self
+                            .search
+                            .preview_index
+                            .map(|i| (i + 1) % len)
+                            .unwrap_or(0);
+                        self.jump_to_preview_item(new_index);
+                    }
+                }
             }
 
             if ui.button("<").on_hover_text("Previous match").clicked() {
@@ -479,6 +507,22 @@ impl PileApp {
 
             if ui.button("x").on_hover_text("Close search").clicked() {
                 self.close_search();
+            }
+
+            let preview_label = if self.search.preview_visible {
+                "▾"
+            } else {
+                "▸"
+            };
+            if ui
+                .add_enabled(
+                    !self.search.query.is_empty() && self.search.has_matches(),
+                    egui::Button::new(preview_label),
+                )
+                .on_hover_text("Toggle result previews")
+                .clicked()
+            {
+                self.search.preview_visible = !self.search.preview_visible;
             }
         });
 
@@ -534,6 +578,122 @@ impl PileApp {
         if do_replace_all {
             self.replace_all_in_active_document();
         }
+    }
+
+    fn render_search_preview(&mut self, ui: &mut egui::Ui) {
+        let preview_items: Vec<_> = self
+            .search
+            .preview_items
+            .iter()
+            .enumerate()
+            .map(|(i, item)| {
+                (
+                    i,
+                    item.line_number,
+                    item.document_title.clone(),
+                    item.context_before.clone(),
+                    item.matched_text.clone(),
+                    item.context_after.clone(),
+                )
+            })
+            .collect();
+        let preview_index = self.search.preview_index;
+        let search_all_tabs = self.search.search_all_tabs;
+
+        let mut clicked_index: Option<usize> = None;
+
+        egui::ScrollArea::vertical()
+            .max_height(200.0)
+            .show(ui, |ui| {
+                for (i, line_number, doc_title, before, matched, after) in &preview_items {
+                    let is_current = preview_index == Some(*i);
+
+                    let bg = if is_current {
+                        ui.style().visuals.selection.bg_fill
+                    } else {
+                        ui.style().visuals.widgets.inactive.bg_fill
+                    };
+
+                    let response = ui.horizontal(|ui| {
+                        ui.painter().rect_filled(
+                            ui.max_rect(),
+                            0.0,
+                            bg,
+                        );
+                        ui.add_sized(
+                            [16.0, ui.spacing().interact_size.y],
+                            egui::Label::new(
+                                egui::RichText::new(format!("{:>4}", i + 1))
+                                    .monospace()
+                                    .weak(),
+                            ),
+                        );
+
+                        ui.add_sized(
+                            [60.0, ui.spacing().interact_size.y],
+                            egui::Label::new(
+                                egui::RichText::new(format!("L{}", line_number + 1))
+                                    .monospace()
+                                    .weak(),
+                            ),
+                        );
+
+                        if search_all_tabs {
+                            let title = doc_title.as_deref().unwrap_or("Unknown");
+                            ui.add_sized(
+                                [120.0, ui.spacing().interact_size.y],
+                                egui::Label::new(
+                                    egui::RichText::new(title)
+                                        .monospace()
+                                        .weak(),
+                                ),
+                            );
+                        }
+
+                        ui.label(
+                            egui::RichText::new(before)
+                                .monospace()
+                                .weak(),
+                        );
+                        ui.label(
+                            egui::RichText::new(matched)
+                                .monospace()
+                                .strong()
+                                .background_color(ui.style().visuals.selection.bg_fill),
+                        );
+                        ui.label(
+                            egui::RichText::new(after)
+                                .monospace()
+                                .weak(),
+                        );
+                    });
+
+                    if response.response.clicked() {
+                        clicked_index = Some(*i);
+                    }
+                }
+            });
+
+        if let Some(index) = clicked_index {
+            self.jump_to_preview_item(index);
+        }
+    }
+
+    fn jump_to_preview_item(&mut self, index: usize) {
+        if index >= self.search.preview_items.len() {
+            return;
+        }
+        let item = &self.search.preview_items[index];
+        if let Some(doc_id) = item.document_id {
+            self.set_active_document_from_global_search(doc_id);
+        }
+        if self.search.search_all_tabs {
+            self.search.global_index = Some(index);
+        } else {
+            self.search.current_match = Some(index);
+        }
+        self.search.preview_index = Some(index);
+        self.search.selection_pending = true;
     }
 
     fn replace_current_match(&mut self) {
@@ -741,6 +901,10 @@ impl eframe::App for PileApp {
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             if self.search.visible {
                 self.render_search_bar(ui);
+                if self.search.preview_visible && !self.search.preview_items.is_empty() {
+                    ui.separator();
+                    self.render_search_preview(ui);
+                }
                 ui.separator();
             }
 
