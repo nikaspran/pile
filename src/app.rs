@@ -5,6 +5,8 @@ use eframe::egui;
 use tracing::{info, warn};
 
 use crate::{
+    command::Command,
+    command_palette::CommandPalette,
     editor::{EditorViewState, SearchHighlight, replace_all_matches, replace_match, show_editor},
     model::{AppState, DocumentId, Selection, SessionSnapshot},
     native_menu::{NativeMenu, NativeMenuCommand},
@@ -49,6 +51,7 @@ pub struct PileApp {
     editor_focus_pending: bool,
     native_menu: Option<NativeMenu>,
     search: SearchState,
+    command_palette: CommandPalette,
 }
 
 impl PileApp {
@@ -87,6 +90,7 @@ impl PileApp {
             editor_focus_pending: true,
             native_menu: NativeMenu::install(),
             search: SearchState::default(),
+            command_palette: CommandPalette::new(),
         }
     }
 
@@ -246,6 +250,189 @@ impl PileApp {
         }
     }
 
+    fn handle_command(&mut self, command: Command) {
+        use Command::*;
+        match command {
+            NewScratch => self.execute_command(AppCommand::NewScratch),
+            CloseScratch => self.execute_command(AppCommand::CloseScratch),
+            RenameTab => self.execute_command(AppCommand::RenameTab),
+            Undo => self.execute_command(AppCommand::Undo),
+            Redo => self.execute_command(AppCommand::Redo),
+
+            // Motion commands - these are handled by editor input
+            MoveLeft | MoveRight | MoveWordLeft | MoveWordRight | MoveUp | MoveDown
+            | MoveDocumentStart | MoveDocumentEnd | MoveLineStart | MoveLineEnd
+            | MoveParagraphUp | MoveParagraphDown | PageUp | PageDown => {
+                // Motion commands are handled by editor input
+            }
+
+            // Selection commands - handled by editor input
+            SelectLeft | SelectRight | SelectWordLeft | SelectWordRight | SelectUp | SelectDown
+            | SelectDocumentStart | SelectDocumentEnd | SelectLineStart | SelectLineEnd
+            | SelectParagraphUp | SelectParagraphDown | SelectPageUp | SelectPageDown => {
+                // Selection commands are handled by editor input
+            }
+
+            // Selection expansion
+            ExpandWord | ContractWord | ExpandLine | ContractLine | ExpandBracketPair
+            | ContractBracketPair | ExpandIndentBlock | ContractIndentBlock => {
+                // These are handled by editor input
+            }
+
+            // Line operations
+            Indent => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::indent_selection(document);
+                    self.document_edited();
+                }
+            }
+            Outdent => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::outdent_selection(document);
+                    self.document_edited();
+                }
+            }
+            DuplicateLines => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::duplicate_selected_lines(document);
+                    self.document_edited();
+                }
+            }
+            DeleteLines => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::delete_selected_lines(document);
+                    self.document_edited();
+                }
+            }
+            MoveLinesUp => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::move_selected_lines_up(document);
+                    self.document_edited();
+                }
+            }
+            MoveLinesDown => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::move_selected_lines_down(document);
+                    self.document_edited();
+                }
+            }
+            JoinLines => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::join_selected_lines(document);
+                    self.document_edited();
+                }
+            }
+            SortLines => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::sort_selected_lines(document);
+                    self.document_edited();
+                }
+            }
+            ReverseLines => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::reverse_selected_lines(document);
+                    self.document_edited();
+                }
+            }
+            TrimTrailingWhitespace => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::trim_trailing_whitespace(document);
+                    self.document_edited();
+                }
+            }
+            NormalizeWhitespace => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::normalize_whitespace(document);
+                    self.document_edited();
+                }
+            }
+
+            // Multi-cursor
+            AddNextMatch => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::add_next_match(document);
+                    self.document_edited();
+                }
+            }
+            AddAllMatches => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::add_all_matches(document);
+                    self.document_edited();
+                }
+            }
+            SplitSelectionIntoLines => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::split_selection_into_lines(document);
+                    self.document_edited();
+                }
+            }
+            ClearSecondaryCursors => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::clear_secondary_cursors(document);
+                    self.document_edited();
+                }
+            }
+
+            // Editing
+            ToggleComments => {
+                if let Some(document) = self.state.active_document_mut() {
+                    let comment_prefix = document
+                        .detect_syntax()
+                        .and_then(|d| d.language.comment_prefix())
+                        .unwrap_or("//");
+                    crate::editor::toggle_comments(document, comment_prefix);
+                    self.document_edited();
+                }
+            }
+            UpperCase => {
+                if let Some(document) = self.state.active_document_mut() {
+                    if document.selections.len() > 1 {
+                        crate::editor::convert_case_all_selections(document, crate::editor::CaseType::Upper);
+                    } else {
+                        crate::editor::convert_case_selection(document, crate::editor::CaseType::Upper);
+                    }
+                    self.document_edited();
+                }
+            }
+            LowerCase => {
+                if let Some(document) = self.state.active_document_mut() {
+                    if document.selections.len() > 1 {
+                        crate::editor::convert_case_all_selections(document, crate::editor::CaseType::Lower);
+                    } else {
+                        crate::editor::convert_case_selection(document, crate::editor::CaseType::Lower);
+                    }
+                    self.document_edited();
+                }
+            }
+            TitleCase => {
+                if let Some(document) = self.state.active_document_mut() {
+                    if document.selections.len() > 1 {
+                        crate::editor::convert_case_all_selections(document, crate::editor::CaseType::Title);
+                    } else {
+                        crate::editor::convert_case_selection(document, crate::editor::CaseType::Title);
+                    }
+                    self.document_edited();
+                }
+            }
+
+            // Search
+            Find => self.open_search(),
+            FindReplace => {
+                self.open_search();
+                self.search.replace_visible = true;
+            }
+            FindUnderCursor => self.find_under_cursor(),
+            SelectNextOccurrence => self.select_next_occurrence(),
+            SearchInTabs => {
+                self.search.search_all_tabs = true;
+                self.open_search();
+            }
+
+            // View
+            CommandPalette => self.command_palette.toggle(),
+        }
+    }
+
     fn handle_native_menu_commands(&mut self) {
         let mut commands = Vec::new();
         if let Some(native_menu) = &self.native_menu {
@@ -341,6 +528,16 @@ impl PileApp {
             ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F3));
         if find_under_cursor {
             self.find_under_cursor();
+        }
+
+        let toggle_palette = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::P,
+            })
+        });
+        if toggle_palette {
+            self.command_palette.toggle();
         }
     }
 
@@ -929,6 +1126,12 @@ impl eframe::App for PileApp {
             .show(ctx, |ui| {
                 self.render_editor(ui);
             });
+
+        let mut cmd = None;
+        self.command_palette.show(ctx, &mut |c| cmd = Some(c));
+        if let Some(command) = cmd {
+            self.handle_command(command);
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

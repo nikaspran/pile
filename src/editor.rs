@@ -18,12 +18,18 @@ pub use geometry::{
 };
 use input::handle_input;
 use line_ops::*;
+pub use line_ops::{
+    delete_selected_lines, duplicate_selected_lines, indent_selection, join_selected_lines,
+    move_selected_lines_down, move_selected_lines_up, normalize_whitespace, outdent_selection,
+    reverse_selected_lines, sort_selected_lines, toggle_comments, trim_trailing_whitespace,
+};
 use motion::*;
 pub use multicursor::{
     add_all_matches, add_next_match, clear_secondary_cursors, delete_all,
     replace_selection_all, split_selection_into_lines,
 };
 use ops::*;
+pub use ops::{convert_case_all_selections, convert_case_selection, CaseType};
 pub use replace::{replace_all_matches, replace_match};
 
 const LINE_GUTTER_MIN_WIDTH: f32 = 44.0;

@@ -1,4 +1,6 @@
 mod app;
+mod command;
+mod command_palette;
 mod editor;
 mod model;
 mod native_menu;

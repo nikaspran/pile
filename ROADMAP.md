@@ -48,11 +48,11 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
   rope-native bounded-window search engine.
 - Completed: add search-in-tabs across all open scratch buffers.
 - Completed: add search result previews with quick navigation.
-- Add find-under-cursor and select-next-occurrence commands.
+- Completed: Add find-under-cursor and select-next-occurrence commands.
 
 ## Navigation and Tabs
 
-- Add command palette infrastructure for all commands.
+- Completed: Add command palette infrastructure for all commands.
 - Add quick tab switcher with fuzzy search across hundreds of buffers.
 - Add recently used tab ordering.
 - Add virtualized tab list rendering for large sessions.
