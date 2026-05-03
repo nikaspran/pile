@@ -3,6 +3,8 @@ pub enum NativeMenuCommand {
     NewScratch,
     CloseScratch,
     RenameTab,
+    Undo,
+    Redo,
 }
 
 #[cfg(target_os = "macos")]
@@ -18,6 +20,8 @@ mod platform {
     const NEW_SCRATCH_ID: &str = "pile.new_scratch";
     const CLOSE_SCRATCH_ID: &str = "pile.close_scratch";
     const RENAME_TAB_ID: &str = "pile.rename_tab";
+    const UNDO_ID: &str = "pile.undo";
+    const REDO_ID: &str = "pile.redo";
 
     pub struct NativeMenu {
         _menu: Menu,
@@ -43,6 +47,8 @@ mod platform {
                     NEW_SCRATCH_ID => return Some(NativeMenuCommand::NewScratch),
                     CLOSE_SCRATCH_ID => return Some(NativeMenuCommand::CloseScratch),
                     RENAME_TAB_ID => return Some(NativeMenuCommand::RenameTab),
+                    UNDO_ID => return Some(NativeMenuCommand::Undo),
+                    REDO_ID => return Some(NativeMenuCommand::Redo),
                     _ => {}
                 }
             }
@@ -103,12 +109,24 @@ mod platform {
             ],
         )?;
 
+        let undo_item = MenuItem::with_id(
+            UNDO_ID,
+            "Undo",
+            true,
+            Some("cmdorctrl+z".parse::<Accelerator>()?),
+        );
+        let redo_item = MenuItem::with_id(
+            REDO_ID,
+            "Redo",
+            true,
+            Some("cmdorctrl+shift+z".parse::<Accelerator>()?),
+        );
         let edit_menu = Submenu::with_items(
             "Edit",
             true,
             &[
-                &PredefinedMenuItem::undo(None),
-                &PredefinedMenuItem::redo(None),
+                &undo_item,
+                &redo_item,
                 &PredefinedMenuItem::separator(),
                 &PredefinedMenuItem::cut(None),
                 &PredefinedMenuItem::copy(None),

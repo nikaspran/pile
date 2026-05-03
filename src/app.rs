@@ -335,6 +335,16 @@ impl PileApp {
                 NativeMenuCommand::NewScratch => self.new_scratch(),
                 NativeMenuCommand::CloseScratch => self.close_active_scratch(),
                 NativeMenuCommand::RenameTab => self.begin_rename(self.state.active_document),
+                NativeMenuCommand::Undo => {
+                    if let Some(document) = self.state.active_document_mut() {
+                        document.undo();
+                    }
+                }
+                NativeMenuCommand::Redo => {
+                    if let Some(document) = self.state.active_document_mut() {
+                        document.redo();
+                    }
+                }
             }
         }
     }
@@ -358,6 +368,32 @@ impl PileApp {
         });
         if close_scratch {
             self.close_active_scratch();
+        }
+
+        let undo = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND,
+                logical_key: egui::Key::Z,
+            })
+        });
+        if undo {
+            if let Some(document) = self.state.active_document_mut() {
+                document.undo();
+                self.document_edited();
+            }
+        }
+
+        let redo = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::Z,
+            })
+        });
+        if redo {
+            if let Some(document) = self.state.active_document_mut() {
+                document.redo();
+                self.document_edited();
+            }
         }
 
         let open_replace = ctx.input_mut(|input| {
