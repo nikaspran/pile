@@ -16,6 +16,18 @@ pub enum LanguageId {
     Bash,
 }
 
+impl LanguageId {
+    /// Returns the line comment prefix for this language, if any.
+    pub fn comment_prefix(&self) -> Option<&'static str> {
+        match self {
+            LanguageId::PlainText | LanguageId::Markdown | LanguageId::Json => None,
+            LanguageId::Rust | LanguageId::JavaScript | LanguageId::TypeScript => Some("//"),
+            LanguageId::Python | LanguageId::Yaml | LanguageId::Bash => Some("#"),
+            LanguageId::Toml => Some("#"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct LanguageDetection {
     pub language: LanguageId,

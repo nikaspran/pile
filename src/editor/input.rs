@@ -3,13 +3,14 @@ use eframe::egui;
 use crate::model::Document;
 
 use super::{
-    EditorViewState, add_all_matches, add_next_match, backspace,
-    clear_secondary_cursors, contract_selection_by_bracket_pair,
-    contract_selection_by_indent_block, contract_selection_by_line,
-    contract_selection_by_word, delete, delete_all, delete_selected_lines,
-    duplicate_selected_lines, expand_selection_by_bracket_pair,
-    expand_selection_by_indent_block, expand_selection_by_line,
-    expand_selection_by_word, indent_selection, insert_newline_with_auto_indent,
+    EditorViewState, add_all_matches, add_next_match,
+    backspace_with_pair_deletion, clear_secondary_cursors,
+    contract_selection_by_bracket_pair, contract_selection_by_indent_block,
+    contract_selection_by_line, contract_selection_by_word, delete,
+    delete_all, delete_selected_lines,
+    expand_selection_by_bracket_pair, expand_selection_by_indent_block,
+    expand_selection_by_line, expand_selection_by_word, indent_selection,
+    insert_char_with_pairing, insert_newline_with_auto_indent,
     join_selected_lines, move_document_end, move_document_start, move_end,
     move_home, move_left, move_page, move_paragraph_down,
     move_paragraph_up, move_right, move_selected_lines_down,
@@ -17,6 +18,8 @@ use super::{
     move_word_right, outdent_selection, replace_selection_all,
     replace_selection_with, reverse_selected_lines, sort_selected_lines,
     split_selection_into_lines, trim_trailing_whitespace,
+    convert_case_all_selections, convert_case_selection, CaseType,
+    toggle_comments,
 };
 use super::multicursor::backspace_all;
 
@@ -43,6 +46,9 @@ pub(super) fn handle_input(
             egui::Event::Text(text) if !text.is_empty() && text != "\n" && text != "\r" => {
                 if document.selections.len() > 1 {
                     changed |= replace_selection_all(document, &text);
+                } else if text.chars().count() == 1 {
+                    let ch = text.chars().next().unwrap();
+                    changed |= insert_char_with_pairing(document, ch);
                 } else {
                     changed |= replace_selection_with(document, &text);
                 }
@@ -66,6 +72,15 @@ pub(super) fn handle_input(
                 }
                 egui::Key::J => {
                     changed |= join_selected_lines(document);
+                    view_state.preferred_column = None;
+                }
+                egui::Key::Slash => {
+                    // Toggle comments using detected language
+                    let comment_prefix = document
+                        .detect_syntax()
+                        .and_then(|d| d.language.comment_prefix())
+                        .unwrap_or("//");
+                    changed |= toggle_comments(document, comment_prefix);
                     view_state.preferred_column = None;
                 }
                 _ => {}
@@ -129,6 +144,38 @@ pub(super) fn handle_input(
                 pressed: true,
                 modifiers,
                 ..
+            } if modifiers.command && modifiers.ctrl => match key {
+                egui::Key::U => {
+                    if document.selections.len() > 1 {
+                        changed |= convert_case_all_selections(document, CaseType::Upper);
+                    } else {
+                        changed |= convert_case_selection(document, CaseType::Upper);
+                    }
+                    view_state.preferred_column = None;
+                }
+                egui::Key::L => {
+                    if document.selections.len() > 1 {
+                        changed |= convert_case_all_selections(document, CaseType::Lower);
+                    } else {
+                        changed |= convert_case_selection(document, CaseType::Lower);
+                    }
+                    view_state.preferred_column = None;
+                }
+                egui::Key::T => {
+                    if document.selections.len() > 1 {
+                        changed |= convert_case_all_selections(document, CaseType::Title);
+                    } else {
+                        changed |= convert_case_selection(document, CaseType::Title);
+                    }
+                    view_state.preferred_column = None;
+                }
+                _ => {}
+            },
+            egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
             } if !modifiers.command => {
                 let extend = modifiers.shift;
                 let word = modifiers.alt || modifiers.ctrl;
@@ -139,7 +186,7 @@ pub(super) fn handle_input(
                         changed |= if document.selections.len() > 1 {
                             backspace_all(document)
                         } else {
-                            backspace(document)
+                            backspace_with_pair_deletion(document)
                         };
                         view_state.preferred_column = None;
                         had_typing_event = true;

@@ -16,22 +16,22 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
   bracket pair, and indentation block scopes.
 - Completed: add multiple cursors as a first-class model with add-next-match, add-all-match,
   split-selection-into-lines, and rectangular/column selection.
-- In progress: add undo/redo backed by an edit history that understands grouped
+- Completed: add undo/redo backed by an edit history that understands grouped
   typing, paste, replace, and multi-cursor transactions. A single-range
-  `DocumentEdit` transaction API exists; multi-range transactions are still
-  needed for multiple cursors, replace-all, and line-operation cleanup.
+  `DocumentEdit` transaction API exists; multi-range transactions are now
+  implemented for multiple cursors, replace-all, and line-operation cleanup.
 - Completed: add indentation commands for Tab, Shift-Tab, and auto-indent on
   newline.
-- Add tab width settings, soft tabs, and whitespace normalization.
-- Add bracket and quote pairing with overwrite, skip-over, and delete-pair
+- Completed: Add tab width settings, soft tabs, and whitespace normalization.
+- Completed: Add bracket and quote pairing with overwrite, skip-over, and delete-pair
   behavior.
 - Completed: add duplicate-line and delete-line commands.
 - Completed: add move-line-up and move-line-down commands.
 - Completed: add join-lines command.
 - Completed: add sort-lines command.
 - Completed: add remaining line operations: reverse lines and trim trailing whitespace.
-- Add case conversion commands for selections and cursors.
-- Add comment toggling for detected code regions.
+- Completed: Add case conversion commands for selections and cursors.
+- Completed: Add comment toggling for detected code regions.
 
 ## Search and Replace
 

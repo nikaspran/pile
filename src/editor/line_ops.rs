@@ -212,6 +212,129 @@ pub fn trim_trailing_whitespace(document: &mut Document) -> bool {
     true
 }
 
+pub fn normalize_whitespace(document: &mut Document) -> bool {
+    if document.rope.byte_len() == 0 {
+        return false;
+    }
+
+    let original = document.text();
+    let tab_width = document.tab_width;
+    let use_soft_tabs = document.use_soft_tabs;
+
+    let lines: Vec<&str> = original.split('\n').collect();
+    let mut changed = false;
+    let mut result = String::new();
+
+    for (i, line) in lines.iter().enumerate() {
+        let mut new_line = String::new();
+        let mut chars = line.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            if ch == '\t' && use_soft_tabs {
+                // Convert tab to spaces
+                let spaces = " ".repeat(tab_width);
+                new_line.push_str(&spaces);
+                changed = true;
+            } else if ch == ' ' && !use_soft_tabs {
+                // Check if this is a tab-width sequence of spaces
+                let mut space_count = 1;
+                while chars.peek() == Some(&' ') {
+                    space_count += 1;
+                    chars.next();
+                }
+                if space_count >= tab_width {
+                    // Convert spaces to tab
+                    new_line.push('\t');
+                    changed = true;
+                } else {
+                    // Keep the spaces
+                    for _ in 0..space_count {
+                        new_line.push(' ');
+                    }
+                }
+            } else {
+                new_line.push(ch);
+            }
+        }
+
+        result.push_str(&new_line);
+        if i < lines.len() - 1 {
+            result.push('\n');
+        }
+    }
+
+    if !changed {
+        return false;
+    }
+
+    let selection = document.selections[0];
+    let original_text = document.text();
+    document.rope = Rope::from(result);
+    document.revision += 1;
+
+    record_full_document_undo(document, original_text, selection);
+    true
+}
+
+pub fn toggle_comments(document: &mut Document, comment_prefix: &str) -> bool {
+    if document.rope.byte_len() == 0 {
+        return false;
+    }
+
+    let selection = primary_selection(document);
+    let (sel_start, sel_end) = selection_range(selection);
+    let (start, end) = selected_full_line_bounds(&document.rope, sel_start, sel_end);
+
+    let original = document.rope.byte_slice(start..end).to_string();
+    let has_trailing_newline = original.ends_with('\n');
+    let body = original.strip_suffix('\n').unwrap_or(&original);
+
+    let lines: Vec<&str> = body.split('\n').collect();
+    let mut result = String::new();
+    let mut toggled = false;
+
+    for (i, line) in lines.iter().enumerate() {
+        if line.starts_with(comment_prefix) {
+            // Remove comment prefix
+            result.push_str(&line[comment_prefix.len()..]);
+            toggled = true;
+        } else {
+            // Add comment prefix
+            result.push_str(comment_prefix);
+            result.push_str(line);
+            toggled = true;
+        }
+
+        if i < lines.len() - 1 {
+            result.push('\n');
+        }
+    }
+
+    if !toggled {
+        return false;
+    }
+
+    if has_trailing_newline {
+        result.push('\n');
+    }
+
+    if result == original {
+        return false;
+    }
+
+    let replacement_len = result.len();
+    document.apply_grouped_edit(DocumentEdit {
+        range: start..end,
+        inserted_text: result,
+        selections_before: vec![selection],
+        selections_after: vec![Selection {
+            anchor: start,
+            head: start + replacement_len,
+        }],
+    });
+    true
+}
+
 pub(super) fn transform_selected_lines<F>(document: &mut Document, transform: F) -> bool
 where
     F: FnOnce(&mut Vec<String>),
@@ -417,17 +540,20 @@ pub(super) fn change_line_indentation(document: &mut Document, change: IndentCha
                 return false;
             }
 
+            let indent = indent_string(document.tab_width, document.use_soft_tabs);
+            let indent_len = indent.len();
+
             let original_text = document.text();
             let mut adjusted_selection = selection;
             let mut shift = 0;
             for line_start in line_starts {
                 let insert_at = line_start + shift;
-                document.rope.insert(insert_at, "    ");
+                document.rope.insert(insert_at, &indent);
                 adjusted_selection.anchor =
-                    adjust_offset_after_insert(adjusted_selection.anchor, insert_at, 4);
+                    adjust_offset_after_insert(adjusted_selection.anchor, insert_at, indent_len);
                 adjusted_selection.head =
-                    adjust_offset_after_insert(adjusted_selection.head, insert_at, 4);
-                shift += 4;
+                    adjust_offset_after_insert(adjusted_selection.head, insert_at, indent_len);
+                shift += indent_len;
             }
 
             record_full_document_undo(document, original_text, selection);
@@ -460,6 +586,14 @@ pub(super) fn change_line_indentation(document: &mut Document, change: IndentCha
             document.revision += 1;
             true
         }
+    }
+}
+
+fn indent_string(tab_width: usize, use_soft_tabs: bool) -> String {
+    if use_soft_tabs {
+        " ".repeat(tab_width)
+    } else {
+        "\t".to_owned()
     }
 }
 

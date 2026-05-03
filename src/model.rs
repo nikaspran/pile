@@ -2,6 +2,8 @@ use crop::{Rope, RopeSlice};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
+use crate::syntax::{LanguageDetection, LanguageId};
+
 pub type DocumentId = Uuid;
 
 const FALLBACK_TITLE: &str = "Untitled";
@@ -107,6 +109,10 @@ pub struct Document {
     pub multi_cursor_query: Option<String>,
     #[serde(skip, default = "UndoState::default")]
     undo: UndoState,
+    /// Tab width in spaces (default 4)
+    pub tab_width: usize,
+    /// Whether to use soft tabs (spaces) instead of tab characters
+    pub use_soft_tabs: bool,
 }
 
 mod rope_serde {
@@ -140,6 +146,8 @@ impl Document {
             occurrence_selections: Vec::new(),
             multi_cursor_query: None,
             undo: UndoState::default(),
+            tab_width: 4,
+            use_soft_tabs: true,
         }
     }
 
@@ -171,6 +179,11 @@ impl Document {
     pub fn has_manual_title(&self) -> bool {
         let trimmed = self.title_hint.trim();
         !trimmed.is_empty() && !is_generated_title_hint(trimmed)
+    }
+
+    pub fn detect_syntax(&self) -> Option<LanguageDetection> {
+        let registry = crate::syntax::LanguageRegistry;
+        Some(registry.detect_rope(&self.rope))
     }
 
     pub fn commit_undo_group(&mut self) {
@@ -221,20 +234,51 @@ impl Document {
         self.apply_edit(edit);
     }
 
-    pub fn record_full_document_replacement(
-        &mut self,
-        original_text: String,
-        selection_before: Selection,
-    ) {
-        self.undo.commit_and_start_new_group();
-        self.undo.record(EditTransaction {
-            start: 0,
-            end: original_text.len(),
-            deleted_text: original_text,
-            inserted_text: self.text(),
-            selections_before: vec![selection_before],
-        });
-        self.undo.commit_group();
+    pub fn apply_multi_edit(&mut self, edits: Vec<DocumentEdit>) {
+        if edits.is_empty() {
+            return;
+        }
+
+        let mut transactions = Vec::new();
+        let mut offset: isize = 0;
+
+        // Apply edits from last to first to preserve positions.
+        // Each edit's range was computed in the original document coordinates.
+        // As we apply edits from the end of the document backwards, we accumulate
+        // an offset that tells us how much the document has shifted for earlier edits.
+        for edit in edits.iter().rev() {
+            let adjusted_start = (edit.range.start as isize + offset) as usize;
+            let adjusted_end = (edit.range.end as isize + offset) as usize;
+
+            let deleted_text = self.rope.byte_slice(adjusted_start..adjusted_end).to_string();
+
+            // Store the ADJUSTED position (where edit was actually applied).
+            // This is the correct position to use during undo.
+            transactions.push(EditTransaction {
+                start: adjusted_start,
+                end: adjusted_end,
+                deleted_text,
+                inserted_text: edit.inserted_text.clone(),
+                selections_before: edit.selections_before.clone(),
+            });
+
+            // Apply the edit
+            if adjusted_start != adjusted_end {
+                self.rope.delete(adjusted_start..adjusted_end);
+            }
+            if !edit.inserted_text.is_empty() {
+                self.rope.insert(adjusted_start, &edit.inserted_text);
+            }
+
+            // Update offset: the document has changed by (inserted - deleted) bytes
+            offset += edit.inserted_text.len() as isize
+                - (edit.range.end as isize - edit.range.start as isize);
+        }
+
+        // Transactions are already in application order (last edit first in the vec).
+        self.undo.record_multi(transactions);
+        self.selections = edits.last().unwrap().selections_after.clone();
+        self.revision += 1;
     }
 
     pub fn can_undo(&self) -> bool {
@@ -250,12 +294,18 @@ impl Document {
             return false;
         };
         let group = group.clone();
+
+        // Undo transactions in REVERSE order (last applied = first undone).
+        // Each transaction stores the ADJUSTED position (where the edit was
+        // actually applied). Since we undo in reverse order, each undo step
+        // returns us to the document state when that edit was applied,
+        // so the stored position is valid.
         for txn in group.iter().rev() {
             self.rope
                 .delete(txn.start..txn.start + txn.inserted_text.len());
             self.rope.insert(txn.start, &txn.deleted_text);
         }
-        if let Some(txn) = group.first() {
+        if let Some(txn) = group.last() {
             self.selections = txn.selections_before.clone();
         }
         self.revision += 1;
@@ -267,8 +317,14 @@ impl Document {
             return false;
         };
         let group = group.clone();
+
+        // Redo transactions in order (reverse of how they were undone).
+        // Since undo() processed transactions in reverse, redo processes in order.
+        // The stored position is valid because each redo step returns us
+        // to that document state.
         for txn in group.iter() {
-            self.rope.delete(txn.start..txn.end);
+            self.rope
+                .delete(txn.start..txn.start + txn.deleted_text.len());
             self.rope.insert(txn.start, &txn.inserted_text);
         }
         if let Some(txn) = group.last() {
@@ -277,6 +333,22 @@ impl Document {
         }
         self.revision += 1;
         true
+    }
+
+    pub fn record_full_document_replacement(
+        &mut self,
+        original_text: String,
+        selection_before: Selection,
+    ) {
+        self.undo.commit_and_start_new_group();
+        self.undo.record(EditTransaction {
+            start: 0,
+            end: original_text.len(),
+            deleted_text: original_text,
+            inserted_text: self.text(),
+            selections_before: vec![selection_before],
+        });
+        self.undo.commit_group();
     }
 }
 
@@ -389,6 +461,18 @@ impl UndoState {
             self.typing_group.push(txn);
         } else {
             self.undo_stack.push(vec![txn]);
+            self.redo_stack.clear();
+        }
+    }
+
+    pub fn record_multi(&mut self, txns: Vec<EditTransaction>) {
+        if txns.is_empty() {
+            return;
+        }
+        if self.is_typing {
+            self.typing_group.extend(txns);
+        } else {
+            self.undo_stack.push(txns);
             self.redo_stack.clear();
         }
     }
@@ -700,5 +784,102 @@ mod tests {
         undo.clear();
         assert!(!undo.can_undo());
         assert!(!undo.can_redo());
+    }
+
+    #[test]
+    fn multi_edit_creates_single_undo_group() {
+        let mut document = Document::new_untitled(1);
+        document.replace_text("hello world");
+        document.revision = 0;
+
+        // Simulate multi-cursor: replace "hello" and "world" with "hi" and "there"
+        let edits = vec![
+            DocumentEdit {
+                range: 0..5,
+                inserted_text: "hi".to_owned(),
+                selections_before: vec![Selection::caret(0)],
+                selections_after: vec![Selection::caret(2)],
+            },
+            DocumentEdit {
+                range: 6..11,
+                inserted_text: "there".to_owned(),
+                selections_before: vec![Selection::caret(6)],
+                selections_after: vec![Selection::caret(8)],
+            },
+        ];
+
+        document.apply_multi_edit(edits);
+        assert_eq!(document.text(), "hi there");
+        assert_eq!(document.revision, 1);
+
+        // Single undo should undo both changes
+        assert!(document.undo());
+        assert_eq!(document.text(), "hello world");
+        assert_eq!(document.revision, 2);
+    }
+
+    #[test]
+    fn multi_edit_undo_single_edit() {
+        let mut document = Document::new_untitled(1);
+        document.replace_text("hello");
+        document.revision = 0;
+
+        // Single edit via multi_edit
+        let edits = vec![
+            DocumentEdit {
+                range: 0..5,
+                inserted_text: "hi".to_owned(),
+                selections_before: vec![Selection::caret(0)],
+                selections_after: vec![Selection::caret(2)],
+            },
+        ];
+
+        document.apply_multi_edit(edits);
+        assert_eq!(document.text(), "hi");
+
+        // Undo should work
+        assert!(document.undo());
+        assert_eq!(document.text(), "hello");
+    }
+
+    #[test]
+    fn multi_edit_undo_restores_all_selections() {
+        let mut document = Document::new_untitled(1);
+        document.replace_text("a b c");
+        document.revision = 0;
+
+        let sel1 = Selection { anchor: 0, head: 1 };
+        let sel2 = Selection { anchor: 2, head: 3 };
+        let sel3 = Selection { anchor: 4, head: 5 };
+
+        let edits = vec![
+            DocumentEdit {
+                range: 0..1,
+                inserted_text: "x".to_owned(),
+                selections_before: vec![sel1],
+                selections_after: vec![Selection::caret(1)],
+            },
+            DocumentEdit {
+                range: 2..3,
+                inserted_text: "y".to_owned(),
+                selections_before: vec![sel2],
+                selections_after: vec![Selection::caret(3)],
+            },
+            DocumentEdit {
+                range: 4..5,
+                inserted_text: "z".to_owned(),
+                selections_before: vec![sel3],
+                selections_after: vec![Selection::caret(5)],
+            },
+        ];
+
+        document.apply_multi_edit(edits);
+        assert_eq!(document.text(), "x y z");
+
+        // Undo should restore original selections
+        assert!(document.undo());
+        assert_eq!(document.text(), "a b c");
+        assert_eq!(document.selections.len(), 1);
+        assert_eq!(document.selections[0], sel1);
     }
 }
