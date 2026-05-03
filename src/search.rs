@@ -1,6 +1,10 @@
 use crop::Rope;
 use regex::Regex;
-use uuid::Uuid;
+
+use crate::{
+    editor::word_at_selection,
+    model::{Document, DocumentId, Selection},
+};
 
 const SEARCH_WINDOW_BYTES: usize = 16 * 1024;
 
@@ -19,10 +23,209 @@ pub struct SearchMatch {
 
 #[derive(Clone, Debug)]
 pub struct GlobalSearchResult {
-    pub document_id: Uuid,
+    pub document_id: DocumentId,
     pub document_title: String,
     pub match_start: usize,
     pub match_end: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SearchState {
+    pub visible: bool,
+    pub replace_visible: bool,
+    pub query: String,
+    pub replacement: String,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+    pub use_regex: bool,
+    pub search_all_tabs: bool,
+    pub matches: Vec<SearchMatch>,
+    pub current_match: Option<usize>,
+    pub focus_pending: bool,
+    pub selection_pending: bool,
+    pub occurrence_selections: Vec<Selection>,
+    pub global_results: Vec<GlobalSearchResult>,
+    pub global_index: Option<usize>,
+}
+
+impl SearchState {
+    pub fn recompute(&mut self, rope: &Rope, documents: &[Document]) {
+        let old_range = self
+            .current_match
+            .and_then(|index| self.matches.get(index).copied());
+        let options = self.options();
+
+        if self.search_all_tabs {
+            self.global_results = find_matches_in_documents(documents, &self.query, options);
+            self.matches.clear();
+            self.current_match = None;
+            self.global_index = if self.global_results.is_empty() {
+                None
+            } else if let Some(old) = old_range {
+                self.global_results
+                    .iter()
+                    .position(|r| r.match_start == old.start && r.match_end == old.end)
+                    .or(Some(0))
+            } else {
+                Some(0)
+            };
+        } else {
+            self.matches = find_matches(rope, &self.query, options);
+            self.global_results.clear();
+            self.global_index = None;
+            self.current_match = if self.matches.is_empty() {
+                None
+            } else if let Some(old_range) = old_range {
+                self.matches
+                    .iter()
+                    .position(|range| *range == old_range)
+                    .or(Some(0))
+            } else {
+                Some(0)
+            };
+        }
+    }
+
+    pub fn options(&self) -> SearchOptions {
+        SearchOptions {
+            case_sensitive: self.case_sensitive,
+            whole_word: self.whole_word,
+            use_regex: self.use_regex,
+        }
+    }
+
+    pub fn replacement_regex(&self) -> Option<Regex> {
+        self.use_regex
+            .then(|| Regex::new(&self.query).ok())
+            .flatten()
+    }
+
+    pub fn has_matches(&self) -> bool {
+        if self.search_all_tabs {
+            !self.global_results.is_empty()
+        } else {
+            !self.matches.is_empty()
+        }
+    }
+
+    pub fn current_global_result(&self) -> Option<&GlobalSearchResult> {
+        self.global_index
+            .and_then(|index| self.global_results.get(index))
+    }
+
+    pub fn current_match(&self) -> Option<SearchMatch> {
+        self.current_match
+            .and_then(|index| self.matches.get(index).copied())
+    }
+
+    pub fn current_result_title(&self) -> Option<&str> {
+        self.current_global_result()
+            .map(|result| result.document_title.as_str())
+    }
+
+    pub fn matches_in_document(&self, document_id: DocumentId) -> Vec<SearchMatch> {
+        self.global_results
+            .iter()
+            .filter(|result| result.document_id == document_id)
+            .map(|result| SearchMatch {
+                start: result.match_start,
+                end: result.match_end,
+            })
+            .collect()
+    }
+
+    pub fn next_match(&mut self) {
+        if self.search_all_tabs {
+            self.global_index = advance_match(self.global_index, self.global_results.len(), 1);
+        } else {
+            self.current_match = advance_match(self.current_match, self.matches.len(), 1);
+        }
+        self.selection_pending = true;
+    }
+
+    pub fn previous_match(&mut self) {
+        if self.search_all_tabs {
+            self.global_index = advance_match(self.global_index, self.global_results.len(), -1);
+        } else {
+            self.current_match = advance_match(self.current_match, self.matches.len(), -1);
+        }
+        self.selection_pending = true;
+    }
+
+    pub fn current_label(&self) -> String {
+        if self.search_all_tabs {
+            match (self.global_index, self.global_results.len()) {
+                (_, 0) => "0 / 0".to_owned(),
+                (Some(index), total) => format!("{} / {total}", index + 1),
+                (None, total) => format!("0 / {total}"),
+            }
+        } else {
+            match (self.current_match, self.matches.len()) {
+                (_, 0) => "0 / 0".to_owned(),
+                (Some(index), total) => format!("{} / {total}", index + 1),
+                (None, total) => format!("0 / {total}"),
+            }
+        }
+    }
+
+    pub fn select_next_occurrence(&mut self, rope: &Rope, primary: Selection) {
+        let query = if let Some((start, end)) = word_at_selection(rope, primary) {
+            let text = rope.byte_slice(start..end).to_string();
+            if text.is_empty() {
+                return;
+            }
+            text
+        } else {
+            return;
+        };
+
+        if self.occurrence_selections.is_empty() {
+            self.occurrence_selections.push(primary);
+            self.query = query.clone();
+        }
+
+        let matches = find_matches(rope, &query, self.options());
+
+        let all_selected: std::collections::HashSet<_> = self
+            .occurrence_selections
+            .iter()
+            .map(|s| (s.anchor.min(s.head), s.anchor.max(s.head)))
+            .collect();
+
+        let next = matches
+            .iter()
+            .find(|m| !all_selected.contains(&(m.start, m.end)))
+            .copied();
+
+        if let Some(m) = next {
+            self.occurrence_selections.push(Selection {
+                anchor: m.start,
+                head: m.end,
+            });
+        }
+    }
+
+    pub fn find_under_cursor(&mut self, rope: &Rope, primary: Selection) {
+        self.occurrence_selections.clear();
+        let (start, end) = if let Some((s, e)) = word_at_selection(rope, primary) {
+            (s, e)
+        } else {
+            return;
+        };
+        if start == end {
+            return;
+        }
+        let text = rope.byte_slice(start..end).to_string();
+        if text.is_empty() {
+            return;
+        }
+        self.query = text;
+        self.recompute(rope, &[]);
+        self.occurrence_selections.push(Selection {
+            anchor: start,
+            head: end,
+        });
+    }
 }
 
 pub fn find_matches(rope: &Rope, query: &str, options: SearchOptions) -> Vec<SearchMatch> {
@@ -100,45 +303,16 @@ fn find_regex_matches(rope: &Rope, query: &str, options: SearchOptions) -> Vec<S
         return Vec::new();
     };
 
-    let rope_len = rope.byte_len();
+    let text = rope.to_string();
+    let rope_len = text.len();
     let mut matches = Vec::new();
-    let window_size = SEARCH_WINDOW_BYTES;
-    let mut window_start: usize = 0;
 
-    while window_start < rope_len {
-        let window_end = floor_char_boundary(rope, (window_start + window_size).min(rope_len));
-        let window_end = if window_end <= window_start {
-            next_char_boundary(rope, window_start)
-        } else {
-            window_end
-        };
-
-        let window = rope.byte_slice(window_start..window_end).to_string();
-        let mut last_end: usize = 0;
-
-        for capture in regex.find_iter(&window) {
-            let local_start = capture.start();
-            let local_end = capture.end();
-
-            if local_start < last_end {
-                continue;
-            }
-            last_end = local_end;
-
-            let start = window_start + local_start;
-            let end = window_start + local_end;
-
-            if (!options.whole_word || is_whole_word_match(rope, start, end))
-                && end <= rope_len
-            {
-                matches.push(SearchMatch { start, end });
-            }
+    for capture in regex.find_iter(&text) {
+        let start = capture.start();
+        let end = capture.end();
+        if (!options.whole_word || is_whole_word_match(rope, start, end)) && end <= rope_len {
+            matches.push(SearchMatch { start, end });
         }
-
-        if window_end >= rope_len {
-            break;
-        }
-        window_start = window_end;
     }
 
     matches
@@ -159,7 +333,7 @@ pub fn advance_match(current: Option<usize>, total: usize, delta: isize) -> Opti
 }
 
 pub fn find_matches_in_documents(
-    documents: &[crate::model::Document],
+    documents: &[Document],
     query: &str,
     options: SearchOptions,
 ) -> Vec<GlobalSearchResult> {
@@ -170,7 +344,7 @@ pub fn find_matches_in_documents(
         for m in matches {
             results.push(GlobalSearchResult {
                 document_id: document.id,
-                document_title: document.title_hint.clone(),
+                document_title: document.display_title(),
                 match_start: m.start,
                 match_end: m.end,
             });
@@ -214,6 +388,10 @@ fn next_char_boundary(rope: &Rope, offset: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn search_state() -> SearchState {
+        SearchState::default()
+    }
 
     fn options(case_sensitive: bool, whole_word: bool) -> SearchOptions {
         SearchOptions {
@@ -297,6 +475,52 @@ mod tests {
     }
 
     #[test]
+    fn select_next_occurrence_adds_first_word() {
+        let rope = Rope::from("hello world hello");
+        let primary = Selection { anchor: 0, head: 5 };
+        let mut state = search_state();
+
+        state.select_next_occurrence(&rope, primary);
+
+        assert_eq!(state.occurrence_selections.len(), 2);
+        assert_eq!(state.occurrence_selections[0], primary);
+        assert_eq!(state.occurrence_selections[1].anchor, 12);
+        assert_eq!(state.occurrence_selections[1].head, 17);
+    }
+
+    #[test]
+    fn find_under_cursor_selects_word() {
+        let rope = Rope::from("hello world hello");
+        let primary = Selection::caret(0);
+        let mut state = search_state();
+
+        state.find_under_cursor(&rope, primary);
+
+        assert_eq!(state.occurrence_selections.len(), 1);
+        let sel = state.occurrence_selections[0];
+        assert_eq!((sel.anchor, sel.head), (0, 5));
+        assert_eq!(state.query, "hello");
+    }
+
+    #[test]
+    fn find_under_cursor_clears_previous() {
+        let rope = Rope::from("hello world");
+        let primary = Selection::caret(6);
+        let mut state = search_state();
+        state.query = "previous".to_owned();
+        state
+            .occurrence_selections
+            .push(Selection { anchor: 0, head: 5 });
+
+        state.find_under_cursor(&rope, primary);
+
+        assert_eq!(state.occurrence_selections.len(), 1);
+        let sel = state.occurrence_selections[0];
+        assert_eq!((sel.anchor, sel.head), (6, 11));
+        assert_eq!(state.query, "world");
+    }
+
+    #[test]
     fn search_returns_non_overlapping_matches() {
         let matches = find_matches(&Rope::from("aaaa"), "aa", options(true, false));
 
@@ -358,6 +582,29 @@ mod tests {
         let prefix = "a".repeat(SEARCH_WINDOW_BYTES - 2);
         let text = format!("{prefix}needle");
         let matches = find_matches(&Rope::from(text), "needle", options(true, false));
+
+        assert_eq!(
+            matches,
+            vec![SearchMatch {
+                start: SEARCH_WINDOW_BYTES - 2,
+                end: SEARCH_WINDOW_BYTES + 4
+            }]
+        );
+    }
+
+    #[test]
+    fn regex_search_finds_matches_across_window_boundaries() {
+        let prefix = "a".repeat(SEARCH_WINDOW_BYTES - 2);
+        let text = format!("{prefix}needle");
+        let matches = find_matches(
+            &Rope::from(text),
+            "ne+dle",
+            SearchOptions {
+                case_sensitive: true,
+                whole_word: false,
+                use_regex: true,
+            },
+        );
 
         assert_eq!(
             matches,

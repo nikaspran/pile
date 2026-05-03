@@ -16,8 +16,10 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
   bracket pair, and indentation block scopes.
 - Add multiple cursors as a first-class model with add-next-match, add-all-match,
   split-selection-into-lines, and rectangular/column selection.
-- Add undo/redo backed by an edit history that understands grouped typing,
-  paste, replace, and multi-cursor transactions.
+- In progress: add undo/redo backed by an edit history that understands grouped
+  typing, paste, replace, and multi-cursor transactions. A single-range
+  `DocumentEdit` transaction API exists; multi-range transactions are still
+  needed for multiple cursors, replace-all, and line-operation cleanup.
 - Completed: add indentation commands for Tab, Shift-Tab, and auto-indent on
   newline.
 - Add tab width settings, soft tabs, and whitespace normalization.
@@ -147,7 +149,8 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 ## Documentation
 
-- Document the command model and keybinding conventions.
+- In progress: document the command model and keybinding conventions.
+- Completed: document the current editor split and transaction direction.
 - Document persistence guarantees and recovery behavior.
 - Document language detection and injection architecture.
 - Document performance invariants for future contributors and agents.

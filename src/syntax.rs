@@ -1,3 +1,5 @@
+use crop::Rope;
+
 use content_inspector::{ContentType, inspect};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -24,6 +26,11 @@ pub struct LanguageDetection {
 pub struct LanguageRegistry;
 
 impl LanguageRegistry {
+    pub fn detect_rope(&self, rope: &Rope) -> LanguageDetection {
+        let text = bounded_rope_sample(rope);
+        self.detect(&text)
+    }
+
     pub fn detect(&self, text: &str) -> LanguageDetection {
         if matches!(inspect(text.as_bytes()), ContentType::BINARY) {
             return LanguageDetection {
@@ -117,6 +124,20 @@ fn bounded_sample(text: &str) -> &str {
             .unwrap_or(0);
         &text[..boundary]
     }
+}
+
+fn bounded_rope_sample(rope: &Rope) -> String {
+    let max = 16 * 1024;
+    let end = floor_char_boundary(rope, rope.byte_len().min(max));
+    rope.byte_slice(..end).to_string()
+}
+
+fn floor_char_boundary(rope: &Rope, mut offset: usize) -> usize {
+    offset = offset.min(rope.byte_len());
+    while offset > 0 && !rope.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
 }
 
 fn looks_like_markdown(text: &str) -> bool {

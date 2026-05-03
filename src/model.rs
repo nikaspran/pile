@@ -29,15 +29,23 @@ impl AppState {
     }
 
     pub fn active_document(&self) -> Option<&Document> {
-        self.documents
-            .iter()
-            .find(|document| document.id == self.active_document)
+        self.document(self.active_document)
     }
 
     pub fn active_document_mut(&mut self) -> Option<&mut Document> {
+        self.document_mut(self.active_document)
+    }
+
+    pub fn document(&self, document_id: DocumentId) -> Option<&Document> {
+        self.documents
+            .iter()
+            .find(|document| document.id == document_id)
+    }
+
+    pub fn document_mut(&mut self, document_id: DocumentId) -> Option<&mut Document> {
         self.documents
             .iter_mut()
-            .find(|document| document.id == self.active_document)
+            .find(|document| document.id == document_id)
     }
 
     pub fn open_untitled(&mut self) -> DocumentId {
@@ -74,9 +82,12 @@ impl AppState {
         });
     }
 
-    pub fn set_active(&mut self, document_id: DocumentId) {
-        if self.tab_order.contains(&document_id) {
+    pub fn set_active(&mut self, document_id: DocumentId) -> bool {
+        if self.tab_order.contains(&document_id) && self.document(document_id).is_some() {
             self.active_document = document_id;
+            true
+        } else {
+            false
         }
     }
 }
@@ -156,10 +167,6 @@ impl Document {
         !trimmed.is_empty() && !is_generated_title_hint(trimmed)
     }
 
-    pub fn begin_undo_group(&mut self) {
-        self.undo.begin_group();
-    }
-
     pub fn commit_undo_group(&mut self) {
         self.undo.commit_group();
     }
@@ -176,6 +183,54 @@ impl Document {
         self.undo.record(txn);
     }
 
+    pub fn apply_edit(&mut self, edit: DocumentEdit) {
+        let deleted_text = self.rope.byte_slice(edit.range.clone()).to_string();
+        self.undo.record(EditTransaction {
+            start: edit.range.start,
+            end: edit.range.end,
+            deleted_text,
+            inserted_text: edit.inserted_text.clone(),
+            selections_before: edit.selections_before,
+        });
+
+        if edit.range.start != edit.range.end {
+            self.rope.delete(edit.range.clone());
+        }
+        if !edit.inserted_text.is_empty() {
+            self.rope.insert(edit.range.start, &edit.inserted_text);
+        }
+
+        self.selections = edit.selections_after;
+        self.revision += 1;
+    }
+
+    pub fn apply_grouped_edit(&mut self, edit: DocumentEdit) {
+        self.undo.commit_and_start_new_group();
+        self.apply_edit(edit);
+        self.undo.commit_group();
+    }
+
+    pub fn apply_continuing_edit(&mut self, edit: DocumentEdit) {
+        self.undo.begin_group();
+        self.apply_edit(edit);
+    }
+
+    pub fn record_full_document_replacement(
+        &mut self,
+        original_text: String,
+        selection_before: Selection,
+    ) {
+        self.undo.commit_and_start_new_group();
+        self.undo.record(EditTransaction {
+            start: 0,
+            end: original_text.len(),
+            deleted_text: original_text,
+            inserted_text: self.text(),
+            selections_before: vec![selection_before],
+        });
+        self.undo.commit_group();
+    }
+
     pub fn can_undo(&self) -> bool {
         self.undo.can_undo()
     }
@@ -190,7 +245,8 @@ impl Document {
         };
         let group = group.clone();
         for txn in group.iter().rev() {
-            self.rope.delete(txn.start..txn.start + txn.inserted_text.len());
+            self.rope
+                .delete(txn.start..txn.start + txn.inserted_text.len());
             self.rope.insert(txn.start, &txn.deleted_text);
         }
         if let Some(txn) = group.first() {
@@ -216,7 +272,29 @@ impl Document {
         self.revision += 1;
         true
     }
+}
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DocumentEdit {
+    pub range: std::ops::Range<usize>,
+    pub inserted_text: String,
+    pub selections_before: Vec<Selection>,
+    pub selections_after: Vec<Selection>,
+}
+
+impl DocumentEdit {
+    pub fn replace_selection(
+        selection: Selection,
+        range: std::ops::Range<usize>,
+        text: &str,
+    ) -> Self {
+        Self {
+            selections_before: vec![selection],
+            selections_after: vec![Selection::caret(range.start + text.len())],
+            range,
+            inserted_text: text.to_owned(),
+        }
+    }
 }
 fn title_from_line(line: RopeSlice<'_>) -> Option<String> {
     let mut chars = line.chars().skip_while(|char| char.is_whitespace());
@@ -402,6 +480,21 @@ mod tests {
     }
 
     #[test]
+    fn set_active_ignores_unknown_documents() {
+        let mut state = AppState::empty();
+        let active = state.active_document;
+
+        assert!(!state.set_active(Uuid::new_v4()));
+        assert_eq!(state.active_document, active);
+
+        let second = state.open_untitled();
+        assert!(state.set_active(active));
+        assert_eq!(state.active_document, active);
+        assert!(state.set_active(second));
+        assert_eq!(state.active_document, second);
+    }
+
+    #[test]
     fn document_title_tracks_first_non_empty_line_until_renamed() {
         let mut document = Document::new_untitled(1);
         assert_eq!(document.display_title(), "Untitled");
@@ -417,6 +510,67 @@ mod tests {
 
         document.rename("");
         assert_eq!(document.display_title(), "Different first line");
+    }
+
+    #[test]
+    fn document_edit_replaces_range_and_records_undo() {
+        let mut document = Document::new_untitled(1);
+        document.replace_text("hello world");
+        document.revision = 0;
+        let selection = Selection {
+            anchor: 6,
+            head: 11,
+        };
+
+        document.apply_grouped_edit(DocumentEdit::replace_selection(selection, 6..11, "pile"));
+
+        assert_eq!(document.text(), "hello pile");
+        assert_eq!(document.selections, vec![Selection::caret(10)]);
+        assert_eq!(document.revision, 1);
+
+        assert!(document.undo());
+        assert_eq!(document.text(), "hello world");
+        assert_eq!(document.selections, vec![selection]);
+    }
+
+    #[test]
+    fn continuing_edits_share_undo_group_until_committed() {
+        let mut document = Document::new_untitled(1);
+
+        document.apply_continuing_edit(DocumentEdit::replace_selection(
+            Selection::caret(0),
+            0..0,
+            "a",
+        ));
+        document.apply_continuing_edit(DocumentEdit::replace_selection(
+            Selection::caret(1),
+            1..1,
+            "b",
+        ));
+        document.commit_undo_group();
+
+        assert_eq!(document.text(), "ab");
+        assert!(document.undo());
+        assert_eq!(document.text(), "");
+    }
+
+    #[test]
+    fn full_document_replacement_records_single_undo_step() {
+        let mut document = Document::new_untitled(1);
+        document.replace_text("one\ntwo");
+        document.revision = 0;
+        let original = document.text();
+        let selection = Selection::caret(0);
+
+        document.rope.delete(0..document.rope.byte_len());
+        document.rope.insert(0, "two\none");
+        document.record_full_document_replacement(original, selection);
+        document.revision += 1;
+
+        assert_eq!(document.text(), "two\none");
+        assert!(document.undo());
+        assert_eq!(document.text(), "one\ntwo");
+        assert_eq!(document.selections, vec![selection]);
     }
 
     #[test]

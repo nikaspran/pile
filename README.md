@@ -26,3 +26,8 @@ debounced background session saver, content-detection scaffolding, and shared
 agent documentation. The editing surface is intentionally plain for now; richer
 editor behaviors should build on the same state and persistence boundaries
 rather than replacing them.
+
+## Contributor Notes
+
+Architecture notes for the current editor split, app command flow, search state,
+and edit transaction direction live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

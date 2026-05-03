@@ -1,9 +1,7 @@
 use std::time::Duration;
 
-use crop::Rope;
 use crossbeam_channel::{Sender, bounded};
 use eframe::egui;
-use regex::Regex;
 use tracing::{info, warn};
 
 use crate::{
@@ -13,170 +11,28 @@ use crate::{
     persistence::{
         SaveMsg, SaveWorker, default_session_path, load_session, quarantine_corrupt_session,
     },
-    search::{SearchMatch, SearchOptions, GlobalSearchResult, advance_match, find_matches, find_matches_in_documents},
+    search::{SearchMatch, SearchState},
     syntax::{LanguageDetection, LanguageRegistry},
 };
 
-#[derive(Clone, Debug, Default)]
-struct SearchState {
-    visible: bool,
-    replace_visible: bool,
-    query: String,
-    replacement: String,
-    case_sensitive: bool,
-    whole_word: bool,
-    use_regex: bool,
-    search_all_tabs: bool,
-    matches: Vec<SearchMatch>,
-    current_match: Option<usize>,
-    focus_pending: bool,
-    selection_pending: bool,
-    occurrence_selections: Vec<Selection>,
-    global_results: Vec<GlobalSearchResult>,
-    global_index: Option<usize>,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AppCommand {
+    NewScratch,
+    CloseScratch,
+    RenameTab,
+    Undo,
+    Redo,
 }
 
-impl SearchState {
-    fn recompute(&mut self, rope: &Rope, documents: &[crate::model::Document]) {
-        let old_range = self
-            .current_match
-            .and_then(|index| self.matches.get(index).copied());
-        let options = SearchOptions {
-            case_sensitive: self.case_sensitive,
-            whole_word: self.whole_word,
-            use_regex: self.use_regex,
-        };
-
-        if self.search_all_tabs {
-            self.global_results = find_matches_in_documents(documents, &self.query, options);
-            self.matches.clear();
-            self.current_match = None;
-            self.global_index = if self.global_results.is_empty() {
-                None
-            } else if let Some(old) = old_range {
-                self.global_results
-                    .iter()
-                    .position(|r| r.match_start == old.start && r.match_end == old.end)
-                    .or(Some(0))
-            } else {
-                Some(0)
-            };
-        } else {
-            self.matches = find_matches(rope, &self.query, options);
-            self.global_results.clear();
-            self.global_index = None;
-            self.current_match = if self.matches.is_empty() {
-                None
-            } else if let Some(old_range) = old_range {
-                self.matches
-                    .iter()
-                    .position(|range| *range == old_range)
-                    .or(Some(0))
-            } else {
-                Some(0)
-            };
+impl From<NativeMenuCommand> for AppCommand {
+    fn from(command: NativeMenuCommand) -> Self {
+        match command {
+            NativeMenuCommand::NewScratch => Self::NewScratch,
+            NativeMenuCommand::CloseScratch => Self::CloseScratch,
+            NativeMenuCommand::RenameTab => Self::RenameTab,
+            NativeMenuCommand::Undo => Self::Undo,
+            NativeMenuCommand::Redo => Self::Redo,
         }
-    }
-
-    fn next_match(&mut self) {
-        if self.search_all_tabs {
-            self.global_index = advance_match(self.global_index, self.global_results.len(), 1);
-        } else {
-            self.current_match = advance_match(self.current_match, self.matches.len(), 1);
-        }
-        self.selection_pending = true;
-    }
-
-    fn previous_match(&mut self) {
-        if self.search_all_tabs {
-            self.global_index = advance_match(self.global_index, self.global_results.len(), -1);
-        } else {
-            self.current_match = advance_match(self.current_match, self.matches.len(), -1);
-        }
-        self.selection_pending = true;
-    }
-
-    fn current_label(&self) -> String {
-        if self.search_all_tabs {
-            match (self.global_index, self.global_results.len()) {
-                (_, 0) => "0 / 0".to_owned(),
-                (Some(index), total) => format!("{} / {total}", index + 1),
-                (None, total) => format!("0 / {total}"),
-            }
-        } else {
-            match (self.current_match, self.matches.len()) {
-                (_, 0) => "0 / 0".to_owned(),
-                (Some(index), total) => format!("{} / {total}", index + 1),
-                (None, total) => format!("0 / {total}"),
-            }
-        }
-    }
-
-    fn select_next_occurrence(&mut self, rope: &Rope, primary: Selection) {
-        let (query, _) = if let Some((start, end)) =
-            crate::editor::word_at_selection(rope, primary)
-        {
-            let text = rope.byte_slice(start..end).to_string();
-            if text.is_empty() {
-                return;
-            }
-            (text, Selection { anchor: start, head: end })
-        } else {
-            return;
-        };
-
-        if self.occurrence_selections.is_empty() {
-            self.occurrence_selections.push(primary);
-            self.query = query.clone();
-        }
-
-        let options = SearchOptions {
-            case_sensitive: self.case_sensitive,
-            whole_word: self.whole_word,
-            use_regex: self.use_regex,
-        };
-        let matches = find_matches(rope, &query, options);
-
-        let all_selected: std::collections::HashSet<_> = self
-            .occurrence_selections
-            .iter()
-            .map(|s| (s.anchor.min(s.head), s.anchor.max(s.head)))
-            .collect();
-
-        let next = matches
-            .iter()
-            .find(|m| !all_selected.contains(&(m.start, m.end)))
-            .copied();
-
-        if let Some(m) = next {
-            let sel = Selection {
-                anchor: m.start,
-                head: m.end,
-            };
-            self.occurrence_selections.push(sel);
-        }
-    }
-
-    fn find_under_cursor(&mut self, rope: &Rope, primary: Selection) {
-        self.occurrence_selections.clear();
-        let (start, end) = if let Some((s, e)) =
-            crate::editor::word_at_selection(rope, primary)
-        {
-            (s, e)
-        } else {
-            return;
-        };
-        if start == end {
-            return;
-        }
-        let text = rope.byte_slice(start..end).to_string();
-        if text.is_empty() {
-            return;
-        }
-        self.query = text;
-        self.recompute(rope, &[]);
-        self.occurrence_selections
-            .push(Selection { anchor: start, head: end });
     }
 }
 
@@ -210,12 +66,11 @@ impl PileApp {
 
         let save_worker = SaveWorker::spawn(session_path);
         let save_tx = save_worker.sender();
-        let active_text = state
-            .active_document()
-            .map(|document| document.text())
-            .unwrap_or_default();
         let syntax = LanguageRegistry;
-        let last_detection = syntax.detect(&active_text);
+        let last_detection = state
+            .active_document()
+            .map(|document| syntax.detect_rope(&document.rope))
+            .unwrap_or_else(|| syntax.detect(""));
 
         info!(documents = state.documents.len(), "pile started");
 
@@ -247,16 +102,16 @@ impl PileApp {
         let _ = ack_rx.recv_timeout(Duration::from_secs(2));
     }
 
-    fn active_document_text(&self) -> String {
-        self.state
+    fn refresh_active_document_detection(&mut self) {
+        self.last_detection = self
+            .state
             .active_document()
-            .map(|document| document.text())
-            .unwrap_or_default()
+            .map(|document| self.syntax.detect_rope(&document.rope))
+            .unwrap_or_else(|| self.syntax.detect(""));
     }
 
     fn refresh_active_document_metadata(&mut self) {
-        let text = self.active_document_text();
-        self.last_detection = self.syntax.detect(&text);
+        self.refresh_active_document_detection();
         self.recompute_search();
     }
 
@@ -265,14 +120,34 @@ impl PileApp {
         self.mark_changed();
     }
 
+    fn set_active_document(&mut self, document_id: DocumentId) {
+        if self.state.active_document == document_id {
+            return;
+        }
+        if self.state.set_active(document_id) {
+            self.refresh_active_document_metadata();
+            self.mark_changed();
+            self.editor_focus_pending = true;
+        }
+    }
+
+    fn set_active_document_from_global_search(&mut self, document_id: DocumentId) {
+        if self.state.active_document == document_id {
+            return;
+        }
+        if self.state.set_active(document_id) {
+            self.refresh_active_document_detection();
+            self.mark_changed();
+            self.editor_focus_pending = true;
+        }
+    }
+
     fn begin_rename(&mut self, document_id: DocumentId) {
         self.renaming_document = Some(document_id);
         self.rename_focus_pending = true;
         self.rename_text = self
             .state
-            .documents
-            .iter()
-            .find(|document| document.id == document_id)
+            .document(document_id)
             .map(|document| {
                 if document.has_manual_title() {
                     document.title_hint.clone()
@@ -288,12 +163,7 @@ impl PileApp {
             return;
         };
 
-        if let Some(document) = self
-            .state
-            .documents
-            .iter_mut()
-            .find(|document| document.id == document_id)
-        {
+        if let Some(document) = self.state.document_mut(document_id) {
             let old_title = document.title_hint.clone();
             document.rename(&self.rename_text);
             if document.title_hint != old_title {
@@ -306,12 +176,7 @@ impl PileApp {
     }
 
     fn render_tab(&mut self, ui: &mut egui::Ui, document_id: DocumentId) {
-        let Some(document_index) = self
-            .state
-            .documents
-            .iter()
-            .position(|document| document.id == document_id)
-        else {
+        let Some(document) = self.state.document(document_id) else {
             return;
         };
 
@@ -336,16 +201,13 @@ impl PileApp {
         }
 
         let selected = document_id == self.state.active_document;
-        let title = self.state.documents[document_index].display_title();
+        let title = document.display_title();
         let response = ui
             .selectable_label(selected, title)
             .on_hover_text("Double-click to rename");
 
         if response.clicked() {
-            self.state.set_active(document_id);
-            self.mark_changed();
-            self.refresh_active_document_metadata();
-            self.editor_focus_pending = true;
+            self.set_active_document(document_id);
         }
 
         if response.double_clicked() {
@@ -361,6 +223,29 @@ impl PileApp {
         self.editor_focus_pending = true;
     }
 
+    fn execute_command(&mut self, command: AppCommand) {
+        match command {
+            AppCommand::NewScratch => self.new_scratch(),
+            AppCommand::CloseScratch => self.close_active_scratch(),
+            AppCommand::RenameTab => self.begin_rename(self.state.active_document),
+            AppCommand::Undo => {
+                if let Some(document) = self.state.active_document_mut()
+                    && document.can_undo()
+                    && document.undo()
+                {
+                    self.document_edited();
+                }
+            }
+            AppCommand::Redo => {
+                if let Some(document) = self.state.active_document_mut()
+                    && document.redo()
+                {
+                    self.document_edited();
+                }
+            }
+        }
+    }
+
     fn handle_native_menu_commands(&mut self) {
         let mut commands = Vec::new();
         if let Some(native_menu) = &self.native_menu {
@@ -370,21 +255,7 @@ impl PileApp {
         }
 
         for command in commands {
-            match command {
-                NativeMenuCommand::NewScratch => self.new_scratch(),
-                NativeMenuCommand::CloseScratch => self.close_active_scratch(),
-                NativeMenuCommand::RenameTab => self.begin_rename(self.state.active_document),
-                NativeMenuCommand::Undo => {
-                    if let Some(document) = self.state.active_document_mut() {
-                        document.undo();
-                    }
-                }
-                NativeMenuCommand::Redo => {
-                    if let Some(document) = self.state.active_document_mut() {
-                        document.redo();
-                    }
-                }
-            }
+            self.execute_command(AppCommand::from(command));
         }
     }
 
@@ -396,7 +267,7 @@ impl PileApp {
             })
         });
         if new_scratch {
-            self.new_scratch();
+            self.execute_command(AppCommand::NewScratch);
         }
 
         let close_scratch = ctx.input_mut(|input| {
@@ -406,7 +277,7 @@ impl PileApp {
             })
         });
         if close_scratch {
-            self.close_active_scratch();
+            self.execute_command(AppCommand::CloseScratch);
         }
 
         let undo = ctx.input_mut(|input| {
@@ -416,10 +287,7 @@ impl PileApp {
             })
         });
         if undo {
-            if let Some(document) = self.state.active_document_mut() {
-                document.undo();
-                self.document_edited();
-            }
+            self.execute_command(AppCommand::Undo);
         }
 
         let redo = ctx.input_mut(|input| {
@@ -429,10 +297,7 @@ impl PileApp {
             })
         });
         if redo {
-            if let Some(document) = self.state.active_document_mut() {
-                document.redo();
-                self.document_edited();
-            }
+            self.execute_command(AppCommand::Redo);
         }
 
         let open_replace = ctx.input_mut(|input| {
@@ -459,7 +324,7 @@ impl PileApp {
         let rename_tab =
             ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2));
         if rename_tab {
-            self.begin_rename(self.state.active_document);
+            self.execute_command(AppCommand::RenameTab);
         }
 
         let select_next = ctx.input_mut(|input| {
@@ -472,9 +337,8 @@ impl PileApp {
             self.select_next_occurrence();
         }
 
-        let find_under_cursor = ctx.input_mut(|input| {
-            input.consume_key(egui::Modifiers::NONE, egui::Key::F3)
-        });
+        let find_under_cursor =
+            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F3));
         if find_under_cursor {
             self.find_under_cursor();
         }
@@ -577,6 +441,11 @@ impl PileApp {
             }
 
             ui.label(self.search.current_label());
+            if self.search.search_all_tabs
+                && let Some(title) = self.search.current_result_title()
+            {
+                ui.label(title);
+            }
 
             changed |= ui
                 .checkbox(&mut self.search.case_sensitive, "Aa")
@@ -632,7 +501,7 @@ impl PileApp {
                     self.close_search();
                 }
 
-                let has_matches = !self.search.matches.is_empty();
+                let has_matches = self.search.has_matches();
                 if ui
                     .add_enabled(has_matches, egui::Button::new("Replace"))
                     .on_hover_text("Replace current match")
@@ -673,12 +542,12 @@ impl PileApp {
             let Some(index) = self.search.global_index else {
                 return;
             };
-            let Some(result) = self.search.global_results.get(index) else {
+            let Some(result) = self.search.current_global_result() else {
                 return;
             };
             if result.document_id != self.state.active_document {
                 // Switch to the document
-                self.state.set_active(result.document_id);
+                self.set_active_document_from_global_search(result.document_id);
                 self.search.selection_pending = true;
                 return;
             }
@@ -687,12 +556,7 @@ impl PileApp {
                 end: result.match_end,
             };
             let replacement = self.search.replacement.clone();
-
-            let regex = if self.search.use_regex {
-                Regex::new(&self.search.query).ok()
-            } else {
-                None
-            };
+            let regex = self.search.replacement_regex();
 
             let Some(document) = self.state.active_document_mut() else {
                 return;
@@ -714,16 +578,11 @@ impl PileApp {
             let Some(index) = self.search.current_match else {
                 return;
             };
-            let Some(search_match) = self.search.matches.get(index).copied() else {
+            let Some(search_match) = self.search.current_match() else {
                 return;
             };
             let replacement = self.search.replacement.clone();
-
-            let regex = if self.search.use_regex {
-                Regex::new(&self.search.query).ok()
-            } else {
-                None
-            };
+            let regex = self.search.replacement_regex();
 
             let Some(document) = self.state.active_document_mut() else {
                 return;
@@ -749,23 +608,9 @@ impl PileApp {
         if self.search.search_all_tabs {
             // Collect matches only from active document
             let active_id = self.state.active_document;
-            let matches: Vec<SearchMatch> = self
-                .search
-                .global_results
-                .iter()
-                .filter(|r| r.document_id == active_id)
-                .map(|r| SearchMatch {
-                    start: r.match_start,
-                    end: r.match_end,
-                })
-                .collect();
+            let matches = self.search.matches_in_document(active_id);
             let replacement = self.search.replacement.clone();
-
-            let regex = if self.search.use_regex {
-                Regex::new(&self.search.query).ok()
-            } else {
-                None
-            };
+            let regex = self.search.replacement_regex();
 
             let Some(document) = self.state.active_document_mut() else {
                 return;
@@ -783,12 +628,7 @@ impl PileApp {
             }
             let matches = self.search.matches.clone();
             let replacement = self.search.replacement.clone();
-
-            let regex = if self.search.use_regex {
-                Regex::new(&self.search.query).ok()
-            } else {
-                None
-            };
+            let regex = self.search.replacement_regex();
 
             let Some(document) = self.state.active_document_mut() else {
                 return;
@@ -806,22 +646,16 @@ impl PileApp {
     fn render_editor(&mut self, ui: &mut egui::Ui) {
         let reveal_selection = if self.search.selection_pending {
             if self.search.search_all_tabs {
-                if let Some(index) = self.search.global_index {
-                    self.search.global_results.get(index).and_then(|result| {
-                        // Switch to the correct tab
-                        self.state.set_active(result.document_id);
-                        Some(crate::model::Selection {
-                            anchor: result.match_start,
-                            head: result.match_end,
-                        })
-                    })
-                } else {
-                    None
-                }
+                self.search.current_global_result().cloned().map(|result| {
+                    self.set_active_document_from_global_search(result.document_id);
+                    crate::model::Selection {
+                        anchor: result.match_start,
+                        head: result.match_end,
+                    }
+                })
             } else {
                 self.search
-                    .current_match
-                    .and_then(|index| self.search.matches.get(index))
+                    .current_match()
                     .map(|search_match| crate::model::Selection {
                         anchor: search_match.start,
                         head: search_match.end,
@@ -890,11 +724,11 @@ impl eframe::App for PileApp {
         egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 if ui.button("+").on_hover_text("New scratch").clicked() {
-                    self.new_scratch();
+                    self.execute_command(AppCommand::NewScratch);
                 }
 
                 if ui.button("x").on_hover_text("Close scratch").clicked() {
-                    self.close_active_scratch();
+                    self.execute_command(AppCommand::CloseScratch);
                 }
 
                 let tabs = self.state.tab_order.clone();
@@ -938,104 +772,5 @@ impl eframe::App for PileApp {
         if let Some(worker) = self.save_worker.take() {
             worker.shutdown();
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crop::Rope;
-    use crate::model::Selection;
-
-    #[test]
-    fn select_next_occurrence_adds_first_word() {
-        let rope = Rope::from("hello world hello");
-        let primary = Selection {
-            anchor: 0,
-            head: 5,
-        };
-        let mut state = super::SearchState {
-            visible: false,
-            replace_visible: false,
-            query: String::new(),
-            replacement: String::new(),
-            case_sensitive: false,
-            whole_word: false,
-            use_regex: false,
-            search_all_tabs: false,
-            matches: vec![],
-            current_match: None,
-            focus_pending: false,
-            selection_pending: false,
-            occurrence_selections: vec![],
-            global_results: vec![],
-            global_index: None,
-        };
-
-        state.select_next_occurrence(&rope, primary);
-
-        assert_eq!(state.occurrence_selections.len(), 2);
-        assert_eq!(state.occurrence_selections[0], primary);
-        assert_eq!(state.occurrence_selections[1].anchor, 12);
-        assert_eq!(state.occurrence_selections[1].head, 17);
-    }
-
-    #[test]
-    fn find_under_cursor_selects_word() {
-        let rope = Rope::from("hello world hello");
-        let primary = Selection::caret(0);
-        let mut state = super::SearchState {
-            visible: false,
-            replace_visible: false,
-            query: String::new(),
-            replacement: String::new(),
-            case_sensitive: false,
-            whole_word: false,
-            use_regex: false,
-            search_all_tabs: false,
-            matches: vec![],
-            current_match: None,
-            focus_pending: false,
-            selection_pending: false,
-            occurrence_selections: vec![],
-            global_results: vec![],
-            global_index: None,
-        };
-
-        state.find_under_cursor(&rope, primary);
-
-        assert_eq!(state.occurrence_selections.len(), 1);
-        let sel = state.occurrence_selections[0];
-        assert_eq!((sel.anchor, sel.head), (0, 5));
-        assert_eq!(state.query, "hello");
-    }
-
-    #[test]
-    fn find_under_cursor_clears_previous() {
-        let rope = Rope::from("hello world");
-        let primary = Selection::caret(6);
-        let mut state = super::SearchState {
-            visible: false,
-            replace_visible: false,
-            query: "previous".to_owned(),
-            replacement: String::new(),
-            case_sensitive: false,
-            whole_word: false,
-            use_regex: false,
-            search_all_tabs: false,
-            matches: vec![],
-            current_match: None,
-            focus_pending: false,
-            selection_pending: false,
-            occurrence_selections: vec![Selection { anchor: 0, head: 5 }],
-            global_results: vec![],
-            global_index: None,
-        };
-
-        state.find_under_cursor(&rope, primary);
-
-        assert_eq!(state.occurrence_selections.len(), 1);
-        let sel = state.occurrence_selections[0];
-        assert_eq!((sel.anchor, sel.head), (6, 11));
-        assert_eq!(state.query, "world");
     }
 }
