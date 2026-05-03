@@ -15,6 +15,7 @@ use crate::{
     },
     search::{SearchMatch, SearchState},
     syntax::{LanguageDetection, LanguageRegistry},
+    tab_switcher::TabSwitcher,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,6 +53,7 @@ pub struct PileApp {
     native_menu: Option<NativeMenu>,
     search: SearchState,
     command_palette: CommandPalette,
+    tab_switcher: TabSwitcher,
 }
 
 impl PileApp {
@@ -91,6 +93,7 @@ impl PileApp {
             native_menu: NativeMenu::install(),
             search: SearchState::default(),
             command_palette: CommandPalette::new(),
+            tab_switcher: TabSwitcher::new(),
         }
     }
 
@@ -538,6 +541,16 @@ impl PileApp {
         });
         if toggle_palette {
             self.command_palette.toggle();
+        }
+
+        let toggle_tab_switcher = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND,
+                logical_key: egui::Key::P,
+            })
+        });
+        if toggle_tab_switcher {
+            self.tab_switcher.toggle(&self.state);
         }
     }
 
@@ -1131,6 +1144,12 @@ impl eframe::App for PileApp {
         self.command_palette.show(ctx, &mut |c| cmd = Some(c));
         if let Some(command) = cmd {
             self.handle_command(command);
+        }
+
+        let mut switch_to = None;
+        self.tab_switcher.show(ctx, &self.state, &mut |id| switch_to = Some(id));
+        if let Some(document_id) = switch_to {
+            self.set_active_document(document_id);
         }
     }
 

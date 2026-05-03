@@ -120,6 +120,26 @@ impl CommandMetadata {
     }
 }
 
+// Simple fuzzy match: characters of query must appear in order in target
+pub fn fuzzy_match(query: &str, target: &str) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    let query = query.to_lowercase();
+    let target = target.to_lowercase();
+    let mut target_chars = target.chars();
+    for qc in query.chars() {
+        loop {
+            match target_chars.next() {
+                Some(tc) if tc == qc => break,
+                Some(_) => continue,
+                None => return false,
+            }
+        }
+    }
+    true
+}
+
 pub fn all_commands() -> Vec<CommandMetadata> {
     use Command::*;
     use CommandCategory::*;

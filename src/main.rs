@@ -7,6 +7,7 @@ mod native_menu;
 mod persistence;
 mod search;
 mod syntax;
+mod tab_switcher;
 
 use anyhow::Result;
 
