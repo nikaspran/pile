@@ -10,9 +10,9 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
   rope-native editor view that renders visible lines without routine full-buffer
   materialization.
 - Completed: implement cursor movement by grapheme cluster.
-- Implement cursor movement by word, line, paragraph, document boundary, and page.
+- Completed: implement cursor movement by word, line, paragraph, document boundary, and page.
 - Add mouse drag selection and richer selection rendering for the custom editor.
-- Add robust selection expansion and contraction for character, word, line,
+- Completed: add robust selection expansion and contraction for character, word, line,
   bracket pair, and indentation block scopes.
 - Add multiple cursors as a first-class model with add-next-match, add-all-match,
   split-selection-into-lines, and rectangular/column selection.

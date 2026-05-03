@@ -1,4 +1,3 @@
-use crop::Rope;
 use eframe::egui;
 
 use crate::model::{Document, Selection};

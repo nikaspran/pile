@@ -1,3 +1,5 @@
+use crop::Rope;
+
 use super::*;
 use regex::Regex;
 
@@ -1529,4 +1531,206 @@ fn grapheme_movement_emoji() {
     let space_pos = emoji_len + 1; // emoji + space
     let before_space = previous_grapheme_boundary(&rope, space_pos);
     assert_eq!(before_space, emoji_len);
+}
+
+#[test]
+fn test_expand_selection_by_word_from_caret() {
+    let mut document = document("hello world foo");
+    set_primary_selection(&mut document, Selection::caret(6)); // at start of "world"
+
+    expand_selection_by_word(&mut document);
+
+    let sel = primary_selection(&document);
+    assert_eq!(sel.anchor, 6);
+    assert_eq!(sel.head, 11); // end of "world"
+}
+
+#[test]
+fn test_expand_selection_by_word_expands_existing_selection() {
+    let mut document = document("hello world foo");
+    set_primary_selection(
+        &mut document,
+        Selection {
+            anchor: 3,
+            head: 8,
+        },
+    ); // overlaps "lo wo"
+
+    expand_selection_by_word(&mut document);
+
+    let sel = primary_selection(&document);
+    assert_eq!(sel.anchor, 0); // start of "hello"
+    assert_eq!(sel.head, 11); // end of "world"
+}
+
+#[test]
+fn test_contract_selection_by_word() {
+    let mut document = document("hello world foo");
+    set_primary_selection(
+        &mut document,
+        Selection {
+            anchor: 0,
+            head: 15,
+        },
+    ); // selects "hello world foo"
+
+    contract_selection_by_word(&mut document);
+
+    let sel = primary_selection(&document);
+    // Should contract to "world foo" (from "hello world foo")
+    assert!(sel.anchor > 0); // should have moved past "hello"
+    assert!(sel.head <= 15);
+}
+
+#[test]
+fn test_expand_selection_by_line_single_line() {
+    let mut document = document("first line\nsecond line\nthird line");
+    let line_start = "first line\n".len();
+    set_primary_selection(&mut document, Selection::caret(line_start + 3)); // in "second"
+
+    expand_selection_by_line(&mut document);
+
+    let sel = primary_selection(&document);
+    assert_eq!(sel.anchor, line_start); // start of "second line"
+    let (_, end) = visual_line_bounds(&document.rope, 1);
+    assert_eq!(sel.head, end); // end of "second line"
+}
+
+#[test]
+fn test_expand_selection_by_line_multiline_selection() {
+    let mut document = document("first line\nsecond line\nthird line");
+    set_primary_selection(
+        &mut document,
+        Selection {
+            anchor: 3,
+            head: "first line\nsecond".len(),
+        },
+    ); // spans first and part of second
+
+    expand_selection_by_line(&mut document);
+
+    let sel = primary_selection(&document);
+    assert_eq!(sel.anchor, 0); // start of first line
+    let (_, end) = visual_line_bounds(&document.rope, 1);
+    assert_eq!(sel.head, end); // end of second line
+}
+
+#[test]
+fn test_contract_selection_by_line() {
+    let mut document = document("first line\nsecond line\nthird line");
+    set_primary_selection(
+        &mut document,
+        Selection {
+            anchor: 0,
+            head: "first line\nsecond line\n".len(),
+        },
+    ); // first two lines
+
+    contract_selection_by_line(&mut document);
+
+    let sel = primary_selection(&document);
+    // Should contract to just "second line"
+    let line_start = "first line\n".len();
+    assert!(sel.anchor >= line_start);
+    assert!(sel.head <= "first line\nsecond line".len());
+}
+
+#[test]
+fn test_expand_selection_by_bracket_pair_simple() {
+    let mut document = document("(hello world)");
+    set_primary_selection(&mut document, Selection::caret(3)); // inside parens
+
+    expand_selection_by_bracket_pair(&mut document);
+
+    let sel = primary_selection(&document);
+    assert_eq!(sel.anchor, 0); // '('
+    assert_eq!(sel.head, 13); // after ')' (string is 13 bytes, positions 0-12, so 13 is end)
+}
+
+#[test]
+fn test_expand_selection_by_bracket_pair_nested() {
+    let mut document = document("(outer (inner) text)");
+    // String bytes: ( =0, o=1, u=2, t=3, e=4, r=5, space=6, (=7, i=8, n=9, n=10, e=11, r=12, )=13, space=14, t=15, e=16, x=17, t=18, )=19
+    set_primary_selection(&mut document, Selection::caret(10)); // inside "inner"
+
+    expand_selection_by_bracket_pair(&mut document);
+
+    let sel = primary_selection(&document);
+    // Should match the inner pair: '(' at 7, ')' at 13
+    assert_eq!(sel.anchor, 7); // '(' before "inner"
+    assert_eq!(sel.head, 14); // after ")" at position 13 (13 + 1)
+}
+
+#[test]
+fn test_contract_selection_by_bracket_pair() {
+    let mut document = document("(hello world)");
+    set_primary_selection(
+        &mut document,
+        Selection {
+            anchor: 0,
+            head: 14,
+        },
+    ); // entire "(hello world)"
+
+    contract_selection_by_bracket_pair(&mut document);
+
+    let sel = primary_selection(&document);
+    // Should contract to "hello world"
+    assert_eq!(sel.anchor, 1); // after '('
+    assert_eq!(sel.head, 13); // before ')'
+}
+
+#[test]
+fn test_expand_selection_by_indent_block_basic() {
+    let text = "no indent\n  indented line 1\n  indented line 2\n  indented line 3\nno indent";
+    let mut document = document(text);
+    let offset = "no indent\n  indented".len(); // in second line
+    set_primary_selection(&mut document, Selection::caret(offset));
+
+    expand_selection_by_indent_block(&mut document);
+
+    let sel = primary_selection(&document);
+    let expected_start = "no indent\n".len(); // 10
+    // The indent block ends at position 63 (the '\n' after "indented line 3")
+    let expected_end = "no indent\n  indented line 1\n  indented line 2\n  indented line 3\n".len() - 1; // 63
+    assert_eq!(sel.anchor, expected_start);
+    assert_eq!(sel.head, expected_end);
+}
+
+#[test]
+fn test_expand_selection_by_indent_block_with_blank_line_boundary() {
+    let text = "  indented 1\n\n  indented 2";
+    let mut document = document(text);
+    let offset = 2; // in first indented line
+    set_primary_selection(&mut document, Selection::caret(offset));
+
+    expand_selection_by_indent_block(&mut document);
+
+    let sel = primary_selection(&document);
+    // Should only select first indented line (blank line is boundary)
+    let (_, end) = visual_line_bounds(&document.rope, 0);
+    assert_eq!(sel.anchor, 0);
+    assert_eq!(sel.head, end);
+}
+
+#[test]
+fn test_contract_selection_by_indent_block() {
+    let text = "no indent\n  indented line 1\n  indented line 2\n  indented line 3\nno indent";
+    let mut document = document(text);
+    let start = "no indent\n".len();
+    let end = "no indent\n  indented line 1\n  indented line 2\n  indented line 3\n".len();
+    set_primary_selection(
+        &mut document,
+        Selection {
+            anchor: start,
+            head: end,
+        },
+    ); // all three indented lines
+
+    contract_selection_by_indent_block(&mut document);
+
+    let sel = primary_selection(&document);
+    // Should contract to just "indented line 2"
+    assert!(sel.anchor > start);
+    assert!(sel.head < end);
 }
