@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use crop::{Rope, RopeSlice};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
@@ -157,6 +159,8 @@ pub struct Document {
     pub use_soft_tabs: bool,
     /// Whether this tab is pinned (cannot be closed, stays in place)
     pub pinned: bool,
+    /// Bookmarks stored as byte offsets (0-based) for consistency with selections
+    pub bookmarks: BTreeSet<usize>,
 }
 
 mod rope_serde {
@@ -193,6 +197,7 @@ impl Document {
             tab_width: 4,
             use_soft_tabs: true,
             pinned: false,
+            bookmarks: BTreeSet::new(),
         }
     }
 

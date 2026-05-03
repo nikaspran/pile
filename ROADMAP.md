@@ -60,7 +60,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add split editor panes with shared document backing.
 - Completed: Add go-to-line and go-to-symbol-like navigation for detected document
   structure.
-- Add bookmarks or lightweight marks within scratch buffers.
+- Completed: Add bookmarks or lightweight marks within scratch buffers.
 - Add session-level tab restore ordering, active pane restore, and focus restore.
 
 ## Rendering and Layout

@@ -240,6 +240,13 @@ pub fn show_editor(
             let primary = primary_selection(document);
             let caret_line = line_index_of_byte(&document.rope, primary.head);
 
+            // Precompute bookmarked lines for this render pass
+            let bookmarked_lines: std::collections::HashSet<usize> = document
+                .bookmarks
+                .iter()
+                .map(|&bm| line_index_of_byte(&document.rope, bm))
+                .collect();
+
             for line_index in first_line..last_line {
                 let y = rect.top() + line_index as f32 * row_height;
                 if line_index == caret_line {
@@ -253,6 +260,19 @@ pub fn show_editor(
                         egui::vec2(gutter_width, row_height),
                     );
                     painter.rect_filled(gutter_rect, 0.0, line_highlight_color);
+                }
+
+                // Draw bookmark indicator
+                if bookmarked_lines.contains(&line_index) {
+                    let bookmark_color = egui::Color32::from_rgb(255, 200, 0);
+                    let icon_pos = egui::pos2(rect.left() + 2.0, y + row_height * 0.5 - 6.0);
+                    painter.text(
+                        icon_pos,
+                        egui::Align2::LEFT_CENTER,
+                        "🔖",
+                        font_id.clone(),
+                        bookmark_color,
+                    );
                 }
 
                 let line_number_pos = egui::pos2(rect.left() + LINE_GUTTER_PADDING, y);

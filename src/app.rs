@@ -25,6 +25,9 @@ enum AppCommand {
     RenameTab,
     Undo,
     Redo,
+    ToggleBookmark,
+    JumpToNextBookmark,
+    ClearBookmarks,
 }
 
 impl From<NativeMenuCommand> for AppCommand {
@@ -372,6 +375,9 @@ impl PileApp {
                     self.document_edited();
                 }
             }
+            AppCommand::ToggleBookmark => self.toggle_bookmark(),
+            AppCommand::JumpToNextBookmark => self.jump_to_next_bookmark(),
+            AppCommand::ClearBookmarks => self.clear_bookmarks(),
         }
     }
 
@@ -753,6 +759,34 @@ impl PileApp {
             self.goto_line.visible = true;
             self.goto_line.focus_pending = true;
         }
+
+        // Bookmark shortcuts (F2 and F4)
+        let toggle_bookmark = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND,
+                logical_key: egui::Key::F2,
+            })
+        });
+        if toggle_bookmark {
+            self.toggle_bookmark();
+        }
+
+        let next_bookmark = ctx.input_mut(|input| {
+            input.consume_key(egui::Modifiers::NONE, egui::Key::F4)
+        });
+        if next_bookmark {
+            self.jump_to_next_bookmark();
+        }
+
+        let clear_bookmarks = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::F2,
+            })
+        });
+        if clear_bookmarks {
+            self.clear_bookmarks();
+        }
     }
 
     fn close_active_scratch(&mut self) {
@@ -1035,6 +1069,38 @@ impl PileApp {
         }
         self.goto_line.visible = false;
         self.goto_line.query.clear();
+    }
+
+    fn toggle_bookmark(&mut self) {
+        if let Some(document) = self.state.active_document_mut() {
+            let caret = crate::editor::primary_selection(document).head;
+            if document.bookmarks.contains(&caret) {
+                document.bookmarks.remove(&caret);
+            } else {
+                document.bookmarks.insert(caret);
+            }
+            self.mark_changed();
+        }
+    }
+
+    fn jump_to_next_bookmark(&mut self) {
+        if let Some(document) = self.state.active_document_mut() {
+            let caret = crate::editor::primary_selection(document).head;
+            if let Some(&next) = document.bookmarks.iter().find(|&&bm| bm > caret) {
+                crate::editor::set_primary_selection(document, crate::model::Selection::caret(next));
+            } else if let Some(&first) = document.bookmarks.first() {
+                // Wrap around
+                crate::editor::set_primary_selection(document, crate::model::Selection::caret(first));
+            }
+            self.editor_focus_pending = true;
+        }
+    }
+
+    fn clear_bookmarks(&mut self) {
+        if let Some(document) = self.state.active_document_mut() {
+            document.bookmarks.clear();
+            self.mark_changed();
+        }
     }
 
     fn render_search_preview(&mut self, ui: &mut egui::Ui) {
