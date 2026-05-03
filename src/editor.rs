@@ -1,4 +1,5 @@
 use eframe::egui;
+use std::time::Instant;
 
 use crate::model::{Document, Selection};
 
@@ -11,7 +12,8 @@ mod replace;
 
 use geometry::*;
 pub use geometry::{
-    decimal_digits, primary_selection, set_primary_selection, visual_line_count, word_at_selection,
+    decimal_digits, primary_selection, select_line_at_offset, select_word_at_offset,
+    set_primary_selection, visual_line_count, word_at_selection,
 };
 use input::handle_input;
 use line_ops::*;
@@ -22,11 +24,14 @@ pub use replace::{replace_all_matches, replace_match};
 const LINE_GUTTER_MIN_WIDTH: f32 = 44.0;
 const LINE_GUTTER_PADDING: f32 = 10.0;
 const EDITOR_MIN_WIDTH: f32 = 320.0;
+const TRIPLE_CLICK_DURATION: f32 = 0.4;
 
 #[derive(Debug, Default)]
 pub struct EditorViewState {
     preferred_column: Option<usize>,
     visible_rows: Option<usize>,
+    last_click_time: Option<Instant>,
+    click_count: u32,
 }
 
 #[derive(Debug)]
@@ -85,9 +90,22 @@ pub fn show_editor(
                 response.request_focus();
                 *focus_pending = false;
             }
-            if response.drag_started() || response.clicked() {
+            let click = response.clicked();
+            let drag_started = response.drag_started();
+            if click || drag_started {
                 response.request_focus();
                 if let Some(pointer_position) = response.interact_pointer_pos() {
+                    let now = Instant::now();
+                    let is_multi = view_state
+                        .last_click_time
+                        .map_or(false, |t| now.duration_since(t).as_secs_f32() < TRIPLE_CLICK_DURATION);
+                    view_state.last_click_time = Some(now);
+                    if is_multi {
+                        view_state.click_count = (view_state.click_count % 3) + 1;
+                    } else {
+                        view_state.click_count = 1;
+                    }
+
                     let offset = offset_at_pointer(
                         &document.rope,
                         pointer_position,
@@ -97,7 +115,14 @@ pub fn show_editor(
                         char_width,
                         line_count,
                     );
-                    set_primary_selection(document, Selection::caret(offset));
+
+                    if view_state.click_count == 3 {
+                        set_primary_selection(document, select_line_at_offset(&document.rope, offset));
+                    } else if view_state.click_count == 2 {
+                        set_primary_selection(document, select_word_at_offset(&document.rope, offset));
+                    } else {
+                        set_primary_selection(document, Selection::caret(offset));
+                    }
                     view_state.preferred_column = None;
                 }
             } else if response.dragged() {
@@ -112,6 +137,9 @@ pub fn show_editor(
                         line_count,
                     );
                     let mut selection = primary_selection(document);
+                    if selection.anchor == selection.head {
+                        selection.anchor = offset;
+                    }
                     selection.head = offset;
                     set_primary_selection(document, selection);
                     view_state.preferred_column = None;

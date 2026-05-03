@@ -340,7 +340,64 @@ pub(super) fn paint_selection_for_line(
         text_pos.x + end_column as f32 * char_width,
         text_pos.y + row_height,
     );
-    painter.rect_filled(egui::Rect::from_min_max(min, max), 0.0, color);
+    let rect = egui::Rect::from_min_max(min, max);
+    let rounding = egui::Rounding::same(2);
+    painter.rect_filled(rect, rounding, color);
+    painter.rect_stroke(rect, rounding, egui::Stroke::new(1.0, color.gamma_multiply(1.3)), egui::StrokeKind::Inside);
+}
+
+pub fn select_word_at_offset(rope: &Rope, offset: usize) -> Selection {
+    let offset = clamp_to_char_boundary(rope, offset.min(rope.byte_len()));
+    if offset >= rope.byte_len() {
+        return Selection::caret(offset);
+    }
+    let char_at_caret = rope.byte_slice(offset..).chars().next();
+    let Some(char_at_caret) = char_at_caret else {
+        return Selection::caret(offset);
+    };
+    if classify_char(char_at_caret) == CharClass::NonWord {
+        return Selection::caret(offset);
+    }
+    let mut word_start = offset;
+    let mut search_offset = offset;
+    loop {
+        if search_offset == 0 {
+            break;
+        }
+        let prev_char = rope.byte_slice(..search_offset).chars().next_back();
+        match prev_char {
+            Some(c) if classify_char(c) == CharClass::Word => {
+                search_offset -= c.len_utf8();
+                word_start = search_offset;
+            }
+            _ => break,
+        }
+    }
+    let mut word_end = offset;
+    let mut chars_after = rope.byte_slice(offset..).chars();
+    if let Some(c) = chars_after.next() {
+        word_end += c.len_utf8();
+    }
+    for c in chars_after {
+        if classify_char(c) == CharClass::Word {
+            word_end += c.len_utf8();
+        } else {
+            break;
+        }
+    }
+    Selection {
+        anchor: word_start,
+        head: word_end,
+    }
+}
+
+pub fn select_line_at_offset(rope: &Rope, offset: usize) -> Selection {
+    let line_index = line_index_of_byte(rope, offset);
+    let (line_start, line_end) = visual_line_bounds(rope, line_index);
+    Selection {
+        anchor: line_start,
+        head: line_end,
+    }
 }
 
 pub(super) fn paint_search_highlights_for_line(

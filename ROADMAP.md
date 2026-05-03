@@ -11,7 +11,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
   materialization.
 - Completed: implement cursor movement by grapheme cluster.
 - Completed: implement cursor movement by word, line, paragraph, document boundary, and page.
-- Add mouse drag selection and richer selection rendering for the custom editor.
+- Completed: add mouse drag selection and richer selection rendering for the custom editor.
 - Completed: add robust selection expansion and contraction for character, word, line,
   bracket pair, and indentation block scopes.
 - Add multiple cursors as a first-class model with add-next-match, add-all-match,
