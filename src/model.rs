@@ -108,6 +108,10 @@ impl AppState {
         &self.recent_order
     }
 
+    pub fn recent_order_mut(&mut self) -> &mut Vec<DocumentId> {
+        &mut self.recent_order
+    }
+
     fn update_recent_order(&mut self, document_id: DocumentId) {
         // Remove if present and push to front (most recent)
         self.recent_order.retain(|id| *id != document_id);
@@ -151,6 +155,8 @@ pub struct Document {
     pub tab_width: usize,
     /// Whether to use soft tabs (spaces) instead of tab characters
     pub use_soft_tabs: bool,
+    /// Whether this tab is pinned (cannot be closed, stays in place)
+    pub pinned: bool,
 }
 
 mod rope_serde {
@@ -186,6 +192,7 @@ impl Document {
             undo: UndoState::default(),
             tab_width: 4,
             use_soft_tabs: true,
+            pinned: false,
         }
     }
 

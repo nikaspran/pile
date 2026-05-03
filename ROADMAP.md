@@ -56,7 +56,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add quick tab switcher with fuzzy search across hundreds of buffers.
 - Completed: Add recently used tab ordering.
 - Completed: Add virtualized tab list rendering for large sessions.
-- Add tab close buttons, tab reordering, and pinned tabs.
+- Completed: Add tab close buttons, tab reordering, and pinned tabs.
 - Add split editor panes with shared document backing.
 - Add go-to-line and go-to-symbol-like navigation for detected document
   structure.

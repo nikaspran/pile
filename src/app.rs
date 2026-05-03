@@ -209,17 +209,33 @@ impl PileApp {
 
         let selected = document_id == self.state.active_document;
         let title = document.display_title();
-        let response = ui
-            .selectable_label(selected, title)
-            .on_hover_text("Double-click to rename");
+        let pinnd = document.pinned;
 
-        if response.clicked() {
-            self.set_active_document(document_id);
-        }
+        ui.horizontal(|ui| {
+            // Pin button (if pinned)
+            if pinnd {
+                if ui.small_button("📌").on_hover_text("Unpin tab").clicked() {
+                    self.toggle_pin_tab(document_id);
+                }
+            }
 
-        if response.double_clicked() {
-            self.begin_rename(document_id);
-        }
+            let response = ui
+                .selectable_label(selected, title)
+                .on_hover_text("Double-click to rename");
+
+            if response.clicked() {
+                self.set_active_document(document_id);
+            }
+
+            if response.double_clicked() {
+                self.begin_rename(document_id);
+            }
+
+            // Close button (not shown for pinned tabs)
+            if !pinnd && ui.small_button("×").on_hover_text("Close tab").clicked() {
+                self.close_document(document_id);
+            }
+        });
     }
 
     fn new_scratch(&mut self) {
@@ -228,6 +244,49 @@ impl PileApp {
         self.mark_changed();
         self.refresh_active_document_metadata();
         self.editor_focus_pending = true;
+    }
+
+    fn toggle_pin_tab(&mut self, document_id: DocumentId) {
+        if let Some(document) = self.state.document_mut(document_id) {
+            document.pinned = !document.pinned;
+            self.mark_changed();
+        }
+    }
+
+    fn close_document(&mut self, document_id: DocumentId) {
+        // Don't close pinned tabs
+        if let Some(document) = self.state.document(document_id) {
+            if document.pinned {
+                return;
+            }
+        }
+
+        if self.state.active_document == document_id {
+            self.close_active_scratch();
+        } else {
+            self.state.documents.retain(|doc| doc.id != document_id);
+            self.state.tab_order.retain(|id| *id != document_id);
+            self.state.recent_order_mut().retain(|id| *id != document_id);
+            self.mark_changed();
+        }
+    }
+
+    fn move_tab_left(&mut self, document_id: DocumentId) {
+        if let Some(pos) = self.state.tab_order.iter().position(|id| *id == document_id) {
+            if pos > 0 {
+                self.state.tab_order.swap(pos, pos - 1);
+                self.mark_changed();
+            }
+        }
+    }
+
+    fn move_tab_right(&mut self, document_id: DocumentId) {
+        if let Some(pos) = self.state.tab_order.iter().position(|id| *id == document_id) {
+            if pos < self.state.tab_order.len() - 1 {
+                self.state.tab_order.swap(pos, pos + 1);
+                self.mark_changed();
+            }
+        }
     }
 
     fn execute_command(&mut self, command: AppCommand) {
@@ -551,6 +610,41 @@ impl PileApp {
         });
         if toggle_tab_switcher {
             self.tab_switcher.toggle(&self.state);
+        }
+
+        // Tab reordering shortcuts (Alt+Left/Right)
+        let move_left = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::ALT | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::ArrowLeft,
+            })
+        });
+        if move_left {
+            let active = self.state.active_document;
+            self.move_tab_left(active);
+        }
+
+        let move_right = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::ALT | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::ArrowRight,
+            })
+        });
+        if move_right {
+            let active = self.state.active_document;
+            self.move_tab_right(active);
+        }
+
+        // Pin/unpin shortcut (Alt+Shift+P)
+        let toggle_pin = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::ALT | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::P,
+            })
+        });
+        if toggle_pin {
+            let active = self.state.active_document;
+            self.toggle_pin_tab(active);
         }
     }
 
