@@ -2410,6 +2410,7 @@ dependencies = [
  "egui",
  "muda",
  "parking_lot",
+ "regex",
  "serde",
  "thiserror 2.0.18",
  "tracing",

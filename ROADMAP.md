@@ -39,12 +39,12 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
   editor renderer, with a distinct current match.
 - Completed: add replace and replace-all (undo grouping deferred until an
   undo/redo stack lands).
-- Add regular expression search and replace.
+- Completed: add regular expression search and replace.
 - Completed: add case-sensitive, whole-word, and wrap-around modes for in-buffer
   search.
 - Move in-buffer search from active-document string materialization to a
   rope-native or bounded-window search engine.
-- Add search-in-tabs across all open scratch buffers.
+- Completed: add search-in-tabs across all open scratch buffers.
 - Add search result previews with quick navigation.
 - Add find-under-cursor and select-next-occurrence commands.
 

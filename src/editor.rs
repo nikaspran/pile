@@ -1,5 +1,6 @@
 use crop::Rope;
 use eframe::egui;
+use regex::Regex;
 
 use crate::model::{Document, EditTransaction, Selection};
 use crate::search::SearchMatch;
@@ -152,10 +153,15 @@ pub fn show_editor(
                 );
 
                 if line_index == caret_line {
+                    let line_highlight_color = if ui.visuals().dark_mode {
+                        egui::Color32::from_rgba_premultiplied(255, 255, 255, 12)
+                    } else {
+                        egui::Color32::from_rgba_premultiplied(0, 0, 0, 12)
+                    };
                     painter.rect_filled(
                         row_rect,
                         0.0,
-                        ui.visuals().selection.bg_fill.gamma_multiply(0.25),
+                        line_highlight_color,
                     );
                 }
 
@@ -1095,11 +1101,19 @@ pub fn replace_match(
     document: &mut Document,
     search_match: SearchMatch,
     replacement: &str,
+    regex: Option<&Regex>,
 ) -> usize {
     let SearchMatch { start, end } = search_match;
     if end > document.rope.byte_len() || start > end {
         return start.min(document.rope.byte_len());
     }
+
+    let inserted_text = if let Some(regex) = regex {
+        let matched_text = document.rope.byte_slice(start..end).to_string();
+        regex.replace(&matched_text, replacement).to_string()
+    } else {
+        replacement.to_owned()
+    };
 
     let deleted_text = document.rope.byte_slice(start..end).to_string();
     let selection_before = primary_selection(document);
@@ -1107,18 +1121,18 @@ pub fn replace_match(
     if start != end {
         document.rope.delete(start..end);
     }
-    if !replacement.is_empty() {
-        document.rope.insert(start, replacement);
+    if !inserted_text.is_empty() {
+        document.rope.insert(start, &inserted_text);
     }
 
-    let caret = start + replacement.len();
+    let caret = start + inserted_text.len();
 
     document.commit_and_start_new_undo_group();
     document.push_undo(EditTransaction {
         start,
         end,
         deleted_text,
-        inserted_text: replacement.to_owned(),
+        inserted_text: inserted_text.clone(),
         selections_before: vec![selection_before],
     });
     document.commit_undo_group();
@@ -1132,27 +1146,58 @@ pub fn replace_all_matches(
     document: &mut Document,
     matches: &[SearchMatch],
     replacement: &str,
+    regex: Option<&Regex>,
 ) -> usize {
     if matches.is_empty() {
         return 0;
     }
 
-    let rope_len = document.rope.byte_len();
     let original_text = document.text();
     let selection_before = primary_selection(document);
     let mut count = 0;
-    for search_match in matches.iter().rev() {
-        let SearchMatch { start, end } = *search_match;
-        if end > rope_len || start > end {
-            continue;
+
+    if let Some(regex) = regex {
+        // Regex replacements can change match lengths, so we need offset tracking
+        let mut offset_shift: isize = 0;
+        for search_match in matches.iter().rev() {
+            let SearchMatch { start, end } = *search_match;
+            let adjusted_start = (start as isize + offset_shift) as usize;
+            let adjusted_end = (end as isize + offset_shift) as usize;
+
+            if adjusted_end > document.rope.byte_len() || adjusted_start > adjusted_end {
+                continue;
+            }
+
+            let matched_text = document.rope.byte_slice(adjusted_start..adjusted_end).to_string();
+            let inserted_text = regex.replace(&matched_text, replacement).to_string();
+            let len_change = inserted_text.len() as isize - (adjusted_end - adjusted_start) as isize;
+
+            if adjusted_start != adjusted_end {
+                document.rope.delete(adjusted_start..adjusted_end);
+            }
+            if !inserted_text.is_empty() {
+                document.rope.insert(adjusted_start, &inserted_text);
+            }
+            offset_shift += len_change;
+            count += 1;
         }
-        if start != end {
-            document.rope.delete(start..end);
+    } else {
+        // Non-regex: process in reverse order using original positions
+        for search_match in matches.iter().rev() {
+            let SearchMatch { start, end } = *search_match;
+
+            if end > document.rope.byte_len() || start > end {
+                continue;
+            }
+
+            if start != end {
+                document.rope.delete(start..end);
+            }
+            if !replacement.is_empty() {
+                document.rope.insert(start, replacement);
+            }
+            count += 1;
         }
-        if !replacement.is_empty() {
-            document.rope.insert(start, replacement);
-        }
-        count += 1;
     }
 
     if count > 0 {
@@ -2875,7 +2920,7 @@ mod tests {
         let mut document = document("hello world hello");
         let revision_before = document.revision;
 
-        let caret = replace_match(&mut document, SearchMatch { start: 6, end: 11 }, "earth");
+        let caret = replace_match(&mut document, SearchMatch { start: 6, end: 11 }, "earth", None);
 
         assert_eq!(document.text(), "hello earth hello");
         assert_eq!(caret, 11);
@@ -2887,7 +2932,7 @@ mod tests {
     fn replace_match_handles_empty_replacement() {
         let mut document = document("delete me here");
 
-        let caret = replace_match(&mut document, SearchMatch { start: 7, end: 9 }, "");
+        let caret = replace_match(&mut document, SearchMatch { start: 7, end: 9 }, "", None);
 
         assert_eq!(document.text(), "delete  here");
         assert_eq!(caret, 7);
@@ -2907,6 +2952,7 @@ mod tests {
                 SearchMatch { start: 16, end: 19 },
             ],
             "qux",
+            None,
         );
 
         assert_eq!(count, 3);
@@ -2927,6 +2973,7 @@ mod tests {
                 SearchMatch { start: 4, end: 5 },
             ],
             "aa",
+            None,
         );
 
         assert_eq!(count, 3);
@@ -2944,6 +2991,7 @@ mod tests {
                 SearchMatch { start: 8, end: 13 },
             ],
             "x",
+            None,
         );
 
         assert_eq!(count, 2);
@@ -2955,7 +3003,7 @@ mod tests {
         let mut document = document("untouched");
         let revision_before = document.revision;
 
-        let count = replace_all_matches(&mut document, &[], "x");
+        let count = replace_all_matches(&mut document, &[], "x", None);
 
         assert_eq!(count, 0);
         assert_eq!(document.text(), "untouched");
@@ -3148,6 +3196,7 @@ mod tests {
                 SearchMatch { start: 8, end: 11 },
             ],
             "baz",
+            None,
         );
         document.commit_undo_group();
 
@@ -3160,7 +3209,7 @@ mod tests {
     #[test]
     fn replace_match_can_be_undone() {
         let mut document = document("hello world");
-        replace_match(&mut document, SearchMatch { start: 6, end: 11 }, "earth");
+        replace_match(&mut document, SearchMatch { start: 6, end: 11 }, "earth", None);
         document.commit_undo_group();
 
         assert_eq!(document.text(), "hello earth");

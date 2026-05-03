@@ -3,6 +3,7 @@ use std::time::Duration;
 use crop::Rope;
 use crossbeam_channel::{Sender, bounded};
 use eframe::egui;
+use regex::Regex;
 use tracing::{info, warn};
 
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
     persistence::{
         SaveMsg, SaveWorker, default_session_path, load_session, quarantine_corrupt_session,
     },
-    search::{SearchMatch, SearchOptions, advance_match, find_matches},
+    search::{SearchMatch, SearchOptions, GlobalSearchResult, advance_match, find_matches, find_matches_in_documents},
     syntax::{LanguageDetection, LanguageRegistry},
 };
 
@@ -24,51 +25,90 @@ struct SearchState {
     replacement: String,
     case_sensitive: bool,
     whole_word: bool,
+    use_regex: bool,
+    search_all_tabs: bool,
     matches: Vec<SearchMatch>,
     current_match: Option<usize>,
     focus_pending: bool,
     selection_pending: bool,
     occurrence_selections: Vec<Selection>,
+    global_results: Vec<GlobalSearchResult>,
+    global_index: Option<usize>,
 }
 
 impl SearchState {
-    fn recompute(&mut self, rope: &Rope) {
+    fn recompute(&mut self, rope: &Rope, documents: &[crate::model::Document]) {
         let old_range = self
             .current_match
             .and_then(|index| self.matches.get(index).copied());
         let options = SearchOptions {
             case_sensitive: self.case_sensitive,
             whole_word: self.whole_word,
+            use_regex: self.use_regex,
         };
 
-        self.matches = find_matches(rope, &self.query, options);
-        self.current_match = if self.matches.is_empty() {
-            None
-        } else if let Some(old_range) = old_range {
-            self.matches
-                .iter()
-                .position(|range| *range == old_range)
-                .or(Some(0))
+        if self.search_all_tabs {
+            self.global_results = find_matches_in_documents(documents, &self.query, options);
+            self.matches.clear();
+            self.current_match = None;
+            self.global_index = if self.global_results.is_empty() {
+                None
+            } else if let Some(old) = old_range {
+                self.global_results
+                    .iter()
+                    .position(|r| r.match_start == old.start && r.match_end == old.end)
+                    .or(Some(0))
+            } else {
+                Some(0)
+            };
         } else {
-            Some(0)
-        };
+            self.matches = find_matches(rope, &self.query, options);
+            self.global_results.clear();
+            self.global_index = None;
+            self.current_match = if self.matches.is_empty() {
+                None
+            } else if let Some(old_range) = old_range {
+                self.matches
+                    .iter()
+                    .position(|range| *range == old_range)
+                    .or(Some(0))
+            } else {
+                Some(0)
+            };
+        }
     }
 
     fn next_match(&mut self) {
-        self.current_match = advance_match(self.current_match, self.matches.len(), 1);
+        if self.search_all_tabs {
+            self.global_index = advance_match(self.global_index, self.global_results.len(), 1);
+        } else {
+            self.current_match = advance_match(self.current_match, self.matches.len(), 1);
+        }
         self.selection_pending = true;
     }
 
     fn previous_match(&mut self) {
-        self.current_match = advance_match(self.current_match, self.matches.len(), -1);
+        if self.search_all_tabs {
+            self.global_index = advance_match(self.global_index, self.global_results.len(), -1);
+        } else {
+            self.current_match = advance_match(self.current_match, self.matches.len(), -1);
+        }
         self.selection_pending = true;
     }
 
     fn current_label(&self) -> String {
-        match (self.current_match, self.matches.len()) {
-            (_, 0) => "0 / 0".to_owned(),
-            (Some(index), total) => format!("{} / {total}", index + 1),
-            (None, total) => format!("0 / {total}"),
+        if self.search_all_tabs {
+            match (self.global_index, self.global_results.len()) {
+                (_, 0) => "0 / 0".to_owned(),
+                (Some(index), total) => format!("{} / {total}", index + 1),
+                (None, total) => format!("0 / {total}"),
+            }
+        } else {
+            match (self.current_match, self.matches.len()) {
+                (_, 0) => "0 / 0".to_owned(),
+                (Some(index), total) => format!("{} / {total}", index + 1),
+                (None, total) => format!("0 / {total}"),
+            }
         }
     }
 
@@ -93,6 +133,7 @@ impl SearchState {
         let options = SearchOptions {
             case_sensitive: self.case_sensitive,
             whole_word: self.whole_word,
+            use_regex: self.use_regex,
         };
         let matches = find_matches(rope, &query, options);
 
@@ -133,7 +174,7 @@ impl SearchState {
             return;
         }
         self.query = text;
-        self.recompute(rope);
+        self.recompute(rope, &[]);
         self.occurrence_selections
             .push(Selection { anchor: start, head: end });
     }
@@ -216,9 +257,7 @@ impl PileApp {
     fn refresh_active_document_metadata(&mut self) {
         let text = self.active_document_text();
         self.last_detection = self.syntax.detect(&text);
-        if let Some(document) = self.state.active_document() {
-            self.search.recompute(&document.rope);
-        }
+        self.recompute_search();
     }
 
     fn document_edited(&mut self) {
@@ -452,9 +491,7 @@ impl PileApp {
     fn open_search(&mut self) {
         self.search.visible = true;
         self.search.focus_pending = true;
-        if let Some(document) = self.state.active_document() {
-            self.search.recompute(&document.rope);
-        }
+        self.recompute_search();
     }
 
     fn select_next_occurrence(&mut self) {
@@ -477,6 +514,13 @@ impl PileApp {
         self.document_edited();
     }
 
+    fn recompute_search(&mut self) {
+        if let Some(document) = self.state.active_document() {
+            let rope = document.rope.clone();
+            self.search.recompute(&rope, &self.state.documents);
+        }
+    }
+
     fn close_search(&mut self) {
         self.search.visible = false;
         self.search.focus_pending = false;
@@ -492,10 +536,15 @@ impl PileApp {
 
         ui.horizontal(|ui| {
             ui.label("Find");
+            let hint = if self.search.search_all_tabs {
+                "Search all scratches"
+            } else {
+                "Search current scratch"
+            };
             let response = ui.add_sized(
                 [240.0, ui.spacing().interact_size.y],
                 egui::TextEdit::singleline(&mut self.search.query)
-                    .hint_text("Search current scratch")
+                    .hint_text(hint)
                     .desired_width(240.0),
             );
 
@@ -536,6 +585,14 @@ impl PileApp {
             changed |= ui
                 .checkbox(&mut self.search.whole_word, "Word")
                 .on_hover_text("Whole word")
+                .changed();
+            changed |= ui
+                .checkbox(&mut self.search.use_regex, ".*")
+                .on_hover_text("Regular expression")
+                .changed();
+            changed |= ui
+                .checkbox(&mut self.search.search_all_tabs, "All")
+                .on_hover_text("Search all tabs")
                 .changed();
 
             let replace_label = if self.search.replace_visible {
@@ -594,9 +651,7 @@ impl PileApp {
         }
 
         if changed {
-            if let Some(document) = self.state.active_document() {
-                self.search.recompute(&document.rope);
-            }
+            self.recompute_search();
         }
         if go_next {
             self.search.next_match();
@@ -613,68 +668,171 @@ impl PileApp {
     }
 
     fn replace_current_match(&mut self) {
-        let Some(index) = self.search.current_match else {
-            return;
-        };
-        let Some(search_match) = self.search.matches.get(index).copied() else {
-            return;
-        };
-        let replacement = self.search.replacement.clone();
-
-        let Some(document) = self.state.active_document_mut() else {
-            return;
-        };
-        replace_match(document, search_match, &replacement);
-
-        let rope = document.rope.clone();
-        self.search.recompute(&rope);
-        if !self.search.matches.is_empty() {
-            let next = if index < self.search.matches.len() {
-                index
-            } else {
-                0
+        if self.search.search_all_tabs {
+            // For global search, only replace in active document
+            let Some(index) = self.search.global_index else {
+                return;
             };
-            self.search.current_match = Some(next);
-            self.search.selection_pending = true;
+            let Some(result) = self.search.global_results.get(index) else {
+                return;
+            };
+            if result.document_id != self.state.active_document {
+                // Switch to the document
+                self.state.set_active(result.document_id);
+                self.search.selection_pending = true;
+                return;
+            }
+            let search_match = SearchMatch {
+                start: result.match_start,
+                end: result.match_end,
+            };
+            let replacement = self.search.replacement.clone();
+
+            let regex = if self.search.use_regex {
+                Regex::new(&self.search.query).ok()
+            } else {
+                None
+            };
+
+            let Some(document) = self.state.active_document_mut() else {
+                return;
+            };
+            replace_match(document, search_match, &replacement, regex.as_ref());
+
+            self.recompute_search();
+            if !self.search.global_results.is_empty() {
+                let next = if index < self.search.global_results.len() {
+                    index
+                } else {
+                    0
+                };
+                self.search.global_index = Some(next);
+                self.search.selection_pending = true;
+            }
+            self.document_edited();
+        } else {
+            let Some(index) = self.search.current_match else {
+                return;
+            };
+            let Some(search_match) = self.search.matches.get(index).copied() else {
+                return;
+            };
+            let replacement = self.search.replacement.clone();
+
+            let regex = if self.search.use_regex {
+                Regex::new(&self.search.query).ok()
+            } else {
+                None
+            };
+
+            let Some(document) = self.state.active_document_mut() else {
+                return;
+            };
+            replace_match(document, search_match, &replacement, regex.as_ref());
+
+            let rope = document.rope.clone();
+            self.search.recompute(&rope, &self.state.documents);
+            if !self.search.matches.is_empty() {
+                let next = if index < self.search.matches.len() {
+                    index
+                } else {
+                    0
+                };
+                self.search.current_match = Some(next);
+                self.search.selection_pending = true;
+            }
+            self.document_edited();
         }
-        self.document_edited();
     }
 
     fn replace_all_in_active_document(&mut self) {
-        if self.search.matches.is_empty() {
-            return;
-        }
-        let matches = self.search.matches.clone();
-        let replacement = self.search.replacement.clone();
+        if self.search.search_all_tabs {
+            // Collect matches only from active document
+            let active_id = self.state.active_document;
+            let matches: Vec<SearchMatch> = self
+                .search
+                .global_results
+                .iter()
+                .filter(|r| r.document_id == active_id)
+                .map(|r| SearchMatch {
+                    start: r.match_start,
+                    end: r.match_end,
+                })
+                .collect();
+            let replacement = self.search.replacement.clone();
 
-        let Some(document) = self.state.active_document_mut() else {
-            return;
-        };
-        let count = replace_all_matches(document, &matches, &replacement);
-        if count == 0 {
-            return;
-        }
+            let regex = if self.search.use_regex {
+                Regex::new(&self.search.query).ok()
+            } else {
+                None
+            };
 
-        let rope = document.rope.clone();
-        self.search.recompute(&rope);
-        self.document_edited();
+            let Some(document) = self.state.active_document_mut() else {
+                return;
+            };
+            let count = replace_all_matches(document, &matches, &replacement, regex.as_ref());
+            if count == 0 {
+                return;
+            }
+
+            self.recompute_search();
+            self.document_edited();
+        } else {
+            if self.search.matches.is_empty() {
+                return;
+            }
+            let matches = self.search.matches.clone();
+            let replacement = self.search.replacement.clone();
+
+            let regex = if self.search.use_regex {
+                Regex::new(&self.search.query).ok()
+            } else {
+                None
+            };
+
+            let Some(document) = self.state.active_document_mut() else {
+                return;
+            };
+            let count = replace_all_matches(document, &matches, &replacement, regex.as_ref());
+            if count == 0 {
+                return;
+            }
+
+            self.recompute_search();
+            self.document_edited();
+        }
     }
 
     fn render_editor(&mut self, ui: &mut egui::Ui) {
         let reveal_selection = if self.search.selection_pending {
-            self.search
-                .current_match
-                .and_then(|index| self.search.matches.get(index))
-                .map(|search_match| crate::model::Selection {
-                    anchor: search_match.start,
-                    head: search_match.end,
-                })
+            if self.search.search_all_tabs {
+                if let Some(index) = self.search.global_index {
+                    self.search.global_results.get(index).and_then(|result| {
+                        // Switch to the correct tab
+                        self.state.set_active(result.document_id);
+                        Some(crate::model::Selection {
+                            anchor: result.match_start,
+                            head: result.match_end,
+                        })
+                    })
+                } else {
+                    None
+                }
+            } else {
+                self.search
+                    .current_match
+                    .and_then(|index| self.search.matches.get(index))
+                    .map(|search_match| crate::model::Selection {
+                        anchor: search_match.start,
+                        head: search_match.end,
+                    })
+            }
         } else {
             None
         };
         self.search.selection_pending = false;
 
-        let search_highlights = if self.search.visible {
+        let search_highlights = if self.search.visible && !self.search.search_all_tabs {
             self.search
                 .matches
                 .iter()
@@ -802,11 +960,15 @@ mod tests {
             replacement: String::new(),
             case_sensitive: false,
             whole_word: false,
+            use_regex: false,
+            search_all_tabs: false,
             matches: vec![],
             current_match: None,
             focus_pending: false,
             selection_pending: false,
             occurrence_selections: vec![],
+            global_results: vec![],
+            global_index: None,
         };
 
         state.select_next_occurrence(&rope, primary);
@@ -828,11 +990,15 @@ mod tests {
             replacement: String::new(),
             case_sensitive: false,
             whole_word: false,
+            use_regex: false,
+            search_all_tabs: false,
             matches: vec![],
             current_match: None,
             focus_pending: false,
             selection_pending: false,
             occurrence_selections: vec![],
+            global_results: vec![],
+            global_index: None,
         };
 
         state.find_under_cursor(&rope, primary);
@@ -854,11 +1020,15 @@ mod tests {
             replacement: String::new(),
             case_sensitive: false,
             whole_word: false,
+            use_regex: false,
+            search_all_tabs: false,
             matches: vec![],
             current_match: None,
             focus_pending: false,
             selection_pending: false,
             occurrence_selections: vec![Selection { anchor: 0, head: 5 }],
+            global_results: vec![],
+            global_index: None,
         };
 
         state.find_under_cursor(&rope, primary);
