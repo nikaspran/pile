@@ -12,7 +12,9 @@ use crossbeam_channel::{Receiver, Sender, bounded};
 use directories::ProjectDirs;
 use tracing::{debug, error, warn};
 
-use crate::model::SessionSnapshot;
+use serde::Deserialize;
+
+use crate::model::{SessionSnapshot, PaneSnapshot};
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 const SESSION_FILE: &str = ".session.bin";
@@ -76,14 +78,46 @@ pub fn load_session(path: &PathBuf) -> Result<Option<SessionSnapshot>> {
     }
 
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let snapshot: SessionSnapshot = bincode::deserialize(&bytes)
-        .with_context(|| format!("failed to decode {}", path.display()))?;
 
-    if snapshot.schema_version != 1 {
-        anyhow::bail!("unsupported session schema {}", snapshot.schema_version);
+    // Try to deserialize as version 2 first
+    match bincode::deserialize::<SessionSnapshot>(&bytes) {
+        Ok(snapshot) => {
+            if snapshot.schema_version == 2 {
+                Ok(Some(snapshot))
+            } else {
+                anyhow::bail!("unsupported session schema {}", snapshot.schema_version);
+            }
+        }
+        Err(_) => {
+            // Try to deserialize as version 1 and migrate
+            #[derive(Deserialize)]
+            struct SessionSnapshotV1 {
+                schema_version: u32,
+                state: crate::model::AppState,
+            }
+
+            let snapshot_v1: SessionSnapshotV1 = bincode::deserialize(&bytes)
+                .with_context(|| format!("failed to decode {}", path.display()))?;
+
+            if snapshot_v1.schema_version != 1 {
+                anyhow::bail!("unsupported session schema {}", snapshot_v1.schema_version);
+            }
+
+            // Migrate to version 2
+            Ok(Some(SessionSnapshot {
+                schema_version: 2,
+                state: snapshot_v1.state,
+                panes: vec![PaneSnapshot {
+                    document_id: snapshot_v1.state.active_document,
+                    preferred_column: None,
+                    visible_rows: None,
+                    column_selection: false,
+                    column_selection_anchor_col: None,
+                }],
+                active_pane: 0,
+            }))
+        }
     }
-
-    Ok(Some(snapshot))
 }
 
 fn run_save_loop(rx: Receiver<SaveMsg>, session_path: PathBuf) {

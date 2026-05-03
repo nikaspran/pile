@@ -8,7 +8,7 @@ use crate::{
     command::Command,
     command_palette::CommandPalette,
     editor::{EditorViewState, SearchHighlight, replace_all_matches, replace_match, show_editor},
-    model::{AppState, DocumentId, Selection, SessionSnapshot},
+    model::{AppState, DocumentId, PaneSnapshot, Selection, SessionSnapshot},
     native_menu::{NativeMenu, NativeMenuCommand},
     persistence::{
         SaveMsg, SaveWorker, default_session_path, load_session, quarantine_corrupt_session,
@@ -59,7 +59,7 @@ impl GotoLineState {
 }
 
 #[derive(Clone, Debug)]
-struct EditorPane {
+pub struct EditorPane {
     document_id: DocumentId,
     view_state: EditorViewState,
 }
@@ -96,13 +96,20 @@ pub struct PileApp {
 impl PileApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let session_path = default_session_path();
-        let state = match load_session(&session_path) {
-            Ok(Some(snapshot)) => snapshot.state,
-            Ok(None) => AppState::empty(),
+        let (state, saved_panes, saved_active_pane) = match load_session(&session_path) {
+            Ok(Some(snapshot)) => {
+                let panes = if snapshot.schema_version >= 2 {
+                    Some((snapshot.panes, snapshot.active_pane))
+                } else {
+                    None
+                };
+                (snapshot.state, panes, panes.map(|(_, p)| p))
+            }
+            Ok(None) => (AppState::empty(), None, None),
             Err(err) => {
                 warn!(error = %err, path = %session_path.display(), "failed to restore session");
                 quarantine_corrupt_session(&session_path);
-                AppState::empty()
+                (AppState::empty(), None, None)
             }
         };
 
@@ -114,7 +121,27 @@ impl PileApp {
             .map(|document| syntax.detect_rope(&document.rope))
             .unwrap_or_else(|| syntax.detect(""));
 
-        let active_doc = state.active_document;
+        let (panes, active_pane) = if let Some((saved_panes, saved_active_pane)) = saved_panes {
+            let panes: Vec<EditorPane> = saved_panes
+                .into_iter()
+                .map(|pane_snap| EditorPane {
+                    document_id: pane_snap.document_id,
+                    view_state: EditorViewState {
+                        preferred_column: pane_snap.preferred_column,
+                        visible_rows: pane_snap.visible_rows,
+                        last_click_time: None,
+                        click_count: 0,
+                        column_selection: pane_snap.column_selection,
+                        column_selection_anchor_col: pane_snap.column_selection_anchor_col,
+                    },
+                })
+                .collect();
+            let active_pane = saved_active_pane.min(panes.len() - 1);
+            (panes, active_pane)
+        } else {
+            (vec![EditorPane::new(state.active_document)], 0)
+        };
+
         info!(documents = state.documents.len(), "pile started");
 
         Self {
@@ -132,20 +159,42 @@ impl PileApp {
             search: SearchState::default(),
             command_palette: CommandPalette::new(),
             tab_switcher: TabSwitcher::new(),
-            panes: vec![EditorPane::new(active_doc)],
-            active_pane: 0,
+            panes,
+            active_pane,
             goto_line: GotoLineState::new(),
         }
     }
 
     fn mark_changed(&self) {
-        let snapshot = SessionSnapshot::from(&self.state);
+        let snapshot = SessionSnapshot {
+            schema_version: 2,
+            state: self.state.clone(),
+            panes: self.panes.iter().map(|pane| PaneSnapshot {
+                document_id: pane.document_id,
+                preferred_column: pane.view_state.preferred_column,
+                visible_rows: pane.view_state.visible_rows,
+                column_selection: pane.view_state.column_selection,
+                column_selection_anchor_col: pane.view_state.column_selection_anchor_col,
+            }).collect(),
+            active_pane: self.active_pane,
+        };
         let _ = self.save_tx.send(SaveMsg::Changed(snapshot));
     }
 
     fn flush_session(&self) {
         let (ack_tx, ack_rx) = bounded(1);
-        let snapshot = SessionSnapshot::from(&self.state);
+        let snapshot = SessionSnapshot {
+            schema_version: 2,
+            state: self.state.clone(),
+            panes: self.panes.iter().map(|pane| PaneSnapshot {
+                document_id: pane.document_id,
+                preferred_column: pane.view_state.preferred_column,
+                visible_rows: pane.view_state.visible_rows,
+                column_selection: pane.view_state.column_selection,
+                column_selection_anchor_col: pane.view_state.column_selection_anchor_col,
+            }).collect(),
+            active_pane: self.active_pane,
+        };
         let _ = self.save_tx.send(SaveMsg::Flush(snapshot, ack_tx));
         let _ = ack_rx.recv_timeout(Duration::from_secs(2));
     }
@@ -1409,14 +1458,37 @@ impl PileApp {
 
 impl eframe::App for PileApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.handle_native_menu_commands();
-        self.handle_keyboard_shortcuts(ctx);
+        // ... existing code ...
+    }
 
-        egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("+").on_hover_text("New scratch").clicked() {
-                    self.execute_command(AppCommand::NewScratch);
-                }
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.flush_session();
+        if let Some(worker) = self.save_worker.take() {
+            worker.shutdown();
+        }
+    }
+}
+
+impl From<(&AppState, &[EditorPane])> for SessionSnapshot {
+    fn from((state, panes): (&AppState, &[EditorPane])) -> Self {
+        Self {
+            schema_version: 2,
+            state: state.clone(),
+            panes: panes
+                .iter()
+                .map(|pane| PaneSnapshot {
+                    document_id: pane.document_id,
+                    preferred_column: pane.view_state.preferred_column,
+                    visible_rows: pane.view_state.visible_rows,
+                    column_selection: pane.view_state.column_selection,
+                    column_selection_anchor_col: pane.view_state.column_selection_anchor_col,
+                })
+                .collect(),
+            active_pane: 0, // Will be set by caller
+        }
+    }
+}
+}
 
                 if ui.button("x").on_hover_text("Close scratch").clicked() {
                     self.execute_command(AppCommand::CloseScratch);
