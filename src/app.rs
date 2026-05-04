@@ -155,6 +155,8 @@ impl PileApp {
                             click_count: 0,
                             column_selection: pane_snap.column_selection,
                             column_selection_anchor_col: pane_snap.column_selection_anchor_col,
+                            scroll_animation: None,
+                            cached_layout: None,
                         },
                     })
                     .collect();

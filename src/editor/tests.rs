@@ -888,7 +888,8 @@ fn offset_at_pointer_maps_clicks_to_byte_offsets() {
     let content_height = (line_count as f32 * row_height).max(200.0);
     let font_id = egui::FontId::monospace(14.0);
 
-    let layout = super::layout::TextLayoutPipeline {
+    // Use the new test constructor to avoid needing private fields
+    let layout = super::layout::TextLayoutPipeline::for_test(
         row_height,
         char_width,
         font_id,
@@ -897,7 +898,7 @@ fn offset_at_pointer_maps_clicks_to_byte_offsets() {
         content_width,
         content_height,
         line_count,
-    };
+    );
 
     let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 200.0));
 

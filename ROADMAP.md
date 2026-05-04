@@ -75,7 +75,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add indentation guides.
 - Completed: Add bracket matching highlights.
 - Completed: Add minimap with viewport indicator and click/drag navigation.
-- Add smooth scrolling and large-file-safe viewport virtualization.
+- Completed: Add smooth scrolling and large-file-safe viewport virtualization.
 - Add high-DPI and font fallback testing.
 - Add theme support with bundled dark and light themes.
 

@@ -1,6 +1,6 @@
 use crop::Rope;
 use eframe::egui;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::model::{Document, Selection};
 
@@ -41,6 +41,44 @@ const LINE_GUTTER_MIN_WIDTH: f32 = 44.0;
 const LINE_GUTTER_PADDING: f32 = 10.0;
 const EDITOR_MIN_WIDTH: f32 = 320.0;
 const TRIPLE_CLICK_DURATION: f32 = 0.4;
+const SMOOTH_SCROLL_DURATION: f32 = 0.15; // seconds
+const LARGE_FILE_LINE_COUNT: usize = 50000;
+const LARGE_FILE_BYTE_SIZE: usize = 5_000_000;
+
+/// Smooth scroll animation state.
+#[derive(Clone, Debug)]
+pub struct ScrollAnimation {
+    start_y: f32,
+    target_y: f32,
+    start_time: Instant,
+    duration: Duration,
+}
+
+impl ScrollAnimation {
+    pub fn new(start_y: f32, target_y: f32) -> Self {
+        Self {
+            start_y,
+            target_y,
+            start_time: Instant::now(),
+            duration: Duration::from_secs_f32(SMOOTH_SCROLL_DURATION),
+        }
+    }
+
+    pub fn current_value(&self) -> f32 {
+        let elapsed = self.start_time.elapsed();
+        if elapsed >= self.duration {
+            return self.target_y;
+        }
+        let t = elapsed.as_secs_f32() / self.duration.as_secs_f32();
+        // Ease-out cubic
+        let t = 1.0 - (1.0 - t).powi(3);
+        self.start_y + (self.target_y - self.start_y) * t
+    }
+
+    pub fn is_done(&self) -> bool {
+        self.start_time.elapsed() >= self.duration
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct EditorViewState {
@@ -52,6 +90,10 @@ pub struct EditorViewState {
     pub column_selection: bool,
     /// The anchor column for column selection
     pub column_selection_anchor_col: Option<usize>,
+    /// Active smooth scroll animation, if any.
+    pub scroll_animation: Option<ScrollAnimation>,
+    /// Cached layout pipeline, invalidated on revision/width/wrap/ruler changes.
+    pub cached_layout: Option<(u64, f32, crate::settings::WrapMode, Vec<usize>, TextLayoutPipeline)>,
 }
 
 #[derive(Debug)]
@@ -129,11 +171,48 @@ pub fn show_editor(
 
     let available_width = ui.available_width().max(EDITOR_MIN_WIDTH);
     let available_height = ui.available_height();
-    let layout = TextLayoutPipeline::new(ui, &document.rope, available_width, available_height, wrap_mode, rulers);
+
+    // Use cached layout if inputs haven't changed, otherwise rebuild and cache.
+    let mut need_rebuild = true;
+    if let Some((rev, w, cached_wrap, cached_rulers, _)) = &view_state.cached_layout {
+        if *rev == document.revision
+            && (*w - available_width).abs() < 1.0
+            && *cached_wrap == wrap_mode
+            && *cached_rulers == rulers
+        {
+            need_rebuild = false;
+        }
+    }
+
+    if need_rebuild {
+        let pipeline =
+            TextLayoutPipeline::new(ui, &document.rope, available_width, available_height, wrap_mode, rulers);
+        view_state.cached_layout = Some((
+            document.revision,
+            available_width,
+            wrap_mode,
+            rulers.to_vec(),
+            pipeline.clone(),
+        ));
+    }
+
+    let layout = view_state
+        .cached_layout
+        .as_ref()
+        .map(|(_, _, _, _, pl)| pl.clone())
+        .unwrap_or_else(|| {
+            TextLayoutPipeline::new(ui, &document.rope, available_width, available_height, wrap_mode, rulers)
+        });
 
     let mut changed = false;
 
-    let scroll_offset = egui::Vec2::new(document.scroll.x, document.scroll.y);
+    // Use animated scroll value if animating, otherwise use stored document scroll
+    let scroll_y = if let Some(anim) = &view_state.scroll_animation {
+        anim.current_value()
+    } else {
+        document.scroll.y
+    };
+    let scroll_offset = egui::Vec2::new(document.scroll.x, scroll_y);
 
     let output = egui::ScrollArea::both()
         .id_salt("editor-scroll")
@@ -264,15 +343,27 @@ pub fn show_editor(
             let primary = primary_selection(document);
             let caret_line = line_index_of_byte(&document.rope, primary.head);
 
-            // Precompute bookmarked lines for this render pass
-            let bookmarked_lines: std::collections::HashSet<usize> = document
-                .bookmarks
-                .iter()
-                .map(|&bm| line_index_of_byte(&document.rope, bm))
-                .collect();
+            // Detect large files for performance guards
+            let is_large_file = layout.line_count > LARGE_FILE_LINE_COUNT
+                || document.rope.byte_len() > LARGE_FILE_BYTE_SIZE;
 
-            // Precompute bracket match for the primary cursor
-            let bracket_match = find_matching_bracket_at(&document.rope, primary.head);
+            // Precompute bookmarked lines for this render pass (skip for large files)
+            let bookmarked_lines: std::collections::HashSet<usize> = if !is_large_file {
+                document
+                    .bookmarks
+                    .iter()
+                    .map(|&bm| line_index_of_byte(&document.rope, bm))
+                    .collect()
+            } else {
+                std::collections::HashSet::new()
+            };
+
+            // Precompute bracket match for the primary cursor (skip for large files)
+            let bracket_match = if !is_large_file {
+                find_matching_bracket_at(&document.rope, primary.head)
+            } else {
+                None
+            };
             let bracket_highlight_color = if ui.visuals().dark_mode {
                 egui::Color32::from_rgba_premultiplied(255, 255, 255, 60)
             } else {
@@ -294,23 +385,25 @@ pub fn show_editor(
                     painter.rect_filled(full_line_rect, 0.0, line_highlight_color);
                 }
 
-                // Draw bracket matching highlights
-                if let Some((bracket_offset, match_offset)) = bracket_match {
-                    paint_bracket_highlight_for_line(
-                        &painter,
-                        &document.rope,
-                        bracket_offset,
-                        match_offset,
-                        line_index,
-                        egui::pos2(rect.left() + layout.text_origin_x, y),
-                        layout.row_height,
-                        layout.char_width,
-                        bracket_highlight_color,
-                    );
+                // Draw bracket matching highlights (skip for large files)
+                if !is_large_file {
+                    if let Some((bracket_offset, match_offset)) = bracket_match {
+                        paint_bracket_highlight_for_line(
+                            &painter,
+                            &document.rope,
+                            bracket_offset,
+                            match_offset,
+                            line_index,
+                            egui::pos2(rect.left() + layout.text_origin_x, y),
+                            layout.row_height,
+                            layout.char_width,
+                            bracket_highlight_color,
+                        );
+                    }
                 }
 
-                // Draw bookmark indicator
-                if bookmarked_lines.contains(&line_index) {
+                // Draw bookmark indicator (skip for large files)
+                if !is_large_file && bookmarked_lines.contains(&line_index) {
                     let bookmark_color = egui::Color32::from_rgb(255, 200, 0);
                     let icon_pos = egui::pos2(rect.left() + 2.0, y + layout.row_height * 0.5 - 6.0);
                     painter.text(
@@ -331,8 +424,8 @@ pub fn show_editor(
                     ui.visuals().weak_text_color(),
                 );
 
-                // Draw indentation guides
-                if show_indentation_guides {
+                // Draw indentation guides (skip for large files)
+                if !is_large_file && show_indentation_guides {
                     let indent_level = line_indent_level(&document.rope, line_index);
                     if indent_level > 0 {
                         let guide_color = if ui.visuals().dark_mode {
@@ -443,6 +536,17 @@ pub fn show_editor(
                 }
             }
 
+    // Handle reveal_selection with smooth scroll animation
+    if reveal_selection.is_some() {
+        let primary = primary_selection(document);
+        let caret_pos = layout.caret_position(&document.rope, primary.head, rect.top());
+        let target_y = caret_pos.y - viewport.height() * 0.5 + layout.row_height * 0.5;
+        let target_y = target_y.max(0.0);
+        if (target_y - document.scroll.y).abs() > 1.0 {
+            view_state.scroll_animation = Some(ScrollAnimation::new(document.scroll.y, target_y));
+        }
+    }
+
             // Draw carets for all selections
             for (i, sel) in document.selections.iter().enumerate() {
                 let caret_pos = layout.caret_position(&document.rope, sel.head, rect.top());
@@ -458,7 +562,7 @@ pub fn show_editor(
                 };
 
                 if is_primary && reveal_selection.is_some() {
-                    ui.scroll_to_rect(caret_rect.expand(24.0), Some(egui::Align::Center));
+                    // Smooth scroll is handled above via animation
                 }
 
                 if response.has_focus() || !is_primary {
@@ -470,9 +574,21 @@ pub fn show_editor(
             }
         });
 
-    // Save scroll offset back to document for persistence
+    // Smooth scroll: advance animation and save animated value
+    if let Some(anim) = &mut view_state.scroll_animation {
+        if anim.is_done() {
+            document.scroll.y = anim.target_y;
+            view_state.scroll_animation = None;
+        } else {
+            document.scroll.y = anim.current_value();
+        }
+    }
+
+    // Save scroll offset back to document for persistence (x always, y if no animation)
     document.scroll.x = output.state.offset.x;
-    document.scroll.y = output.state.offset.y;
+    if view_state.scroll_animation.is_none() {
+        document.scroll.y = output.state.offset.y;
+    }
 
     EditorResponse { changed }
 }

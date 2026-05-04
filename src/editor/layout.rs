@@ -6,6 +6,7 @@ use eframe::egui;
 /// This struct encapsulates all measurements needed to render editor content
 /// without recalculating font metrics on every frame. It provides stable line
 /// heights and fast viewport-based lookups.
+#[derive(Clone, Debug)]
 pub struct TextLayoutPipeline {
     pub row_height: f32,
     pub char_width: f32,
@@ -83,6 +84,35 @@ impl TextLayoutPipeline {
             wrap_mode: wrap_mode_enum,
             wrap_width_chars,
             visual_line_map,
+        }
+    }
+
+    /// Create a TextLayoutPipeline for testing purposes.
+    /// This bypasses the normal construction that requires UI context.
+    #[cfg(test)]
+    pub fn for_test(
+        row_height: f32,
+        char_width: f32,
+        font_id: egui::FontId,
+        gutter_width: f32,
+        text_origin_x: f32,
+        content_width: f32,
+        content_height: f32,
+        line_count: usize,
+    ) -> Self {
+        use crate::settings::WrapMode as SettingsWrapMode;
+        Self {
+            row_height,
+            char_width,
+            font_id,
+            gutter_width,
+            text_origin_x,
+            content_width,
+            content_height,
+            line_count,
+            wrap_mode: WrapMode::NoWrap,
+            wrap_width_chars: usize::MAX,
+            visual_line_map: vec![],
         }
     }
 
