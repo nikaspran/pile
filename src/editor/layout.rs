@@ -15,6 +15,17 @@ pub struct TextLayoutPipeline {
     pub content_width: f32,
     pub content_height: f32,
     pub line_count: usize,
+    wrap_mode: WrapMode,
+    wrap_width_chars: usize,
+    visual_line_map: Vec<(usize, usize, usize)>,
+}
+
+/// Line wrapping mode (internal to layout).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WrapMode {
+    NoWrap,
+    ViewportWrap,
+    RulerWrap,
 }
 
 impl TextLayoutPipeline {
@@ -24,6 +35,8 @@ impl TextLayoutPipeline {
         rope: &Rope,
         available_width: f32,
         available_height: f32,
+        wrap_mode: crate::settings::WrapMode,
+        rulers: &[usize],
     ) -> Self {
         let line_count = visual_line_count(rope);
         let line_digits = decimal_digits(line_count);
@@ -33,8 +46,30 @@ impl TextLayoutPipeline {
         let gutter_width =
             (line_digits as f32 * 8.0 + super::LINE_GUTTER_PADDING * 2.0).max(super::LINE_GUTTER_MIN_WIDTH);
         let text_origin_x = gutter_width + super::LINE_GUTTER_PADDING;
-        let content_width = available_width.max(text_origin_x + super::EDITOR_MIN_WIDTH);
-        let content_height = (line_count as f32 * row_height).max(available_height);
+
+        let wrap_mode_enum = match wrap_mode {
+            crate::settings::WrapMode::NoWrap => WrapMode::NoWrap,
+            crate::settings::WrapMode::ViewportWrap => WrapMode::ViewportWrap,
+            crate::settings::WrapMode::RulerWrap => WrapMode::RulerWrap,
+        };
+
+        let text_width = available_width - text_origin_x;
+        let (wrap_width_chars, visual_line_map) =
+            build_wrap_map(rope, wrap_mode_enum, char_width, text_width, rulers);
+        let wrapped_line_count = if wrap_mode_enum == WrapMode::NoWrap {
+            line_count
+        } else {
+            visual_line_map.len().max(1)
+        };
+
+        let content_width = match wrap_mode_enum {
+            WrapMode::NoWrap => available_width.max(text_origin_x + super::EDITOR_MIN_WIDTH),
+            WrapMode::ViewportWrap | WrapMode::RulerWrap => {
+                let wrap_px = wrap_width_chars as f32 * char_width;
+                (text_origin_x + wrap_px).max(text_origin_x + super::EDITOR_MIN_WIDTH)
+            }
+        };
+        let content_height = (wrapped_line_count as f32 * row_height).max(available_height);
 
         Self {
             row_height,
@@ -44,7 +79,10 @@ impl TextLayoutPipeline {
             text_origin_x,
             content_width,
             content_height,
-            line_count,
+            line_count: wrapped_line_count,
+            wrap_mode: wrap_mode_enum,
+            wrap_width_chars,
+            visual_line_map,
         }
     }
 
@@ -62,7 +100,7 @@ impl TextLayoutPipeline {
             .max(1.0) as usize
     }
 
-    /// Compute the Y coordinate for a given line index.
+    /// Compute the Y coordinate for a given wrapped line index.
     #[inline]
     pub fn line_y(&self, line_index: usize, content_top: f32) -> f32 {
         content_top + line_index as f32 * self.row_height
@@ -81,9 +119,14 @@ impl TextLayoutPipeline {
         offset: usize,
         content_top: f32,
     ) -> egui::Pos2 {
-        let line = line_index_of_byte(rope, offset);
-        let column = column_of_byte(rope, offset);
-        egui::pos2(self.column_x(column), self.line_y(line, content_top))
+        let (wrapped_line, column) = if self.wrap_mode != WrapMode::NoWrap {
+            wrapped_line_and_column(rope, offset, &self.visual_line_map)
+        } else {
+            let line = line_index_of_byte(rope, offset);
+            let col = column_of_byte(rope, offset);
+            (line, col)
+        };
+        egui::pos2(self.column_x(column), self.line_y(wrapped_line, content_top))
     }
 
     /// Convert a pointer position to a byte offset in the rope.
@@ -93,22 +136,134 @@ impl TextLayoutPipeline {
         pos: egui::Pos2,
         rect: egui::Rect,
     ) -> usize {
-        let line = ((pos.y - rect.top()).max(0.0) / self.row_height) as usize;
-        let line = line.min(self.line_count.saturating_sub(1));
-        let column = ((pos.x - (rect.left() + self.text_origin_x)) / self.char_width)
-            .round()
-            .max(0.0) as usize;
-        byte_for_line_column(rope, line, column)
+        if self.wrap_mode == WrapMode::NoWrap {
+            let line = ((pos.y - rect.top()).max(0.0) / self.row_height) as usize;
+            let line = line.min(self.line_count.saturating_sub(1));
+            let column = ((pos.x - (rect.left() + self.text_origin_x)) / self.char_width)
+                .round()
+                .max(0.0) as usize;
+            byte_for_line_column(rope, line, column)
+        } else {
+            let wrapped_line = ((pos.y - rect.top()).max(0.0) / self.row_height) as usize;
+            let wrapped_line = wrapped_line.min(self.line_count.saturating_sub(1));
+            let column = ((pos.x - (rect.left() + self.text_origin_x)) / self.char_width)
+                .round()
+                .max(0.0) as usize;
+            byte_for_wrapped_line_column(rope, wrapped_line, column, &self.visual_line_map)
+        }
     }
 
     /// Return the total content size as a `egui::Vec2`.
     pub fn content_size(&self) -> egui::Vec2 {
         egui::vec2(self.content_width, self.content_height)
     }
+
+    /// Get the text for a wrapped line.
+    pub fn wrapped_line_text(&self, rope: &Rope, wrapped_line_index: usize) -> String {
+        if self.wrap_mode == WrapMode::NoWrap {
+            visual_line_text(rope, wrapped_line_index)
+        } else {
+            let Some(&(doc_line, start_col, end_col)) = self.visual_line_map.get(wrapped_line_index) else {
+                return String::new();
+            };
+            let line_text = visual_line_text(rope, doc_line);
+            line_text
+                .chars()
+                .skip(start_col)
+                .take(end_col - start_col)
+                .collect()
+        }
+    }
+}
+
+fn build_wrap_map(
+    rope: &Rope,
+    wrap_mode: WrapMode,
+    char_width: f32,
+    available_text_width: f32,
+    rulers: &[usize],
+) -> (usize, Vec<(usize, usize, usize)>) {
+    if wrap_mode == WrapMode::NoWrap {
+        return (usize::MAX, vec![]);
+    }
+
+    let wrap_cols = match wrap_mode {
+        WrapMode::NoWrap => usize::MAX,
+        WrapMode::ViewportWrap => {
+            let cols = (available_text_width / char_width).floor().max(1.0) as usize;
+            cols
+        }
+        WrapMode::RulerWrap => rulers.first().copied().unwrap_or(80),
+    };
+
+    let mut map = Vec::new();
+    for doc_line in 0..visual_line_count(rope) {
+        let line_text = visual_line_text(rope, doc_line);
+        let line_len_chars = line_text.chars().count();
+
+        if line_len_chars == 0 {
+            map.push((doc_line, 0, 0));
+        } else if line_len_chars <= wrap_cols {
+            map.push((doc_line, 0, line_len_chars));
+        } else {
+            let mut col = 0;
+            while col < line_len_chars {
+                let end = (col + wrap_cols).min(line_len_chars);
+                map.push((doc_line, col, end));
+                col = end;
+            }
+        }
+    }
+
+    (wrap_cols, map)
+}
+
+fn wrapped_line_and_column(
+    rope: &Rope,
+    offset: usize,
+    visual_line_map: &[(usize, usize, usize)],
+) -> (usize, usize) {
+    let doc_line = line_index_of_byte(rope, offset);
+    let doc_col = column_of_byte(rope, offset);
+
+    for (i, &(line, start_col, _)) in visual_line_map.iter().enumerate() {
+        if line == doc_line && doc_col >= start_col {
+            return (i, doc_col - start_col);
+        }
+    }
+
+    (visual_line_map.len().saturating_sub(1), 0)
+}
+
+fn byte_for_wrapped_line_column(
+    rope: &Rope,
+    wrapped_line: usize,
+    column: usize,
+    visual_line_map: &[(usize, usize, usize)],
+) -> usize {
+    let Some(&(doc_line, start_col, _)) = visual_line_map.get(wrapped_line) else {
+        return rope.byte_len();
+    };
+
+    let target_col = start_col + column;
+    let line_start_byte = byte_of_visual_line(rope, doc_line);
+    let line_text = visual_line_text(rope, doc_line);
+    let mut byte_offset = line_start_byte;
+    let mut char_count = 0usize;
+
+    for c in line_text.chars() {
+        if char_count >= target_col {
+            break;
+        }
+        byte_offset += c.len_utf8();
+        char_count += 1;
+    }
+
+    byte_offset
 }
 
 // Re-export helpers from geometry so the pipeline is self-contained for callers
 use super::{
-    byte_for_line_column, column_of_byte, decimal_digits, line_index_of_byte,
-    monospace_char_width, visual_line_count,
+    byte_for_line_column, byte_of_visual_line, column_of_byte, decimal_digits,
+    line_index_of_byte, monospace_char_width, visual_line_count, visual_line_text,
 };

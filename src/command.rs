@@ -85,6 +85,7 @@ pub enum Command {
 
     // View
     CommandPalette,
+    ToggleWrapMode,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -725,6 +726,13 @@ pub fn all_commands() -> Vec<CommandMetadata> {
                 modifiers: Modifiers::COMMAND | Modifiers::SHIFT,
                 logical_key: Key::P,
             }),
+        },
+        CommandMetadata {
+            command: ToggleWrapMode,
+            name: "Toggle Wrap Mode",
+            description: "Cycle through line wrap modes (No Wrap, Viewport Wrap, Ruler Wrap)",
+            category: View,
+            shortcut: None,
         },
     ]
 }

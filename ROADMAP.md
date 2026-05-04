@@ -68,8 +68,8 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Build a custom text layout pipeline with stable line heights, fast
   viewport measurement, and no nested editor frame.
 - Completed: Persist and restore custom editor scroll offsets per document.
-- Add line wrapping modes: no wrap, viewport wrap, and ruler wrap.
-- Add configurable rulers.
+- Completed: Add line wrapping modes: no wrap, viewport wrap, and ruler wrap.
+- Completed: Add configurable rulers.
 - Add current-line highlight.
 - Add visible whitespace rendering.
 - Add indentation guides.

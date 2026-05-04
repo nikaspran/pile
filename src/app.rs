@@ -11,9 +11,11 @@ use crate::{
     model::{AppState, DocumentId, PaneSnapshot, Selection, SessionSnapshot},
     native_menu::{NativeMenu, NativeMenuCommand},
     persistence::{
-        SaveMsg, SaveWorker, default_session_path, load_session, quarantine_corrupt_session,
+        SaveMsg, SaveWorker, default_session_path, default_settings_path, load_session,
+        load_settings, quarantine_corrupt_session, save_settings,
     },
     search::{SearchMatch, SearchState},
+    settings::Settings,
     syntax::{LanguageDetection, LanguageRegistry},
     tab_switcher::TabSwitcher,
 };
@@ -75,6 +77,7 @@ impl EditorPane {
 
 pub struct PileApp {
     state: AppState,
+    settings: Settings,
     save_tx: Sender<SaveMsg>,
     save_worker: Option<SaveWorker>,
     syntax: LanguageRegistry,
@@ -142,10 +145,14 @@ impl PileApp {
             (vec![EditorPane::new(state.active_document)], 0)
         };
 
+        let settings_path = default_settings_path();
+        let settings = load_settings(&settings_path);
+
         info!(documents = state.documents.len(), panes = panes.len(), "pile started");
 
         Self {
             state,
+            settings,
             save_tx,
             save_worker: Some(save_worker),
             syntax,
@@ -588,6 +595,11 @@ impl PileApp {
 
             // View
             CommandPalette => self.command_palette.toggle(),
+            ToggleWrapMode => {
+                self.settings.wrap_mode = self.settings.wrap_mode.cycle();
+                let settings_path = default_settings_path();
+                save_settings(&settings_path, &self.settings);
+            }
         }
     }
 
@@ -1426,6 +1438,8 @@ impl PileApp {
             reveal_selection,
             &search_highlights,
             &extra_selections,
+            self.settings.wrap_mode,
+            &self.settings.rulers,
         );
 
         if response.changed {

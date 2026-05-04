@@ -13,6 +13,7 @@ use directories::ProjectDirs;
 use tracing::{debug, error, warn};
 
 use crate::model::{PaneSnapshot, SessionSnapshot};
+use crate::settings::Settings;
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 const SESSION_FILE: &str = ".session.bin";
@@ -68,6 +69,28 @@ pub fn default_session_path() -> PathBuf {
     ProjectDirs::from("", "", "pile")
         .map(|dirs| dirs.data_local_dir().join(SESSION_FILE))
         .unwrap_or_else(|| PathBuf::from(SESSION_FILE))
+}
+
+pub fn default_settings_path() -> PathBuf {
+    ProjectDirs::from("", "", "pile")
+        .map(|dirs| dirs.data_local_dir().join("settings.json"))
+        .unwrap_or_else(|| PathBuf::from("settings.json"))
+}
+
+pub fn load_settings(path: &PathBuf) -> Settings {
+    match fs::read_to_string(path) {
+        Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
+        Err(_) => Settings::default(),
+    }
+}
+
+pub fn save_settings(path: &PathBuf, settings: &Settings) {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(settings) {
+        let _ = fs::write(path, json);
+    }
 }
 
 pub fn load_session(path: &PathBuf) -> Result<Option<SessionSnapshot>> {

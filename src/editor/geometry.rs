@@ -241,6 +241,23 @@ pub(super) fn visual_line_text(rope: &Rope, line_index: usize) -> String {
     }
 }
 
+/// Get the text for a wrapped line given the visual line map.
+pub fn wrapped_line_text(
+    rope: &Rope,
+    visual_line_map: &[(usize, usize, usize)],
+    wrapped_line_index: usize,
+) -> String {
+    let Some(&(doc_line, start_col, end_col)) = visual_line_map.get(wrapped_line_index) else {
+        return String::new();
+    };
+    let line_text = visual_line_text(rope, doc_line);
+    line_text
+        .chars()
+        .skip(start_col)
+        .take(end_col - start_col)
+        .collect()
+}
+
 pub(super) fn line_index_of_byte(rope: &Rope, offset: usize) -> usize {
     let offset = offset.min(rope.byte_len());
     let line = if rope.byte_len() == 0 {

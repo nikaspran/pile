@@ -6,6 +6,7 @@ mod model;
 mod native_menu;
 mod persistence;
 mod search;
+mod settings;
 mod syntax;
 mod tab_switcher;
 

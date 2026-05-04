@@ -71,6 +71,8 @@ pub fn show_editor(
     reveal_selection: Option<Selection>,
     search_highlights: &[SearchHighlight],
     extra_selections: &[Selection],
+    wrap_mode: crate::settings::WrapMode,
+    rulers: &[usize],
 ) -> EditorResponse {
     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
     clamp_primary_selection(document);
@@ -82,7 +84,7 @@ pub fn show_editor(
 
     let available_width = ui.available_width().max(EDITOR_MIN_WIDTH);
     let available_height = ui.available_height();
-    let layout = TextLayoutPipeline::new(ui, &document.rope, available_width, available_height);
+    let layout = TextLayoutPipeline::new(ui, &document.rope, available_width, available_height, wrap_mode, rulers);
 
     let mut changed = false;
 
@@ -323,7 +325,7 @@ pub fn show_editor(
                     ui.visuals(),
                 );
 
-                let line_text = visual_line_text(&document.rope, line_index);
+                let line_text = layout.wrapped_line_text(&document.rope, line_index);
                 painter.text(
                     text_pos,
                     egui::Align2::LEFT_TOP,
