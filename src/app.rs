@@ -99,7 +99,7 @@ pub struct PileApp {
 impl PileApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let session_path = default_session_path();
-        let (state, saved_panes) = match load_session(&session_path) {
+        let (mut state, saved_panes) = match load_session(&session_path) {
             Ok(Some(snapshot)) => {
                 let panes = if snapshot.schema_version >= 2 {
                     Some((snapshot.panes, snapshot.active_pane))
@@ -125,23 +125,44 @@ impl PileApp {
             .unwrap_or_else(|| syntax.detect(""));
 
         let (panes, active_pane) = if let Some((saved_panes, saved_active_pane)) = saved_panes {
-            let panes: Vec<EditorPane> = saved_panes
+            let valid_panes: Vec<_> = saved_panes
                 .into_iter()
-                .map(|pane_snap| EditorPane {
-                    document_id: pane_snap.document_id,
-                    view_state: EditorViewState {
-                        preferred_column: pane_snap.preferred_column,
-                        visible_rows: pane_snap.visible_rows,
-                        last_click_time: None,
-                        click_count: 0,
-                        column_selection: pane_snap.column_selection,
-                        column_selection_anchor_col: pane_snap.column_selection_anchor_col,
-                    },
+                .filter_map(|pane_snap| {
+                    if state.document(pane_snap.document_id).is_some() {
+                        Some(pane_snap)
+                    } else {
+                        None
+                    }
                 })
                 .collect();
-            let active_pane = saved_active_pane.min(panes.len().saturating_sub(1));
-            (panes, active_pane)
+
+            if valid_panes.is_empty() {
+                // All saved panes were invalid, create a new document
+                state.open_untitled();
+                (vec![EditorPane::new(state.active_document)], 0)
+            } else {
+                let panes: Vec<EditorPane> = valid_panes
+                    .into_iter()
+                    .map(|pane_snap| EditorPane {
+                        document_id: pane_snap.document_id,
+                        view_state: EditorViewState {
+                            preferred_column: pane_snap.preferred_column,
+                            visible_rows: pane_snap.visible_rows,
+                            last_click_time: None,
+                            click_count: 0,
+                            column_selection: pane_snap.column_selection,
+                            column_selection_anchor_col: pane_snap.column_selection_anchor_col,
+                        },
+                    })
+                    .collect();
+                let active_pane = saved_active_pane.min(panes.len() - 1);
+                (panes, active_pane)
+            }
         } else {
+            // No saved panes - ensure we have at least one document
+            if state.documents.is_empty() {
+                state.open_untitled();
+            }
             (vec![EditorPane::new(state.active_document)], 0)
         };
 
@@ -1371,12 +1392,19 @@ impl PileApp {
     }
 
     fn render_pane(&mut self, ui: &mut egui::Ui, pane_index: usize) {
-        let Some(pane) = self.panes.get(pane_index) else {
+        let Some(pane) = self.panes.get_mut(pane_index) else {
             ui.label("Invalid pane index");
             return;
         };
-        let document_id = pane.document_id;
 
+        // Ensure the document exists; if not, create a new one
+        if self.state.document(pane.document_id).is_none() {
+            tracing::warn!(?pane.document_id, pane_index, "document not found, creating new one");
+            self.state.open_untitled();
+            pane.document_id = self.state.active_document;
+        }
+
+        let document_id = pane.document_id;
         let reveal_selection = if self.search.selection_pending {
             if self.search.search_all_tabs {
                 self.search.current_global_result().cloned().map(|result| {
@@ -1429,10 +1457,7 @@ impl PileApp {
             .copied()
             .collect();
 
-        let Some(document) = self.state.document_mut(document_id) else {
-            ui.label("Document not found");
-            return;
-        };
+        let document = self.state.document_mut(document_id).expect("document must exist after validation");
 
         let pane = &mut self.panes[pane_index];
         let response = show_editor(
