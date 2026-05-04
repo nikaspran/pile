@@ -1,3 +1,4 @@
+use crop::Rope;
 use eframe::egui;
 use std::time::Instant;
 
@@ -31,6 +32,7 @@ pub use multicursor::{
     replace_selection_all, split_selection_into_lines,
 };
 use ops::*;
+use motion::find_matching_bracket_at;
 pub use ops::{convert_case_all_selections, convert_case_selection, CaseType};
 pub use replace::{replace_all_matches, replace_match};
 
@@ -61,6 +63,46 @@ pub struct SearchHighlight {
     pub start: usize,
     pub end: usize,
     pub is_current: bool,
+}
+
+/// Renders bracket matching highlights for the given line.
+/// Highlights both the bracket at `bracket_offset` and its matching pair at `match_offset`.
+fn paint_bracket_highlight_for_line(
+    painter: &egui::Painter,
+    rope: &Rope,
+    bracket_offset: usize,
+    match_offset: usize,
+    line_index: usize,
+    text_pos: egui::Pos2,
+    row_height: f32,
+    char_width: f32,
+    color: egui::Color32,
+) {
+    let (line_start, line_end) = visual_line_bounds(rope, line_index);
+
+    // Helper to paint a single bracket highlight
+    let paint_bracket = |offset: usize| {
+        if offset < line_start || offset >= line_end {
+            return;
+        }
+        let col = rope.byte_slice(line_start..offset).chars().count();
+        let x = text_pos.x + col as f32 * char_width;
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(x - 1.0, text_pos.y),
+            egui::vec2(char_width + 2.0, row_height),
+        );
+        painter.rect_stroke(
+            rect,
+            egui::CornerRadius::same(2),
+            egui::Stroke::new(1.0, color),
+            egui::StrokeKind::Inside,
+        );
+    };
+
+    paint_bracket(bracket_offset);
+    if match_offset != bracket_offset {
+        paint_bracket(match_offset);
+    }
 }
 
 pub fn show_editor(
@@ -228,6 +270,14 @@ pub fn show_editor(
                 .map(|&bm| line_index_of_byte(&document.rope, bm))
                 .collect();
 
+            // Precompute bracket match for the primary cursor
+            let bracket_match = find_matching_bracket_at(&document.rope, primary.head);
+            let bracket_highlight_color = if ui.visuals().dark_mode {
+                egui::Color32::from_rgba_premultiplied(255, 255, 255, 60)
+            } else {
+                egui::Color32::from_rgba_premultiplied(0, 0, 0, 60)
+            };
+
             for line_index in first_line..last_line {
                 let y = layout.line_y(line_index, rect.top());
                 if line_index == caret_line {
@@ -241,6 +291,21 @@ pub fn show_editor(
                         egui::vec2(rect.width(), layout.row_height),
                     );
                     painter.rect_filled(full_line_rect, 0.0, line_highlight_color);
+                }
+
+                // Draw bracket matching highlights
+                if let Some((bracket_offset, match_offset)) = bracket_match {
+                    paint_bracket_highlight_for_line(
+                        &painter,
+                        &document.rope,
+                        bracket_offset,
+                        match_offset,
+                        line_index,
+                        egui::pos2(rect.left() + layout.text_origin_x, y),
+                        layout.row_height,
+                        layout.char_width,
+                        bracket_highlight_color,
+                    );
                 }
 
                 // Draw bookmark indicator

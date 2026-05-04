@@ -222,7 +222,7 @@ pub(super) fn byte_of_visual_line(rope: &Rope, line_index: usize) -> usize {
     }
 }
 
-pub(super) fn visual_line_bounds(rope: &Rope, line_index: usize) -> (usize, usize) {
+pub fn visual_line_bounds(rope: &Rope, line_index: usize) -> (usize, usize) {
     if rope.line_len() == 0 || line_index >= rope.line_len() {
         let end = rope.byte_len();
         return (end, end);

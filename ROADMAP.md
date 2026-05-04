@@ -73,7 +73,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add current-line highlight.
 - Completed: Add visible whitespace rendering.
 - Completed: Add indentation guides.
-- Add bracket matching highlights.
+- Completed: Add bracket matching highlights.
 - Add minimap with viewport indicator and click/drag navigation.
 - Add smooth scrolling and large-file-safe viewport virtualization.
 - Add high-DPI and font fallback testing.

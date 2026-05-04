@@ -433,22 +433,67 @@ pub fn contract_selection_by_indent_block(document: &mut Document) {
 }
 
 fn find_matching_bracket_pair(rope: &Rope, offset: usize) -> Option<(usize, usize)> {
-    let total = rope.byte_len();
-    let offset = offset.min(total);
+    find_matching_bracket_at(rope, offset)
+        .or_else(|| {
+            // Also try the character before offset for backward search
+            if offset > 0 {
+                let mut pos = offset;
+                let ch = rope.byte_slice(..offset).chars().next_back()?;
+                pos -= ch.len_utf8();
+                if is_opening_bracket(ch) {
+                    find_matching_forward(rope, pos, ch)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+}
 
-    // Search backwards from offset to find the nearest unmatched opening bracket
-    let mut found_open = None;
-    let mut current_pos = offset;
-    for c in rope.byte_slice(..offset).chars().rev() {
-        current_pos -= c.len_utf8();
-        if is_opening_bracket(c) {
-            found_open = Some((current_pos, c));
-            break;
+fn is_opening_bracket(c: char) -> bool {
+    matches!(c, '(' | '[' | '{' | '<')
+}
+
+fn is_closing_bracket(c: char) -> bool {
+    matches!(c, ')' | ']' | '}' | '>')
+}
+
+/// Returns the matching bracket position if the character at `offset` (or just before it) is a bracket.
+/// Checks both the character at offset and the character before offset to handle caret between chars.
+/// Returns `Some((bracket_offset, matching_offset))` if a match is found.
+pub fn find_matching_bracket_at(rope: &Rope, offset: usize) -> Option<(usize, usize)> {
+    let total = rope.byte_len();
+
+    // Check character at offset (if not at end)
+    if offset < total {
+        let ch = rope.byte_slice(offset..).chars().next()?;
+        if is_opening_bracket(ch) {
+            return find_matching_forward(rope, offset, ch);
+        }
+        if is_closing_bracket(ch) {
+            return find_matching_backward(rope, offset, ch);
         }
     }
 
-    let (open_offset, open_char) = found_open?;
+    // Check character before offset (if not at start)
+    if offset > 0 {
+        let mut pos = offset;
+        let ch = rope.byte_slice(..offset).chars().next_back()?;
+        pos -= ch.len_utf8();
+        if is_opening_bracket(ch) {
+            return find_matching_forward(rope, pos, ch);
+        }
+        if is_closing_bracket(ch) {
+            return find_matching_backward(rope, pos, ch);
+        }
+    }
 
+    None
+}
+
+/// Find matching closing bracket starting from an opening bracket position.
+fn find_matching_forward(rope: &Rope, open_offset: usize, open_char: char) -> Option<(usize, usize)> {
     let close_char = match open_char {
         '(' => ')',
         '[' => ']',
@@ -479,12 +524,31 @@ fn find_matching_bracket_pair(rope: &Rope, offset: usize) -> Option<(usize, usiz
     None
 }
 
-fn is_opening_bracket(c: char) -> bool {
-    matches!(c, '(' | '[' | '{' | '<')
-}
+/// Find matching opening bracket starting from a closing bracket position.
+fn find_matching_backward(rope: &Rope, close_offset: usize, close_char: char) -> Option<(usize, usize)> {
+    let open_char = match close_char {
+        ')' => '(',
+        ']' => '[',
+        '}' => '{',
+        '>' => '<',
+        _ => return None,
+    };
 
-fn is_closing_bracket(c: char) -> bool {
-    matches!(c, ')' | ']' | '}' | '>')
+    let mut depth = 1usize;
+    let mut current_pos = close_offset;
+    for c in rope.byte_slice(..close_offset).chars().rev() {
+        current_pos -= c.len_utf8();
+        if c == close_char {
+            depth += 1;
+        } else if c == open_char {
+            depth -= 1;
+            if depth == 0 {
+                return Some((current_pos, close_offset + close_char.len_utf8()));
+            }
+        }
+    }
+
+    None
 }
 
 pub fn move_to_line(document: &mut Document, line_number: usize) {
