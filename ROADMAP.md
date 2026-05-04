@@ -71,7 +71,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add line wrapping modes: no wrap, viewport wrap, and ruler wrap.
 - Completed: Add configurable rulers.
 - Completed: Add current-line highlight.
-- Add visible whitespace rendering.
+- Completed: Add visible whitespace rendering.
 - Add indentation guides.
 - Add bracket matching highlights.
 - Add minimap with viewport indicator and click/drag navigation.

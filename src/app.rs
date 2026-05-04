@@ -600,6 +600,11 @@ impl PileApp {
                 let settings_path = default_settings_path();
                 save_settings(&settings_path, &self.settings);
             }
+            ToggleVisibleWhitespace => {
+                self.settings.show_visible_whitespace = !self.settings.show_visible_whitespace;
+                let settings_path = default_settings_path();
+                save_settings(&settings_path, &self.settings);
+            }
         }
     }
 
@@ -1440,6 +1445,7 @@ impl PileApp {
             &extra_selections,
             self.settings.wrap_mode,
             &self.settings.rulers,
+            self.settings.show_visible_whitespace,
         );
 
         if response.changed {

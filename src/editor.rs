@@ -73,6 +73,7 @@ pub fn show_editor(
     extra_selections: &[Selection],
     wrap_mode: crate::settings::WrapMode,
     rulers: &[usize],
+    show_visible_whitespace: bool,
 ) -> EditorResponse {
     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
     clamp_primary_selection(document);
@@ -326,13 +327,33 @@ pub fn show_editor(
                 );
 
                 let line_text = layout.wrapped_line_text(&document.rope, line_index);
-                painter.text(
-                    text_pos,
-                    egui::Align2::LEFT_TOP,
-                    line_text,
-                    layout.font_id.clone(),
-                    ui.visuals().text_color(),
-                );
+                if show_visible_whitespace {
+                    let whitespace_color = ui.visuals().weak_text_color();
+                    let mut x_offset = 0.0;
+                    for ch in line_text.chars() {
+                        let (display_ch, color) = match ch {
+                            ' ' => ('·', whitespace_color),
+                            '\t' => ('→', whitespace_color),
+                            _ => (ch, ui.visuals().text_color()),
+                        };
+                        painter.text(
+                            text_pos + egui::vec2(x_offset, 0.0),
+                            egui::Align2::LEFT_TOP,
+                            display_ch.to_string(),
+                            layout.font_id.clone(),
+                            color,
+                        );
+                        x_offset += layout.char_width;
+                    }
+                } else {
+                    painter.text(
+                        text_pos,
+                        egui::Align2::LEFT_TOP,
+                        line_text,
+                        layout.font_id.clone(),
+                        ui.visuals().text_color(),
+                    );
+                }
             }
 
             // Draw carets for all selections

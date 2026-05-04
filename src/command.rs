@@ -86,6 +86,7 @@ pub enum Command {
     // View
     CommandPalette,
     ToggleWrapMode,
+    ToggleVisibleWhitespace,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -731,6 +732,13 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             command: ToggleWrapMode,
             name: "Toggle Wrap Mode",
             description: "Cycle through line wrap modes (No Wrap, Viewport Wrap, Ruler Wrap)",
+            category: View,
+            shortcut: None,
+        },
+        CommandMetadata {
+            command: ToggleVisibleWhitespace,
+            name: "Toggle Visible Whitespace",
+            description: "Toggle visible rendering of spaces and tabs",
             category: View,
             shortcut: None,
         },

@@ -37,6 +37,8 @@ pub struct Settings {
     pub wrap_mode: WrapMode,
     /// Ruler column positions for ruler wrap and visual indicators.
     pub rulers: Vec<usize>,
+    /// Show visible whitespace characters (spaces as middle dots, tabs as arrows).
+    pub show_visible_whitespace: bool,
 }
 
 impl Default for Settings {
@@ -44,6 +46,7 @@ impl Default for Settings {
         Self {
             wrap_mode: WrapMode::default(),
             rulers: vec![80],
+            show_visible_whitespace: false,
         }
     }
 }
