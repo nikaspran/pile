@@ -1655,11 +1655,28 @@ impl eframe::App for PileApp {
             }
 
             ui.horizontal(|ui| {
-                ui.label(format!(
-                    "{:?} ({:.0}%)",
+                let (lang, confidence) = (
                     self.last_detection.language,
-                    self.last_detection.confidence * 100.0
-                ));
+                    self.last_detection.confidence,
+                );
+                let has_parse_errors = self
+                    .state
+                    .active_document()
+                    .map_or(false, |doc| doc.syntax_state.has_parse_errors());
+                let low_confidence = confidence < 0.5;
+
+                let lang_text = format!("{lang:?} ({confidence:.0}%)");
+                let response = ui.label(lang_text);
+                if low_confidence {
+                    response.highlight();
+                }
+                if has_parse_errors {
+                    ui.label(
+                        egui::RichText::new("⚠ parse issues")
+                            .color(egui::Color32::from_rgb(255, 180, 50)),
+                    );
+                }
+
                 ui.separator();
                 let byte_len = self
                     .state

@@ -86,7 +86,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add range-based highlighting for injected languages.
 - Completed: Add Markdown fenced-code injection support.
 - Completed: Add syntax-aware comments, brackets, and indentation rules.
-- Add diagnostics-free parse status display for low-confidence detection.
+- Completed: Add diagnostics-free parse status display for low-confidence detection.
 - Add grammar registry configuration for adding languages without changing
   editor core code.
 - Add highlight cache invalidation keyed by document revision and visible byte

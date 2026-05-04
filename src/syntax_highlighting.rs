@@ -446,6 +446,13 @@ impl DocumentSyntaxState {
         self.parsed_as
     }
 
+    /// Returns true if the last parse tree contains syntax errors.
+    pub fn has_parse_errors(&self) -> bool {
+        self.tree
+            .as_ref()
+            .map_or(false, |t| t.root_node().has_error())
+    }
+
     /// Check if the given byte offset is inside a comment node.
     pub fn is_inside_comment(&self, text: &str, offset: usize) -> bool {
         let Some(tree) = self.tree.as_ref() else {
