@@ -1,6 +1,7 @@
 use crop::Rope;
 
 use crate::model::{Document, DocumentEdit, Selection};
+use crate::syntax_highlighting::DocumentSyntaxState;
 
 use super::{
     byte_of_visual_line, clamp_primary_selection, line_index_of_byte, next_grapheme_boundary,
@@ -48,7 +49,17 @@ pub fn insert_newline_with_auto_indent(document: &mut Document) -> bool {
     let (start, _) = selection_range(selection);
     let line = line_index_of_byte(&document.rope, start);
     let line_start = byte_of_visual_line(&document.rope, line);
-    let indent = leading_whitespace(&document.rope, line_start, start);
+    
+    // Try syntax-aware indentation first
+    let indent = if document.syntax_state.parsed_as().map_or(false, |l| l.has_tree_sitter()) {
+        let text = document.rope.byte_slice(..).to_string();
+        document.syntax_state
+            .indentation_at(&text, start, document.tab_width, document.use_soft_tabs)
+            .unwrap_or_else(|| leading_whitespace(&document.rope, line_start, start))
+    } else {
+        leading_whitespace(&document.rope, line_start, start)
+    };
+    
     let text = format!("\n{indent}");
 
     replace_selection_with(document, &text)
@@ -197,6 +208,19 @@ pub fn insert_char_with_pairing(document: &mut Document, ch: char) -> bool {
     };
 
     if let Some(close) = pairing {
+        // Check if we're inside a string or comment - if so, don't auto-pair
+        let syntax_state = &document.syntax_state;
+        let selection = primary_selection(document);
+        let (start, _) = selection_range(selection);
+        let text = document.rope.byte_slice(..).to_string();
+        
+        if syntax_state.parsed_as().map_or(false, |l| l.has_tree_sitter()) {
+            if syntax_state.is_inside_string(&text, start) || syntax_state.is_inside_comment(&text, start) {
+                // Inside string or comment - just insert the character normally
+                return replace_selection_with(document, &ch.to_string());
+            }
+        }
+
         // Auto-close: insert opening and closing pair
         let selection = primary_selection(document);
         let (start, end) = selection_range(selection);
@@ -239,6 +263,15 @@ pub fn backspace_with_pair_deletion(document: &mut Document) -> bool {
 
     if start == 0 {
         return false;
+    }
+
+    // Check if we're inside a string or comment - if so, don't do pair deletion
+    let syntax_state = &document.syntax_state;
+    if syntax_state.parsed_as().map_or(false, |l| l.has_tree_sitter()) {
+        let text = document.rope.byte_slice(..).to_string();
+        if syntax_state.is_inside_string(&text, start) || syntax_state.is_inside_comment(&text, start) {
+            return backspace(document);
+        }
     }
 
     // Check if we're backspacing over an opening bracket/quote

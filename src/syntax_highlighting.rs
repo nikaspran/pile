@@ -435,6 +435,130 @@ impl DocumentSyntaxState {
     pub fn invalidate_cache(&mut self) {
         self.cached_spans = None;
     }
+
+    /// Returns the tree-sitter `Tree` if available.
+    pub fn tree(&self) -> Option<&Tree> {
+        self.tree.as_ref()
+    }
+
+    /// Returns the language used to parse the current tree.
+    pub fn parsed_as(&self) -> Option<LanguageId> {
+        self.parsed_as
+    }
+
+    /// Check if the given byte offset is inside a comment node.
+    pub fn is_inside_comment(&self, text: &str, offset: usize) -> bool {
+        let Some(tree) = self.tree.as_ref() else {
+            return false;
+        };
+        let node = tree.root_node();
+        if let Some(leaf) = find_leaf_at_offset(node, offset) {
+            let mut current = Some(leaf);
+            while let Some(n) = current {
+                let kind = n.kind();
+                if kind == "comment" || kind.ends_with("comment") {
+                    return true;
+                }
+                current = n.parent();
+            }
+        }
+        false
+    }
+
+    /// Check if the given byte offset is inside a string node.
+    pub fn is_inside_string(&self, text: &str, offset: usize) -> bool {
+        let Some(tree) = self.tree.as_ref() else {
+            return false;
+        };
+        let node = tree.root_node();
+        if let Some(leaf) = find_leaf_at_offset(node, offset) {
+            let mut current = Some(leaf);
+            while let Some(n) = current {
+                let kind = n.kind();
+                if kind.contains("string") || kind.contains("str") {
+                    return true;
+                }
+                current = n.parent();
+            }
+        }
+        false
+    }
+
+    /// Get the node type at the given byte offset.
+    pub fn node_type_at(&self, offset: usize) -> Option<String> {
+        let tree = self.tree.as_ref()?;
+        let node = tree.root_node();
+        let leaf = find_leaf_at_offset(node, offset)?;
+        Some(leaf.kind().to_string())
+    }
+
+    /// Calculate syntax-aware indentation for a new line at the given offset.
+    /// Returns the indentation string (spaces or tabs) to use.
+    pub fn indentation_at(&self, text: &str, offset: usize, tab_width: usize, use_soft_tabs: bool) -> Option<String> {
+        let tree = self.tree.as_ref()?;
+        let root = tree.root_node();
+        
+        // Find the node at the current position
+        let node = find_leaf_at_offset(root, offset)?;
+        
+        // Walk up the tree to find the enclosing structure
+        let mut current: Option<tree_sitter::Node> = Some(node);
+        let mut depth = 0usize;
+        
+        while let Some(n) = current {
+            let kind = n.kind();
+            
+            // For Python, check if we're after a line ending with `:`
+            if kind == "block" || kind == "suite" || kind.contains("_block") {
+                depth += 1;
+            }
+            
+            // Count indentation depth based on brace-delimited blocks
+            if n.start_byte() <= offset && offset <= n.end_byte() {
+                if kind == "{" || kind.ends_with("_block") {
+                    depth += 1;
+                }
+            }
+            
+            current = n.parent();
+        }
+        
+        if depth == 0 {
+            return None;
+        }
+        
+        let indent_char = if use_soft_tabs { " " } else { "\t" };
+        let indent_count = if use_soft_tabs { tab_width * depth } else { depth };
+        Some(indent_char.repeat(indent_count))
+    }
+}
+
+/// Find the leaf node at the given byte offset.
+fn find_leaf_at_offset(node: tree_sitter::Node, offset: usize) -> Option<tree_sitter::Node> {
+    if node.start_byte() > offset || offset >= node.end_byte() {
+        return None;
+    }
+
+    let mut current = node;
+    loop {
+        let child_count = current.child_count();
+        if child_count ==0 {
+            return Some(current);
+        }
+        let mut found = None;
+        for i in 0..child_count {
+            if let Some(child) = current.child(i as u32) {
+                if child.start_byte() <= offset && offset < child.end_byte() {
+                    found = Some(child);
+                    break;
+                }
+            }
+        }
+        match found {
+            Some(child) => current = child,
+            None => return Some(current),
+        }
+    }
 }
 
 /// Convert a byte offset into a tree-sitter `Point` (row, column in bytes).

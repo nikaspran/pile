@@ -1,6 +1,7 @@
 use crop::Rope;
 
 use crate::model::{Document, DocumentEdit, EditTransaction, Selection};
+use crate::syntax_highlighting::DocumentSyntaxState;
 
 use super::{
     byte_of_visual_line, clamp_primary_selection, line_index_of_byte, primary_selection,
@@ -292,23 +293,113 @@ pub fn toggle_comments(document: &mut Document, comment_prefix: &str) -> bool {
     let lines: Vec<&str> = body.split('\n').collect();
     let mut result = String::new();
     let mut toggled = false;
+    let mut any_commented = false;
+    let mut any_uncommented = false;
+
+    // Get syntax state for syntax-aware toggling
+    let syntax_state = &document.syntax_state;
+    let text = document.rope.byte_slice(..).to_string();
 
     for (i, line) in lines.iter().enumerate() {
-        if line.starts_with(comment_prefix) {
+        let line_start = start + body[..body.find(line).unwrap_or(0)].chars().count();
+        
+        // Skip lines that are inside string literals
+        if syntax_state.is_inside_string(&text, line_start) {
+            result.push_str(line);
+            if i < lines.len() - 1 {
+                result.push('\n');
+            }
+            continue;
+        }
+
+        // Check if this line is actually a comment (using tree-sitter if available)
+        let is_commented = if syntax_state.parsed_as().map_or(false, |l| l.has_tree_sitter()) {
+            // Use tree-sitter to check if the content after whitespace is a comment
+            let trimmed = line.trim_start();
+            if trimmed.starts_with(comment_prefix) {
+                // Verify it's actually in a comment node (not a string containing the prefix)
+                let first_char_offset = line_start + line.len() - trimmed.len();
+                syntax_state.is_inside_comment(&text, first_char_offset)
+            } else {
+                false
+            }
+        } else {
+            // Fallback to simple prefix check
+            line.starts_with(comment_prefix)
+        };
+
+        if is_commented {
             // Remove comment prefix
-            result.push_str(&line[comment_prefix.len()..]);
-            toggled = true;
+            let after_prefix = line[comment_prefix.len()..].to_string();
+            // Also remove a single trailing space if present (common style)
+            let after_prefix = after_prefix.strip_prefix(' ').unwrap_or(&after_prefix);
+            result.push_str(after_prefix);
+            any_commented = true;
         } else {
             // Add comment prefix
             result.push_str(comment_prefix);
+            // Add a space after prefix if line is not empty and doesn't already start with space
+            if !line.is_empty() && !line.starts_with(' ') {
+                result.push(' ');
+            }
             result.push_str(line);
-            toggled = true;
+            any_uncommented = true;
         }
 
         if i < lines.len() - 1 {
             result.push('\n');
         }
     }
+
+    // If some lines were commented and some uncommented, we need a consistent action
+    // Default to commenting all uncommented lines
+    if any_commented && any_uncommented {
+        // Re-process: comment all uncommented lines
+        result.clear();
+        for (i, line) in lines.iter().enumerate() {
+            let line_start = start + body[..body.find(line).unwrap_or(0)].chars().count();
+            
+            if syntax_state.is_inside_string(&text, line_start) {
+                result.push_str(line);
+                if i < lines.len() - 1 {
+                    result.push('\n');
+                }
+                continue;
+            }
+
+            let is_commented = if syntax_state.parsed_as().map_or(false, |l| l.has_tree_sitter()) {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with(comment_prefix) {
+                    let first_char_offset = line_start + line.len() - trimmed.len();
+                    syntax_state.is_inside_comment(&text, first_char_offset)
+                } else {
+                    false
+                }
+            } else {
+                line.starts_with(comment_prefix)
+            };
+
+            if is_commented {
+                // Already commented, keep as-is but remove prefix
+                let after_prefix = line[comment_prefix.len()..].to_string();
+                let after_prefix = after_prefix.strip_prefix(' ').unwrap_or(&after_prefix);
+                result.push_str(after_prefix);
+            } else {
+                // Comment it
+                result.push_str(comment_prefix);
+                if !line.is_empty() && !line.starts_with(' ') {
+                    result.push(' ');
+                }
+                result.push_str(line);
+            }
+
+            if i < lines.len() - 1 {
+                result.push('\n');
+            }
+        }
+    }
+
+    toggled = any_commented || any_uncommented;
 
     if !toggled {
         return false;

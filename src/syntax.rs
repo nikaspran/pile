@@ -26,6 +26,21 @@ impl LanguageId {
             LanguageId::Toml => Some("#"),
         }
     }
+
+    /// Returns the block comment delimiters (open, close) for this language, if any.
+    pub fn block_comment_delimiters(&self) -> Option<(&'static str, &'static str)> {
+        match self {
+            LanguageId::Rust | LanguageId::JavaScript | LanguageId::TypeScript => Some(("/*", "*/")),
+            LanguageId::Python => Some(("\"\"\"", "\"\"\"")),
+            LanguageId::Bash => Some((":", ":")), // Bash uses heredoc, not typical block comments
+            LanguageId::PlainText | LanguageId::Markdown | LanguageId::Json | LanguageId::Toml | LanguageId::Yaml => None,
+        }
+    }
+
+    /// Returns true if this language uses tree-sitter for syntax awareness.
+    pub fn has_tree_sitter(&self) -> bool {
+        !matches!(self, LanguageId::PlainText)
+    }
 }
 
 #[derive(Clone, Debug)]
