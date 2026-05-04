@@ -87,6 +87,7 @@ pub enum Command {
     CommandPalette,
     ToggleWrapMode,
     ToggleVisibleWhitespace,
+    ToggleIndentGuides,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -739,6 +740,13 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             command: ToggleVisibleWhitespace,
             name: "Toggle Visible Whitespace",
             description: "Toggle visible rendering of spaces and tabs",
+            category: View,
+            shortcut: None,
+        },
+        CommandMetadata {
+            command: ToggleIndentGuides,
+            name: "Toggle Indentation Guides",
+            description: "Toggle vertical indentation guide lines",
             category: View,
             shortcut: None,
         },

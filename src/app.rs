@@ -644,6 +644,11 @@ impl PileApp {
                 let settings_path = default_settings_path();
                 save_settings(&settings_path, &self.settings);
             }
+            ToggleIndentGuides => {
+                self.settings.show_indentation_guides = !self.settings.show_indentation_guides;
+                let settings_path = default_settings_path();
+                save_settings(&settings_path, &self.settings);
+            }
         }
     }
 
@@ -1496,6 +1501,7 @@ impl PileApp {
             self.settings.wrap_mode,
             &self.settings.rulers,
             self.settings.show_visible_whitespace,
+            self.settings.show_indentation_guides,
         );
 
         if response.changed {

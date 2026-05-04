@@ -495,7 +495,7 @@ pub fn move_to_line(document: &mut Document, line_number: usize) {
     apply_motion(document, target, false);
 }
 
-fn line_indent_level(rope: &Rope, line_index: usize) -> usize {
+pub fn line_indent_level(rope: &Rope, line_index: usize) -> usize {
     if line_index >= rope.line_len() {
         return 0;
     }

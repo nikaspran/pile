@@ -72,7 +72,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add configurable rulers.
 - Completed: Add current-line highlight.
 - Completed: Add visible whitespace rendering.
-- Add indentation guides.
+- Completed: Add indentation guides.
 - Add bracket matching highlights.
 - Add minimap with viewport indicator and click/drag navigation.
 - Add smooth scrolling and large-file-safe viewport virtualization.

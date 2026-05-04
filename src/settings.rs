@@ -39,6 +39,8 @@ pub struct Settings {
     pub rulers: Vec<usize>,
     /// Show visible whitespace characters (spaces as middle dots, tabs as arrows).
     pub show_visible_whitespace: bool,
+    /// Show indentation guides at multiples of tab width.
+    pub show_indentation_guides: bool,
 }
 
 impl Default for Settings {
@@ -47,6 +49,7 @@ impl Default for Settings {
             wrap_mode: WrapMode::default(),
             rulers: vec![80],
             show_visible_whitespace: false,
+            show_indentation_guides: true,
         }
     }
 }

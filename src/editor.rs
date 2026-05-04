@@ -74,6 +74,7 @@ pub fn show_editor(
     wrap_mode: crate::settings::WrapMode,
     rulers: &[usize],
     show_visible_whitespace: bool,
+    show_indentation_guides: bool,
 ) -> EditorResponse {
     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
     clamp_primary_selection(document);
@@ -263,6 +264,26 @@ pub fn show_editor(
                     layout.font_id.clone(),
                     ui.visuals().weak_text_color(),
                 );
+
+                // Draw indentation guides
+                if show_indentation_guides {
+                    let indent_level = line_indent_level(&document.rope, line_index);
+                    if indent_level > 0 {
+                        let guide_color = if ui.visuals().dark_mode {
+                            egui::Color32::from_rgba_premultiplied(255, 255, 255, 20)
+                        } else {
+                            egui::Color32::from_rgba_premultiplied(0, 0, 0, 20)
+                        };
+                        let tab_width = document.tab_width;
+                        for col in (tab_width..=indent_level).step_by(tab_width) {
+                            let x = rect.left() + layout.text_origin_x + layout.column_x(col);
+                            painter.line_segment(
+                                [egui::pos2(x, y), egui::pos2(x, y + layout.row_height)],
+                                egui::Stroke::new(1.0, guide_color),
+                            );
+                        }
+                    }
+                }
 
                 let text_pos = egui::pos2(rect.left() + layout.text_origin_x, y);
 
