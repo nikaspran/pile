@@ -7,7 +7,10 @@ use tracing::{info, warn};
 use crate::{
     command::Command,
     command_palette::CommandPalette,
-    editor::{EditorViewState, SearchHighlight, replace_all_matches, replace_match, show_editor},
+    editor::{
+        EditorViewState, SearchHighlight, minimap::{self, MinimapConfig},
+        replace_all_matches, replace_match, show_editor,
+    },
     model::{AppState, DocumentId, PaneSnapshot, Selection, SessionSnapshot},
     native_menu::{NativeMenu, NativeMenuCommand},
     persistence::{
@@ -646,6 +649,11 @@ impl PileApp {
             }
             ToggleIndentGuides => {
                 self.settings.show_indentation_guides = !self.settings.show_indentation_guides;
+                let settings_path = default_settings_path();
+                save_settings(&settings_path, &self.settings);
+            }
+            ToggleMinimap => {
+                self.settings.show_minimap = !self.settings.show_minimap;
                 let settings_path = default_settings_path();
                 save_settings(&settings_path, &self.settings);
             }
@@ -1487,26 +1495,101 @@ impl PileApp {
             .copied()
             .collect();
 
-        let document = self.state.document_mut(document_id).expect("document must exist after validation");
+        // Get pane view state before any borrowing
+        let mut view_state = self.panes[pane_index].view_state.clone();
 
-        let pane = &mut self.panes[pane_index];
-        let response = show_editor(
-            ui,
-            document,
-            &mut pane.view_state,
-            &mut self.editor_focus_pending,
-            reveal_selection,
-            &search_highlights,
-            &extra_selections,
-            self.settings.wrap_mode,
-            &self.settings.rulers,
-            self.settings.show_visible_whitespace,
-            self.settings.show_indentation_guides,
-        );
+        // Check if minimap should be shown (before borrowing document mutably)
+        let show_minimap = self.settings.show_minimap && {
+            let doc = self.state.document(document_id).expect("document must exist");
+            minimap::should_show_minimap(&doc.rope)
+        };
 
-        if response.changed {
-            self.document_edited();
+        if show_minimap {
+            // Render editor and minimap side by side
+            ui.horizontal(|ui| {
+                // Editor takes most of the space
+                let config = MinimapConfig::default();
+                let editor_width = ui.available_width() - config.width - 4.0;
+
+                // Render editor
+                let editor_response = {
+                    let document = self.state.document_mut(document_id).expect("document must exist");
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(editor_width, ui.available_height()),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            show_editor(
+                                ui,
+                                document,
+                                &mut view_state,
+                                &mut self.editor_focus_pending,
+                                reveal_selection,
+                                &search_highlights,
+                                &extra_selections,
+                                self.settings.wrap_mode,
+                                &self.settings.rulers,
+                                self.settings.show_visible_whitespace,
+                                self.settings.show_indentation_guides,
+                            )
+                        },
+                    )
+                };
+
+                if editor_response.inner.changed {
+                    self.document_edited();
+                }
+
+                ui.separator();
+
+                // Render minimap
+                let (scroll_y, content_height) = {
+                    let doc = self.state.document(document_id).expect("document must exist");
+                    (doc.scroll.y, doc.rope.lines().count() as f32 * ui.text_style_height(&egui::TextStyle::Monospace))
+                };
+
+                let config = MinimapConfig::default();
+                let viewport_height = ui.available_height();
+
+                let doc = self.state.document(document_id).expect("document must exist");
+                let minimap_result = minimap::show_minimap(
+                    ui,
+                    &doc.rope,
+                    scroll_y,
+                    viewport_height,
+                    content_height,
+                    &config,
+                );
+                drop(doc); // Drop immutable borrow
+
+                if let Some(target_scroll_y) = minimap_result.target_scroll_y {
+                    let doc = self.state.document_mut(document_id).expect("document must exist");
+                    doc.scroll.y = target_scroll_y;
+                    ui.ctx().request_repaint();
+                }
+            });
+        } else {
+            let document = self.state.document_mut(document_id).expect("document must exist");
+            let response = show_editor(
+                ui,
+                document,
+                &mut view_state,
+                &mut self.editor_focus_pending,
+                reveal_selection,
+                &search_highlights,
+                &extra_selections,
+                self.settings.wrap_mode,
+                &self.settings.rulers,
+                self.settings.show_visible_whitespace,
+                self.settings.show_indentation_guides,
+            );
+
+            if response.changed {
+                self.document_edited();
+            }
         }
+
+        // Save back the view state
+        self.panes[pane_index].view_state = view_state;
     }
 }
 

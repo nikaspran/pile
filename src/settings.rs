@@ -41,6 +41,8 @@ pub struct Settings {
     pub show_visible_whitespace: bool,
     /// Show indentation guides at multiples of tab width.
     pub show_indentation_guides: bool,
+    /// Show minimap with viewport indicator.
+    pub show_minimap: bool,
 }
 
 impl Default for Settings {
@@ -50,6 +52,7 @@ impl Default for Settings {
             rulers: vec![80],
             show_visible_whitespace: false,
             show_indentation_guides: true,
+            show_minimap: false,
         }
     }
 }

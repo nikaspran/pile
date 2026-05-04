@@ -4,10 +4,11 @@ use std::time::Instant;
 
 use crate::model::{Document, Selection};
 
-mod geometry;
+pub mod geometry;
 mod input;
-mod layout;
+pub mod layout;
 mod line_ops;
+pub mod minimap;
 mod motion;
 mod multicursor;
 mod ops;

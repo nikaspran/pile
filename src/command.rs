@@ -88,6 +88,7 @@ pub enum Command {
     ToggleWrapMode,
     ToggleVisibleWhitespace,
     ToggleIndentGuides,
+    ToggleMinimap,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -747,6 +748,13 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             command: ToggleIndentGuides,
             name: "Toggle Indentation Guides",
             description: "Toggle vertical indentation guide lines",
+            category: View,
+            shortcut: None,
+        },
+        CommandMetadata {
+            command: ToggleMinimap,
+            name: "Toggle Minimap",
+            description: "Toggle minimap with viewport indicator",
             category: View,
             shortcut: None,
         },
