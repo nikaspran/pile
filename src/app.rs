@@ -228,6 +228,10 @@ impl PileApp {
             return;
         }
         if self.state.set_active(document_id) {
+            // Update the active pane to point to the new document
+            if let Some(pane) = self.panes.get_mut(self.active_pane) {
+                pane.document_id = document_id;
+            }
             self.refresh_active_document_metadata();
             self.mark_changed();
             self.editor_focus_pending = true;
@@ -239,6 +243,10 @@ impl PileApp {
             return;
         }
         if self.state.set_active(document_id) {
+            // Update the active pane to point to the new document
+            if let Some(pane) = self.panes.get_mut(self.active_pane) {
+                pane.document_id = document_id;
+            }
             self.refresh_active_document_detection();
             self.mark_changed();
             self.editor_focus_pending = true;
@@ -337,6 +345,10 @@ impl PileApp {
     fn new_scratch(&mut self) {
         self.commit_rename();
         self.state.open_untitled();
+        // Update the active pane to point to the new document
+        if let Some(pane) = self.panes.get_mut(self.active_pane) {
+            pane.document_id = self.state.active_document;
+        }
         self.mark_changed();
         self.refresh_active_document_metadata();
         self.editor_focus_pending = true;
