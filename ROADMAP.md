@@ -83,8 +83,8 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 - Completed: Replace placeholder language heuristics with a scored content detector.
 - Completed: Wire tree-sitter parsers into incremental parse state per document.
-- Add range-based highlighting for injected languages.
-- Add Markdown fenced-code injection support.
+- Completed: Add range-based highlighting for injected languages.
+- Completed: Add Markdown fenced-code injection support.
 - Add syntax-aware comments, brackets, and indentation rules.
 - Add diagnostics-free parse status display for low-confidence detection.
 - Add grammar registry configuration for adding languages without changing

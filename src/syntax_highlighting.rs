@@ -3,6 +3,9 @@
 //! This module provides incremental parse state per document and converts
 //! tree-sitter parse trees into highlight spans for rendering.
 
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
+
 use tree_sitter::{InputEdit, Language, Parser, Point, Tree};
 use tree_sitter_highlight::{Highlight, HighlightConfiguration, HighlightEvent, Highlighter};
 
@@ -124,6 +127,157 @@ fn language_config(lang: LanguageId) -> Option<PerLanguageConfig> {
     Some(PerLanguageConfig { config })
 }
 
+/// Returns a static map of language name to `HighlightConfiguration` for injection resolution.
+fn injection_language_registry() -> &'static HashMap<&'static str, Arc<HighlightConfiguration>> {
+    static REGISTRY: OnceLock<HashMap<&'static str, Arc<HighlightConfiguration>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        let mut map: HashMap<&'static str, Arc<HighlightConfiguration>> = HashMap::new();
+
+        let highlight_names: &[&str] = &[
+            "attribute", "comment", "constant", "constant.builtin", "constructor",
+            "embedded", "function", "function.builtin", "keyword", "module",
+            "number", "operator", "property", "property.builtin", "punctuation",
+            "punctuation.bracket", "punctuation.delimiter", "punctuation.special",
+            "string", "string.special", "tag", "type", "type.builtin",
+            "variable", "variable.builtin", "variable.parameter",
+        ];
+
+        // Rust
+        if let Ok(mut config) = HighlightConfiguration::new(
+            tree_sitter_rust::LANGUAGE.into(),
+            "rust",
+            tree_sitter_rust::HIGHLIGHTS_QUERY,
+            tree_sitter_rust::INJECTIONS_QUERY,
+            tree_sitter_rust::TAGS_QUERY,
+        ) {
+            config.configure(highlight_names);
+            map.insert("rust", Arc::new(config));
+        }
+
+        // JavaScript
+        if let Ok(mut config) = HighlightConfiguration::new(
+            tree_sitter_javascript::LANGUAGE.into(),
+            "javascript",
+            tree_sitter_javascript::HIGHLIGHT_QUERY,
+            tree_sitter_javascript::INJECTIONS_QUERY,
+            tree_sitter_javascript::LOCALS_QUERY,
+        ) {
+            config.configure(highlight_names);
+            let arc_config = Arc::new(config);
+            map.insert("javascript", arc_config.clone());
+            map.insert("js", arc_config);
+        }
+
+        // TypeScript
+        if let Ok(mut config) = HighlightConfiguration::new(
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            "typescript",
+            tree_sitter_typescript::HIGHLIGHTS_QUERY,
+            "",
+            tree_sitter_typescript::LOCALS_QUERY,
+        ) {
+            config.configure(highlight_names);
+            let arc_config = Arc::new(config);
+            map.insert("typescript", arc_config.clone());
+            map.insert("ts", arc_config);
+        }
+
+        // TSX
+        if let Ok(mut config) = HighlightConfiguration::new(
+            tree_sitter_typescript::LANGUAGE_TSX.into(),
+            "tsx",
+            tree_sitter_typescript::HIGHLIGHTS_QUERY,
+            "",
+            tree_sitter_typescript::LOCALS_QUERY,
+        ) {
+            config.configure(highlight_names);
+            map.insert("tsx", Arc::new(config));
+        }
+
+        // Python
+        if let Ok(mut config) = HighlightConfiguration::new(
+            tree_sitter_python::LANGUAGE.into(),
+            "python",
+            tree_sitter_python::HIGHLIGHTS_QUERY,
+            "",
+            tree_sitter_python::TAGS_QUERY,
+        ) {
+            config.configure(highlight_names);
+            let arc_config = Arc::new(config);
+            map.insert("python", arc_config.clone());
+            map.insert("py", arc_config);
+        }
+
+        // JSON
+        if let Ok(mut config) = HighlightConfiguration::new(
+            tree_sitter_json::LANGUAGE.into(),
+            "json",
+            tree_sitter_json::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ) {
+            config.configure(highlight_names);
+            map.insert("json", Arc::new(config));
+        }
+
+        // TOML
+        if let Ok(mut config) = HighlightConfiguration::new(
+            tree_sitter_toml_ng::LANGUAGE.into(),
+            "toml",
+            tree_sitter_toml_ng::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ) {
+            config.configure(highlight_names);
+            map.insert("toml", Arc::new(config));
+        }
+
+        // YAML
+        if let Ok(mut config) = HighlightConfiguration::new(
+            tree_sitter_yaml::LANGUAGE.into(),
+            "yaml",
+            tree_sitter_yaml::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ) {
+            config.configure(highlight_names);
+            let arc_config = Arc::new(config);
+            map.insert("yaml", arc_config.clone());
+            map.insert("yml", arc_config);
+        }
+
+        // Bash
+        if let Ok(mut config) = HighlightConfiguration::new(
+            tree_sitter_bash::LANGUAGE.into(),
+            "bash",
+            tree_sitter_bash::HIGHLIGHT_QUERY,
+            "",
+            "",
+        ) {
+            config.configure(highlight_names);
+            let arc_config = Arc::new(config);
+            map.insert("bash", arc_config.clone());
+            map.insert("sh", arc_config);
+        }
+
+        // Markdown (for embedded code blocks)
+        if let Ok(mut config) = HighlightConfiguration::new(
+            tree_sitter_md::LANGUAGE.into(),
+            "markdown",
+            tree_sitter_md::HIGHLIGHT_QUERY_BLOCK,
+            tree_sitter_md::INJECTION_QUERY_BLOCK,
+            "",
+        ) {
+            config.configure(highlight_names);
+            let arc_config = Arc::new(config);
+            map.insert("markdown", arc_config.clone());
+            map.insert("md", arc_config);
+        }
+
+        map
+    })
+}
+
 /// Per-document syntax highlighting state.
 ///
 /// Stores the parsed tree-sitter `Tree` for incremental reparsing and
@@ -214,9 +368,17 @@ impl DocumentSyntaxState {
     }
 
     /// Generate highlight spans from the parsed tree using `tree-sitter-highlight`.
+    ///
+    /// Supports injected languages by resolving language names through the
+    /// injection registry, enabling range-based highlighting for embedded code
+    /// (e.g., JavaScript inside Markdown fenced code blocks).
     fn generate_highlight_spans(config: &HighlightConfiguration, text: &str) -> Vec<HighlightSpan> {
         let mut highlighter = Highlighter::new();
-        let Ok(events) = highlighter.highlight(config, text.as_bytes(), None, |_| None) else {
+        let registry = injection_language_registry();
+
+        let Ok(events) = highlighter.highlight(config, text.as_bytes(), None, |lang_name| {
+            registry.get(lang_name).map(|c| &**c as &HighlightConfiguration)
+        }) else {
             return Vec::new();
         };
 
