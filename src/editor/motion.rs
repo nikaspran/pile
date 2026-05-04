@@ -433,22 +433,37 @@ pub fn contract_selection_by_indent_block(document: &mut Document) {
 }
 
 fn find_matching_bracket_pair(rope: &Rope, offset: usize) -> Option<(usize, usize)> {
-    find_matching_bracket_at(rope, offset)
-        .or_else(|| {
-            // Also try the character before offset for backward search
-            if offset > 0 {
-                let mut pos = offset;
-                let ch = rope.byte_slice(..offset).chars().next_back()?;
-                pos -= ch.len_utf8();
-                if is_opening_bracket(ch) {
-                    find_matching_forward(rope, pos, ch)
-                } else {
-                    None
+    // First try direct match at cursor position
+    if let Some(result) = find_matching_bracket_at(rope, offset) {
+        return Some(result);
+    }
+
+    // Search backward from cursor to find the innermost enclosing bracket pair
+    let mut best_match: Option<(usize, usize)> = None;
+    
+    // Iterate through characters before the cursor (going backward)
+    let mut search_offset = offset;
+    while search_offset > 0 {
+        let ch = rope.byte_slice(..search_offset).chars().next_back()?;
+        let byte_offset = search_offset - ch.len_utf8();
+        
+        if is_opening_bracket(ch) {
+            // Check if this opening bracket has a matching closing bracket
+            if let Some((open, close)) = find_matching_forward(rope, byte_offset, ch) {
+                // Make sure cursor is between the brackets and this is the innermost pair
+                if open <= offset && offset <= close {
+                    // Keep the innermost pair (smallest range)
+                    if best_match.map_or(true, |(o, c)| open > o || (open == o && close < c)) {
+                        best_match = Some((open, close));
+                    }
                 }
-            } else {
-                None
             }
-        })
+        }
+        
+        search_offset = byte_offset;
+    }
+    
+    best_match
 }
 
 fn is_opening_bracket(c: char) -> bool {
