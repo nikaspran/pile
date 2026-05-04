@@ -124,7 +124,7 @@ impl PileApp {
 
         let save_worker = SaveWorker::spawn(session_path);
         let save_tx = save_worker.sender();
-        let syntax = LanguageRegistry;
+        let syntax = LanguageRegistry::default();
         let last_detection = state
             .active_document()
             .map(|document| syntax.detect_rope(&document.rope))

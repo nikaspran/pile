@@ -232,7 +232,7 @@ impl Document {
     }
 
     pub fn detect_syntax(&self) -> Option<LanguageDetection> {
-        let registry = crate::syntax::LanguageRegistry;
+        let registry = crate::syntax::LanguageRegistry::default();
         Some(registry.detect_rope(&self.rope))
     }
 
