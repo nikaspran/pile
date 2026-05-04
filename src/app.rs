@@ -1465,10 +1465,6 @@ impl eframe::App for PileApp {
                     self.execute_command(AppCommand::NewScratch);
                 }
 
-                if ui.button("x").on_hover_text("Close scratch").clicked() {
-                    self.execute_command(AppCommand::CloseScratch);
-                }
-
                 // Horizontal tab list with scrolling
                 let tab_ids: Vec<_> = self.state.tab_order.iter().copied().collect();
                 if !tab_ids.is_empty() {
