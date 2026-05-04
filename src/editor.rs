@@ -41,8 +41,8 @@ const TRIPLE_CLICK_DURATION: f32 = 0.4;
 pub struct EditorViewState {
     pub preferred_column: Option<usize>,
     pub visible_rows: Option<usize>,
-    last_click_time: Option<Instant>,
-    click_count: u32,
+    pub last_click_time: Option<Instant>,
+    pub click_count: u32,
     /// Set to true when Alt+click or Alt+drag is used for column selection
     pub column_selection: bool,
     /// The anchor column for column selection

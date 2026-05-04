@@ -579,7 +579,6 @@ impl UndoState {
     }
 }
 
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PaneSnapshot {
     pub document_id: DocumentId,
@@ -600,7 +599,7 @@ pub struct SessionSnapshot {
 impl From<&AppState> for SessionSnapshot {
     fn from(state: &AppState) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: 2,
             state: state.clone(),
             panes: vec![],
             active_pane: 0,

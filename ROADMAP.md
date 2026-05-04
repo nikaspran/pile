@@ -61,7 +61,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add go-to-line and go-to-symbol-like navigation for detected document
   structure.
 - Completed: Add bookmarks or lightweight marks within scratch buffers.
-- Add session-level tab restore ordering, active pane restore, and focus restore.
+- Completed: Add session-level tab restore ordering, active pane restore, and focus restore.
 
 ## Rendering and Layout
 

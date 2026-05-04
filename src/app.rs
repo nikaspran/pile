@@ -59,7 +59,7 @@ impl GotoLineState {
 }
 
 #[derive(Clone, Debug)]
-pub struct EditorPane {
+struct EditorPane {
     document_id: DocumentId,
     view_state: EditorViewState,
 }
@@ -96,20 +96,20 @@ pub struct PileApp {
 impl PileApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let session_path = default_session_path();
-        let (state, saved_panes, saved_active_pane) = match load_session(&session_path) {
+        let (state, saved_panes) = match load_session(&session_path) {
             Ok(Some(snapshot)) => {
                 let panes = if snapshot.schema_version >= 2 {
                     Some((snapshot.panes, snapshot.active_pane))
                 } else {
                     None
                 };
-                (snapshot.state, panes, panes.map(|(_, p)| p))
+                (snapshot.state, panes)
             }
-            Ok(None) => (AppState::empty(), None, None),
+            Ok(None) => (AppState::empty(), None),
             Err(err) => {
                 warn!(error = %err, path = %session_path.display(), "failed to restore session");
                 quarantine_corrupt_session(&session_path);
-                (AppState::empty(), None, None)
+                (AppState::empty(), None)
             }
         };
 
@@ -136,13 +136,13 @@ impl PileApp {
                     },
                 })
                 .collect();
-            let active_pane = saved_active_pane.min(panes.len() - 1);
+            let active_pane = saved_active_pane.min(panes.len().saturating_sub(1));
             (panes, active_pane)
         } else {
             (vec![EditorPane::new(state.active_document)], 0)
         };
 
-        info!(documents = state.documents.len(), "pile started");
+        info!(documents = state.documents.len(), panes = panes.len(), "pile started");
 
         Self {
             state,
@@ -166,35 +166,13 @@ impl PileApp {
     }
 
     fn mark_changed(&self) {
-        let snapshot = SessionSnapshot {
-            schema_version: 2,
-            state: self.state.clone(),
-            panes: self.panes.iter().map(|pane| PaneSnapshot {
-                document_id: pane.document_id,
-                preferred_column: pane.view_state.preferred_column,
-                visible_rows: pane.view_state.visible_rows,
-                column_selection: pane.view_state.column_selection,
-                column_selection_anchor_col: pane.view_state.column_selection_anchor_col,
-            }).collect(),
-            active_pane: self.active_pane,
-        };
+        let snapshot = create_snapshot(&self.state, &self.panes);
         let _ = self.save_tx.send(SaveMsg::Changed(snapshot));
     }
 
     fn flush_session(&self) {
         let (ack_tx, ack_rx) = bounded(1);
-        let snapshot = SessionSnapshot {
-            schema_version: 2,
-            state: self.state.clone(),
-            panes: self.panes.iter().map(|pane| PaneSnapshot {
-                document_id: pane.document_id,
-                preferred_column: pane.view_state.preferred_column,
-                visible_rows: pane.view_state.visible_rows,
-                column_selection: pane.view_state.column_selection,
-                column_selection_anchor_col: pane.view_state.column_selection_anchor_col,
-            }).collect(),
-            active_pane: self.active_pane,
-        };
+        let snapshot = create_snapshot(&self.state, &self.panes);
         let _ = self.save_tx.send(SaveMsg::Flush(snapshot, ack_tx));
         let _ = ack_rx.recv_timeout(Duration::from_secs(2));
     }
@@ -1458,37 +1436,14 @@ impl PileApp {
 
 impl eframe::App for PileApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // ... existing code ...
-    }
+        self.handle_native_menu_commands();
+        self.handle_keyboard_shortcuts(ctx);
 
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.flush_session();
-        if let Some(worker) = self.save_worker.take() {
-            worker.shutdown();
-        }
-    }
-}
-
-impl From<(&AppState, &[EditorPane])> for SessionSnapshot {
-    fn from((state, panes): (&AppState, &[EditorPane])) -> Self {
-        Self {
-            schema_version: 2,
-            state: state.clone(),
-            panes: panes
-                .iter()
-                .map(|pane| PaneSnapshot {
-                    document_id: pane.document_id,
-                    preferred_column: pane.view_state.preferred_column,
-                    visible_rows: pane.view_state.visible_rows,
-                    column_selection: pane.view_state.column_selection,
-                    column_selection_anchor_col: pane.view_state.column_selection_anchor_col,
-                })
-                .collect(),
-            active_pane: 0, // Will be set by caller
-        }
-    }
-}
-}
+        egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("+").on_hover_text("New scratch").clicked() {
+                    self.execute_command(AppCommand::NewScratch);
+                }
 
                 if ui.button("x").on_hover_text("Close scratch").clicked() {
                     self.execute_command(AppCommand::CloseScratch);
@@ -1634,5 +1589,23 @@ impl From<(&AppState, &[EditorPane])> for SessionSnapshot {
         if let Some(worker) = self.save_worker.take() {
             worker.shutdown();
         }
+    }
+}
+
+fn create_snapshot(state: &AppState, panes: &[EditorPane]) -> SessionSnapshot {
+    SessionSnapshot {
+        schema_version: 2,
+        state: state.clone(),
+        panes: panes
+            .iter()
+            .map(|pane| PaneSnapshot {
+                document_id: pane.document_id,
+                preferred_column: pane.view_state.preferred_column,
+                visible_rows: pane.view_state.visible_rows,
+                column_selection: pane.view_state.column_selection,
+                column_selection_anchor_col: pane.view_state.column_selection_anchor_col,
+            })
+            .collect(),
+        active_pane: 0, // Will be set by caller if needed
     }
 }
