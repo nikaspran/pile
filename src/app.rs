@@ -375,6 +375,12 @@ impl PileApp {
             self.state.documents.retain(|doc| doc.id != document_id);
             self.state.tab_order.retain(|id| *id != document_id);
             self.state.recent_order_mut().retain(|id| *id != document_id);
+            // Update any panes that were pointing to the closed document
+            for pane in &mut self.panes {
+                if pane.document_id == document_id {
+                    pane.document_id = self.state.active_document;
+                }
+            }
             self.mark_changed();
         }
     }
@@ -868,7 +874,14 @@ impl PileApp {
 
     fn close_active_scratch(&mut self) {
         self.commit_rename();
+        let old_active = self.state.active_document;
         self.state.close_active();
+        // Update any panes that were pointing to the closed document
+        for pane in &mut self.panes {
+            if pane.document_id == old_active {
+                pane.document_id = self.state.active_document;
+            }
+        }
         self.mark_changed();
         self.refresh_active_document_metadata();
         self.editor_focus_pending = true;
