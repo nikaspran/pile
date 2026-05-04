@@ -82,7 +82,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 ## Syntax and Language Awareness
 
 - Completed: Replace placeholder language heuristics with a scored content detector.
-- Wire tree-sitter parsers into incremental parse state per document.
+- Completed: Wire tree-sitter parsers into incremental parse state per document.
 - Add range-based highlighting for injected languages.
 - Add Markdown fenced-code injection support.
 - Add syntax-aware comments, brackets, and indentation rules.

@@ -8,6 +8,7 @@ mod persistence;
 mod search;
 mod settings;
 mod syntax;
+mod syntax_highlighting;
 mod tab_switcher;
 mod theme;
 

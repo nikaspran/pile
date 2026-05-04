@@ -5,6 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
 use crate::syntax::{LanguageDetection, LanguageId};
+use crate::syntax_highlighting::DocumentSyntaxState;
 
 pub type DocumentId = Uuid;
 
@@ -161,6 +162,9 @@ pub struct Document {
     pub pinned: bool,
     /// Bookmarks stored as byte offsets (0-based) for consistency with selections
     pub bookmarks: BTreeSet<usize>,
+    /// Per-document tree-sitter syntax state (parse tree + highlight cache)
+    #[serde(skip)]
+    pub syntax_state: DocumentSyntaxState,
 }
 
 mod rope_serde {
@@ -198,6 +202,7 @@ impl Document {
             use_soft_tabs: true,
             pinned: false,
             bookmarks: BTreeSet::new(),
+            syntax_state: DocumentSyntaxState::new(),
         }
     }
 

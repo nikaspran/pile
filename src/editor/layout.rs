@@ -204,6 +204,27 @@ impl TextLayoutPipeline {
                 .collect()
         }
     }
+
+    /// Get the byte offset where a wrapped line starts in the original rope.
+    pub fn wrapped_line_byte_start(&self, rope: &Rope, wrapped_line_index: usize) -> usize {
+        if self.wrap_mode == WrapMode::NoWrap {
+            byte_of_visual_line(rope, wrapped_line_index)
+        } else {
+            let Some(&(doc_line, start_col, _)) = self.visual_line_map.get(wrapped_line_index) else {
+                return 0;
+            };
+            let line_start = byte_of_visual_line(rope, doc_line);
+            let line_text = visual_line_text(rope, doc_line);
+            let mut byte_offset = line_start;
+            for (i, c) in line_text.chars().enumerate() {
+                if i >= start_col {
+                    break;
+                }
+                byte_offset += c.len_utf8();
+            }
+            byte_offset
+        }
+    }
 }
 
 fn build_wrap_map(

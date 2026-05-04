@@ -3,6 +3,7 @@ use eframe::egui;
 use std::time::{Duration, Instant};
 
 use crate::model::{Document, Selection};
+use crate::syntax_highlighting::{highlight_color, highlight_name};
 
 pub mod geometry;
 mod input;
@@ -495,34 +496,149 @@ pub fn show_editor(
                     ui.visuals(),
                 );
 
-                let line_text = layout.wrapped_line_text(&document.rope, line_index);
-                if show_visible_whitespace {
-                    let whitespace_color = ui.visuals().weak_text_color();
-                    let mut x_offset = 0.0;
-                    for ch in line_text.chars() {
-                        let (display_ch, color) = match ch {
-                            ' ' => ('·', whitespace_color),
-                            '\t' => ('→', whitespace_color),
-                            _ => (ch, ui.visuals().text_color()),
-                        };
-                        painter.text(
-                            text_pos + egui::vec2(x_offset, 0.0),
-                            egui::Align2::LEFT_TOP,
-                            display_ch.to_string(),
-                            layout.font_id.clone(),
-                            color,
-                        );
-                        x_offset += layout.char_width;
-                    }
-                } else {
-                    painter.text(
-                        text_pos,
-                        egui::Align2::LEFT_TOP,
-                        line_text,
-                        layout.font_id.clone(),
-                        ui.visuals().text_color(),
-                    );
-                }
+                 let line_text = layout.wrapped_line_text(&document.rope, line_index);
+                 let line_start_byte = layout.wrapped_line_byte_start(&document.rope, line_index);
+
+                 // Get syntax highlight spans for this line
+                 let highlight_spans: Vec<(usize, usize, egui::Color32)> = if !is_large_file {
+                     if let Some(detection) = document.detect_syntax() {
+                         if detection.language != crate::syntax::LanguageId::PlainText {
+                             let text = document.text();
+                             let spans = document.syntax_state.highlight(
+                                 &text,
+                                 detection.language,
+                                 document.revision,
+                             );
+                             let line_end_byte = line_start_byte + line_text.len();
+                             spans.iter()
+                                 .filter_map(|span| {
+                                     let start = span.start.max(line_start_byte);
+                                     let end = span.end.min(line_end_byte);
+                                     if start < end {
+                                         let color = highlight_color(&highlight_name(span.highlight), theme);
+                                         Some((start - line_start_byte, end - line_start_byte, color))
+                                     } else {
+                                         None
+                                     }
+                                 })
+                                 .collect()
+                         } else {
+                             Vec::new()
+                         }
+                     } else {
+                         Vec::new()
+                     }
+                 } else {
+                     Vec::new()
+                 };
+
+                 if show_visible_whitespace {
+                     let whitespace_color = ui.visuals().weak_text_color();
+                     let mut x_offset = 0.0;
+                     let mut span_idx = 0;
+
+                     for (i, ch) in line_text.chars().enumerate() {
+                         let byte_pos = line_text.char_indices().nth(i).map(|(b, _)| b).unwrap_or(0);
+                         let (display_ch, mut color) = match ch {
+                             ' ' => ('·', whitespace_color),
+                             '\t' => ('→', whitespace_color),
+                             _ => (ch, ui.visuals().text_color()),
+                         };
+
+                         // Check if this character is within a highlight span
+                         while span_idx < highlight_spans.len() && highlight_spans[span_idx].1 <= byte_pos {
+                             span_idx += 1;
+                         }
+                         if span_idx < highlight_spans.len()
+                             && byte_pos >= highlight_spans[span_idx].0
+                             && byte_pos < highlight_spans[span_idx].1
+                         {
+                             if ch != ' ' && ch != '\t' {
+                                 color = highlight_spans[span_idx].2;
+                             }
+                         }
+
+                         painter.text(
+                             text_pos + egui::vec2(x_offset, 0.0),
+                             egui::Align2::LEFT_TOP,
+                             display_ch.to_string(),
+                             layout.font_id.clone(),
+                             color,
+                         );
+                         x_offset += layout.char_width;
+                     }
+                 } else {
+                     // Render with syntax highlighting
+                     if highlight_spans.is_empty() {
+                         // No highlights: render entire line with default color
+                         painter.text(
+                             text_pos,
+                             egui::Align2::LEFT_TOP,
+                             line_text,
+                             layout.font_id.clone(),
+                             ui.visuals().text_color(),
+                         );
+                     } else {
+                         // Render line piece-by-piece with different colors
+                         let mut x_offset = 0.0;
+                         let mut last_byte = 0;
+                         let default_color = ui.visuals().text_color();
+
+                         // Sort spans by start position
+                         let mut sorted_spans = highlight_spans.clone();
+                         sorted_spans.sort_by_key(|(start, _, _)| *start);
+
+                         for (span_start, span_end, color) in sorted_spans {
+                             // Render unhighlighted text before this span
+                             if span_start > last_byte {
+                                 let text_segment = &line_text[last_byte..span_start.min(line_text.len())];
+                                 if !text_segment.is_empty() {
+                                     painter.text(
+                                         text_pos + egui::vec2(x_offset, 0.0),
+                                         egui::Align2::LEFT_TOP,
+                                         text_segment,
+                                         layout.font_id.clone(),
+                                         default_color,
+                                     );
+                                     x_offset += layout.char_width * text_segment.chars().count() as f32;
+                                 }
+                             }
+
+                             // Render highlighted text
+                             let segment_start = span_start.min(line_text.len());
+                             let segment_end = span_end.min(line_text.len());
+                             if segment_start < segment_end {
+                                 let text_segment = &line_text[segment_start..segment_end];
+                                 if !text_segment.is_empty() {
+                                     painter.text(
+                                         text_pos + egui::vec2(x_offset, 0.0),
+                                         egui::Align2::LEFT_TOP,
+                                         text_segment,
+                                         layout.font_id.clone(),
+                                         color,
+                                     );
+                                     x_offset += layout.char_width * text_segment.chars().count() as f32;
+                                 }
+                             }
+
+                             last_byte = segment_end;
+                         }
+
+                         // Render remaining unhighlighted text
+                         if last_byte < line_text.len() {
+                             let text_segment = &line_text[last_byte..];
+                             if !text_segment.is_empty() {
+                                 painter.text(
+                                     text_pos + egui::vec2(x_offset, 0.0),
+                                     egui::Align2::LEFT_TOP,
+                                     text_segment,
+                                     layout.font_id.clone(),
+                                     default_color,
+                                 );
+                             }
+                         }
+                     }
+                 }
             }
 
     // Handle reveal_selection with smooth scroll animation
