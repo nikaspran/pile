@@ -86,8 +86,11 @@ pub fn show_editor(
 
     let mut changed = false;
 
-    egui::ScrollArea::both()
+    let scroll_offset = egui::Vec2::new(document.scroll.x, document.scroll.y);
+
+    let output = egui::ScrollArea::both()
         .id_salt("editor-scroll")
+        .scroll_offset(scroll_offset)
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {
             let (rect, response) = ui.allocate_exact_size(
@@ -356,6 +359,10 @@ pub fn show_editor(
                 }
             }
         });
+
+    // Save scroll offset back to document for persistence
+    document.scroll.x = output.state.offset.x;
+    document.scroll.y = output.state.offset.y;
 
     EditorResponse { changed }
 }
