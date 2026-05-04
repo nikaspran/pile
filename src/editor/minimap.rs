@@ -1,6 +1,8 @@
 use crop::Rope;
 use eframe::egui;
 
+use crate::settings::Theme;
+
 /// Minimap rendering configuration.
 pub struct MinimapConfig {
     pub width: f32,
@@ -10,15 +12,21 @@ pub struct MinimapConfig {
     pub background_color: egui::Color32,
 }
 
-impl Default for MinimapConfig {
-    fn default() -> Self {
+impl MinimapConfig {
+    pub fn new(theme: Theme) -> Self {
         Self {
             width: 80.0,
             line_height: 2.0,
-            viewport_color: egui::Color32::from_rgba_premultiplied(100, 100, 255, 40),
-            viewport_border: egui::Color32::from_rgba_premultiplied(150, 150, 255, 100),
+            viewport_color: theme.minimap_viewport(),
+            viewport_border: theme.minimap_viewport_border(),
             background_color: egui::Color32::from_rgba_premultiplied(0, 0, 0, 0),
         }
+    }
+}
+
+impl Default for MinimapConfig {
+    fn default() -> Self {
+        Self::new(Theme::Dark)
     }
 }
 
@@ -46,6 +54,7 @@ pub fn show_minimap(
     viewport_height: f32,
     content_height: f32,
     config: &MinimapConfig,
+    theme: Theme,
 ) -> MinimapResult {
     let line_count = visual_line_count(rope).max(1);
     let total_height = minimap_total_height(line_count, config.line_height);
@@ -62,23 +71,11 @@ pub fn show_minimap(
     painter.rect_filled(rect, 0.0, config.background_color);
 
     // Draw minimap content - show lines as colored blocks
-    let text_color = if ui.visuals().dark_mode {
-        egui::Color32::from_rgba_premultiplied(180, 180, 180, 30)
-    } else {
-        egui::Color32::from_rgba_premultiplied(100, 100, 100, 30)
-    };
+    let text_color = theme.minimap_text();
 
-    let comment_color = if ui.visuals().dark_mode {
-        egui::Color32::from_rgba_premultiplied(100, 100, 100, 40)
-    } else {
-        egui::Color32::from_rgba_premultiplied(150, 150, 150, 40)
-    };
+    let comment_color = theme.minimap_comment();
 
-    let keyword_color = if ui.visuals().dark_mode {
-        egui::Color32::from_rgba_premultiplied(150, 200, 255, 60)
-    } else {
-        egui::Color32::from_rgba_premultiplied(100, 150, 200, 60)
-    };
+    let keyword_color = theme.minimap_keyword();
 
     // Simple line rendering - iterate through wrapped lines
     for line_idx in 0..line_count {

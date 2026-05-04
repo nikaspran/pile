@@ -9,6 +9,7 @@ mod search;
 mod settings;
 mod syntax;
 mod tab_switcher;
+mod theme;
 
 use anyhow::Result;
 

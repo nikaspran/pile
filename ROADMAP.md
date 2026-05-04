@@ -77,7 +77,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add minimap with viewport indicator and click/drag navigation.
 - Completed: Add smooth scrolling and large-file-safe viewport virtualization.
 - Completed: Add high-DPI and font fallback testing.
-- Add theme support with bundled dark and light themes.
+- Completed: Add theme support with bundled dark and light themes.
 
 ## Syntax and Language Awareness
 

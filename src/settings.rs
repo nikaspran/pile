@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub use crate::theme::Theme;
+
 /// Line wrapping mode for the editor.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum WrapMode {
@@ -33,6 +35,8 @@ impl WrapMode {
 /// Application-wide settings that persist separately from session state.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Settings {
+    /// Active theme.
+    pub theme: Theme,
     /// Line wrapping mode.
     pub wrap_mode: WrapMode,
     /// Ruler column positions for ruler wrap and visual indicators.
@@ -48,6 +52,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            theme: Theme::default(),
             wrap_mode: WrapMode::default(),
             rulers: vec![80],
             show_visible_whitespace: false,

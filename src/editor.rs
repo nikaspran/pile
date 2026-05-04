@@ -160,6 +160,7 @@ pub fn show_editor(
     rulers: &[usize],
     show_visible_whitespace: bool,
     show_indentation_guides: bool,
+    theme: crate::settings::Theme,
 ) -> EditorResponse {
     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
     clamp_primary_selection(document);
@@ -364,20 +365,12 @@ pub fn show_editor(
             } else {
                 None
             };
-            let bracket_highlight_color = if ui.visuals().dark_mode {
-                egui::Color32::from_rgba_premultiplied(255, 255, 255, 60)
-            } else {
-                egui::Color32::from_rgba_premultiplied(0, 0, 0, 60)
-            };
+            let bracket_highlight_color = theme.bracket_highlight();
 
             for line_index in first_line..last_line {
                 let y = layout.line_y(line_index, rect.top());
                 if line_index == caret_line {
-                    let line_highlight_color = if ui.visuals().dark_mode {
-                        egui::Color32::from_rgba_premultiplied(255, 255, 255, 12)
-                    } else {
-                        egui::Color32::from_rgba_premultiplied(0, 0, 0, 12)
-                    };
+                    let line_highlight_color = theme.current_line_highlight();
                     let full_line_rect = egui::Rect::from_min_size(
                         egui::pos2(rect.left(), y),
                         egui::vec2(rect.width(), layout.row_height),
@@ -404,7 +397,7 @@ pub fn show_editor(
 
                 // Draw bookmark indicator (skip for large files)
                 if !is_large_file && bookmarked_lines.contains(&line_index) {
-                    let bookmark_color = egui::Color32::from_rgb(255, 200, 0);
+                    let bookmark_color = theme.bookmark();
                     let icon_pos = egui::pos2(rect.left() + 2.0, y + layout.row_height * 0.5 - 6.0);
                     painter.text(
                         icon_pos,
@@ -428,11 +421,7 @@ pub fn show_editor(
                 if !is_large_file && show_indentation_guides {
                     let indent_level = line_indent_level(&document.rope, line_index);
                     if indent_level > 0 {
-                        let guide_color = if ui.visuals().dark_mode {
-                            egui::Color32::from_rgba_premultiplied(255, 255, 255, 20)
-                        } else {
-                            egui::Color32::from_rgba_premultiplied(0, 0, 0, 20)
-                        };
+                        let guide_color = theme.indent_guide();
                         let tab_width = document.tab_width;
                         for col in (tab_width..=indent_level).step_by(tab_width) {
                             let x = rect.left() + layout.text_origin_x + layout.column_x(col);

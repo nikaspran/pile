@@ -89,6 +89,7 @@ pub enum Command {
     ToggleVisibleWhitespace,
     ToggleIndentGuides,
     ToggleMinimap,
+    ToggleTheme,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -755,6 +756,13 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             command: ToggleMinimap,
             name: "Toggle Minimap",
             description: "Toggle minimap with viewport indicator",
+            category: View,
+            shortcut: None,
+        },
+        CommandMetadata {
+            command: ToggleTheme,
+            name: "Toggle Theme",
+            description: "Switch between dark and light themes",
             category: View,
             shortcut: None,
         },

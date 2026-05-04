@@ -21,6 +21,7 @@ use crate::{
     settings::Settings,
     syntax::{LanguageDetection, LanguageRegistry},
     tab_switcher::TabSwitcher,
+    theme::{self, apply_theme},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -79,6 +80,7 @@ impl EditorPane {
 }
 
 pub struct PileApp {
+    ctx: egui::Context,
     state: AppState,
     settings: Settings,
     save_tx: Sender<SaveMsg>,
@@ -100,7 +102,8 @@ pub struct PileApp {
 }
 
 impl PileApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let ctx = cc.egui_ctx.clone();
         let session_path = default_session_path();
         let (mut state, saved_panes) = match load_session(&session_path) {
             Ok(Some(snapshot)) => {
@@ -174,9 +177,13 @@ impl PileApp {
         let settings_path = default_settings_path();
         let settings = load_settings(&settings_path);
 
+        // Apply the loaded theme
+        apply_theme(&ctx, settings.theme);
+
         info!(documents = state.documents.len(), panes = panes.len(), "pile started");
 
         Self {
+            ctx,
             state,
             settings,
             save_tx,
@@ -656,6 +663,12 @@ impl PileApp {
             }
             ToggleMinimap => {
                 self.settings.show_minimap = !self.settings.show_minimap;
+                let settings_path = default_settings_path();
+                save_settings(&settings_path, &self.settings);
+            }
+            ToggleTheme => {
+                self.settings.theme = self.settings.theme.cycle();
+                apply_theme(&self.ctx, self.settings.theme);
                 let settings_path = default_settings_path();
                 save_settings(&settings_path, &self.settings);
             }
@@ -1532,6 +1545,7 @@ impl PileApp {
                                 &self.settings.rulers,
                                 self.settings.show_visible_whitespace,
                                 self.settings.show_indentation_guides,
+                                self.settings.theme,
                             )
                         },
                     )
@@ -1549,7 +1563,7 @@ impl PileApp {
                     (doc.scroll.y, doc.rope.lines().count() as f32 * ui.text_style_height(&egui::TextStyle::Monospace))
                 };
 
-                let config = MinimapConfig::default();
+                let config = MinimapConfig::new(self.settings.theme);
                 let viewport_height = ui.available_height();
 
                 let doc = self.state.document(document_id).expect("document must exist");
@@ -1560,6 +1574,7 @@ impl PileApp {
                     viewport_height,
                     content_height,
                     &config,
+                    self.settings.theme,
                 );
                 drop(doc); // Drop immutable borrow
 
@@ -1583,6 +1598,7 @@ impl PileApp {
                 &self.settings.rulers,
                 self.settings.show_visible_whitespace,
                 self.settings.show_indentation_guides,
+                self.settings.theme,
             );
 
             if response.changed {
