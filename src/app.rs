@@ -1470,6 +1470,8 @@ impl eframe::App for PileApp {
                 }
             });
 
+            ui.separator();
+
             // Virtualized horizontal tab list
             let tab_count = self.state.tab_order.len();
             if tab_count > 0 {
@@ -1482,7 +1484,7 @@ impl eframe::App for PileApp {
                     .show_viewport(ui, |ui, viewport| {
                         // Allocate space for all tabs (virtualized)
                         let total_width = tab_width * tab_count as f32;
-                        ui.allocate_space(egui::vec2(total_width, tab_height));
+                        ui.set_min_size(egui::vec2(total_width, tab_height));
 
                         // Calculate visible range
                         let first_visible = (viewport.min.x / tab_width)
@@ -1503,9 +1505,7 @@ impl eframe::App for PileApp {
                                 egui::vec2(tab_width, tab_height),
                             );
                             ui.scope_builder(
-                                egui::UiBuilder::new()
-                                    .max_rect(tab_rect)
-                                    .layout(*ui.layout()),
+                                egui::UiBuilder::new().max_rect(tab_rect),
                                 |ui| {
                                     self.render_tab(ui, document_id);
                                 },
