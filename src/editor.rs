@@ -5,6 +5,7 @@ use crate::model::{Document, Selection};
 
 mod geometry;
 mod input;
+mod layout;
 mod line_ops;
 mod motion;
 mod multicursor;
@@ -12,6 +13,7 @@ mod ops;
 mod replace;
 
 use geometry::*;
+use layout::TextLayoutPipeline;
 pub use geometry::{
     decimal_digits, primary_selection, select_line_at_offset, select_word_at_offset,
     set_primary_selection, visual_line_count, word_at_selection,
@@ -78,17 +80,9 @@ pub fn show_editor(
         *focus_pending = true;
     }
 
-    let line_count = visual_line_count(&document.rope);
-    let line_digits = decimal_digits(line_count);
-    let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
-    let gutter_width =
-        (line_digits as f32 * 8.0 + LINE_GUTTER_PADDING * 2.0).max(LINE_GUTTER_MIN_WIDTH);
     let available_width = ui.available_width().max(EDITOR_MIN_WIDTH);
-    let text_origin_x = gutter_width + LINE_GUTTER_PADDING;
-    let content_width = available_width.max(text_origin_x + EDITOR_MIN_WIDTH);
-    let content_height = (line_count as f32 * row_height).max(ui.available_height());
-    let font_id = egui::TextStyle::Monospace.resolve(ui.style());
-    let char_width = monospace_char_width(ui, font_id.clone());
+    let available_height = ui.available_height();
+    let layout = TextLayoutPipeline::new(ui, &document.rope, available_width, available_height);
 
     let mut changed = false;
 
@@ -97,7 +91,7 @@ pub fn show_editor(
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {
             let (rect, response) = ui.allocate_exact_size(
-                egui::vec2(content_width, content_height),
+                layout.content_size(),
                 egui::Sense::click_and_drag(),
             );
 
@@ -121,16 +115,7 @@ pub fn show_editor(
                         view_state.click_count = 1;
                     }
 
-                    let offset = offset_at_pointer(
-                        &document.rope,
-                        pointer_position,
-                        rect,
-                        text_origin_x,
-                        row_height,
-                        char_width,
-                        line_count,
-                    );
-
+                    let offset = layout.offset_at_pointer(&document.rope, pointer_position, rect);
                     let column = column_of_byte(&document.rope, offset);
                     let is_alt = ui.input(|i| i.modifiers.alt);
 
@@ -160,15 +145,7 @@ pub fn show_editor(
                 }
             } else if response.dragged() {
                 if let Some(pointer_position) = response.interact_pointer_pos() {
-                    let offset = offset_at_pointer(
-                        &document.rope,
-                        pointer_position,
-                        rect,
-                        text_origin_x,
-                        row_height,
-                        char_width,
-                        line_count,
-                    );
+                    let offset = layout.offset_at_pointer(&document.rope, pointer_position, rect);
                     let column = column_of_byte(&document.rope, offset);
                     let line = line_index_of_byte(&document.rope, offset);
                     let is_alt = ui.input(|i| i.modifiers.alt);
@@ -203,17 +180,15 @@ pub fn show_editor(
                         || pointer_position.y > viewport_bottom_abs
                     {
                         let scroll_rect = egui::Rect::from_min_size(
-                            egui::pos2(pointer_position.x, pointer_position.y - row_height * 0.5),
-                            egui::vec2(1.0, row_height),
+                            egui::pos2(pointer_position.x, pointer_position.y - layout.row_height * 0.5),
+                            egui::vec2(1.0, layout.row_height),
                         );
                         ui.scroll_to_rect(scroll_rect, None);
                     }
                 }
             }
 
-            let viewport_rows = ((viewport.max.y - viewport.min.y) / row_height)
-                .floor()
-                .max(1.0) as usize;
+            let viewport_rows = layout.visible_row_count(&viewport);
             view_state.visible_rows = Some(viewport_rows);
 
             if response.has_focus() {
@@ -235,8 +210,7 @@ pub fn show_editor(
             }
 
             let painter = ui.painter_at(rect);
-            let first_line = (viewport.min.y / row_height).floor().max(0.0) as usize;
-            let last_line = ((viewport.max.y / row_height).ceil() as usize + 1).min(line_count);
+            let (first_line, last_line) = layout.visible_line_range(&viewport);
             let primary = primary_selection(document);
             let caret_line = line_index_of_byte(&document.rope, primary.head);
 
@@ -248,7 +222,7 @@ pub fn show_editor(
                 .collect();
 
             for line_index in first_line..last_line {
-                let y = rect.top() + line_index as f32 * row_height;
+                let y = layout.line_y(line_index, rect.top());
                 if line_index == caret_line {
                     let line_highlight_color = if ui.visuals().dark_mode {
                         egui::Color32::from_rgba_premultiplied(255, 255, 255, 12)
@@ -257,7 +231,7 @@ pub fn show_editor(
                     };
                     let gutter_rect = egui::Rect::from_min_size(
                         egui::pos2(rect.left(), y),
-                        egui::vec2(gutter_width, row_height),
+                        egui::vec2(layout.gutter_width, layout.row_height),
                     );
                     painter.rect_filled(gutter_rect, 0.0, line_highlight_color);
                 }
@@ -265,12 +239,12 @@ pub fn show_editor(
                 // Draw bookmark indicator
                 if bookmarked_lines.contains(&line_index) {
                     let bookmark_color = egui::Color32::from_rgb(255, 200, 0);
-                    let icon_pos = egui::pos2(rect.left() + 2.0, y + row_height * 0.5 - 6.0);
+                    let icon_pos = egui::pos2(rect.left() + 2.0, y + layout.row_height * 0.5 - 6.0);
                     painter.text(
                         icon_pos,
                         egui::Align2::LEFT_CENTER,
                         "🔖",
-                        font_id.clone(),
+                        layout.font_id.clone(),
                         bookmark_color,
                     );
                 }
@@ -280,11 +254,11 @@ pub fn show_editor(
                     line_number_pos,
                     egui::Align2::LEFT_TOP,
                     (line_index + 1).to_string(),
-                    font_id.clone(),
+                    layout.font_id.clone(),
                     ui.visuals().weak_text_color(),
                 );
 
-                let text_pos = egui::pos2(rect.left() + text_origin_x, y);
+                let text_pos = egui::pos2(rect.left() + layout.text_origin_x, y);
 
                 // Draw search highlights first (behind selections)
                 paint_search_highlights_for_line(
@@ -294,8 +268,8 @@ pub fn show_editor(
                     line_index,
                     false,
                     text_pos,
-                    row_height,
-                    char_width,
+                    layout.row_height,
+                    layout.char_width,
                     ui.visuals(),
                 );
 
@@ -313,8 +287,8 @@ pub fn show_editor(
                         *sel,
                         line_index,
                         text_pos,
-                        row_height,
-                        char_width,
+                        layout.row_height,
+                        layout.char_width,
                         color,
                     );
                 }
@@ -327,8 +301,8 @@ pub fn show_editor(
                         *sel,
                         line_index,
                         text_pos,
-                        row_height,
-                        char_width,
+                        layout.row_height,
+                        layout.char_width,
                         ui.visuals().selection.bg_fill.gamma_multiply(0.4),
                     );
                 }
@@ -341,8 +315,8 @@ pub fn show_editor(
                     line_index,
                     true,
                     text_pos,
-                    row_height,
-                    char_width,
+                    layout.row_height,
+                    layout.char_width,
                     ui.visuals(),
                 );
 
@@ -351,23 +325,16 @@ pub fn show_editor(
                     text_pos,
                     egui::Align2::LEFT_TOP,
                     line_text,
-                    font_id.clone(),
+                    layout.font_id.clone(),
                     ui.visuals().text_color(),
                 );
             }
 
             // Draw carets for all selections
             for (i, sel) in document.selections.iter().enumerate() {
-                let caret_pos = caret_position(
-                    &document.rope,
-                    sel.head,
-                    rect.left() + text_origin_x,
-                    rect.top(),
-                    row_height,
-                    char_width,
-                );
+                let caret_pos = layout.caret_position(&document.rope, sel.head, rect.top());
                 let caret_rect =
-                    egui::Rect::from_min_size(caret_pos, egui::vec2(1.0, row_height));
+                    egui::Rect::from_min_size(caret_pos, egui::vec2(1.0, layout.row_height));
 
                 let is_primary = i == 0;
                 let stroke_width = if is_primary { 1.5 } else { 1.0 };

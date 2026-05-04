@@ -258,23 +258,6 @@ pub(super) fn column_of_byte(rope: &Rope, offset: usize) -> usize {
     rope.byte_slice(line_start..offset).chars().count()
 }
 
-pub(super) fn offset_at_pointer(
-    rope: &Rope,
-    pos: egui::Pos2,
-    rect: egui::Rect,
-    text_origin_x: f32,
-    row_height: f32,
-    char_width: f32,
-    line_count: usize,
-) -> usize {
-    let line = ((pos.y - rect.top()).max(0.0) / row_height) as usize;
-    let line = line.min(line_count.saturating_sub(1));
-    let column = ((pos.x - (rect.left() + text_origin_x)) / char_width)
-        .round()
-        .max(0.0) as usize;
-    byte_for_line_column(rope, line, column)
-}
-
 pub(super) fn byte_for_line_column(rope: &Rope, line_index: usize, column: usize) -> usize {
     let (start, end) = visual_line_bounds(rope, line_index);
     let mut offset = start;
@@ -285,22 +268,6 @@ pub(super) fn byte_for_line_column(rope: &Rope, line_index: usize, column: usize
         offset += char.len_utf8();
     }
     offset
-}
-
-pub(super) fn caret_position(
-    rope: &Rope,
-    offset: usize,
-    text_left: f32,
-    content_top: f32,
-    row_height: f32,
-    char_width: f32,
-) -> egui::Pos2 {
-    let line = line_index_of_byte(rope, offset);
-    let column = column_of_byte(rope, offset);
-    egui::pos2(
-        text_left + column as f32 * char_width,
-        content_top + line as f32 * row_height,
-    )
 }
 
 pub(super) fn monospace_char_width(ui: &egui::Ui, font_id: egui::FontId) -> f32 {

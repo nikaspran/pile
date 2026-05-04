@@ -883,17 +883,29 @@ fn offset_at_pointer_maps_clicks_to_byte_offsets() {
     let row_height = 10.0;
     let char_width = 8.0;
     let text_origin_x = 20.0;
+    let gutter_width = 44.0;
+    let content_width = 400.0_f32.max(text_origin_x + super::EDITOR_MIN_WIDTH);
+    let content_height = (line_count as f32 * row_height).max(200.0);
+    let font_id = egui::FontId::monospace(14.0);
+
+    let layout = super::layout::TextLayoutPipeline {
+        row_height,
+        char_width,
+        font_id,
+        gutter_width,
+        text_origin_x,
+        content_width,
+        content_height,
+        line_count,
+    };
+
     let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 200.0));
 
     let pointer_at = |x: f32, y: f32| {
-        offset_at_pointer(
+        layout.offset_at_pointer(
             rope,
             egui::pos2(x, y),
             rect,
-            text_origin_x,
-            row_height,
-            char_width,
-            line_count,
         )
     };
 
