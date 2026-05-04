@@ -70,7 +70,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Persist and restore custom editor scroll offsets per document.
 - Completed: Add line wrapping modes: no wrap, viewport wrap, and ruler wrap.
 - Completed: Add configurable rulers.
-- Add current-line highlight.
+- Completed: Add current-line highlight.
 - Add visible whitespace rendering.
 - Add indentation guides.
 - Add bracket matching highlights.

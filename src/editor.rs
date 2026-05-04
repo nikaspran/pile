@@ -234,11 +234,11 @@ pub fn show_editor(
                     } else {
                         egui::Color32::from_rgba_premultiplied(0, 0, 0, 12)
                     };
-                    let gutter_rect = egui::Rect::from_min_size(
+                    let full_line_rect = egui::Rect::from_min_size(
                         egui::pos2(rect.left(), y),
-                        egui::vec2(layout.gutter_width, layout.row_height),
+                        egui::vec2(rect.width(), layout.row_height),
                     );
-                    painter.rect_filled(gutter_rect, 0.0, line_highlight_color);
+                    painter.rect_filled(full_line_rect, 0.0, line_highlight_color);
                 }
 
                 // Draw bookmark indicator
