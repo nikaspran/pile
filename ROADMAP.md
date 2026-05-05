@@ -98,7 +98,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add crash-resilient backup rotation for corrupt session files.
 - Completed: Add restore validation for tab order, active document, selections, scroll, and
   syntax metadata.
-- Add save-worker telemetry and surfaced recovery logs.
+- Completed: Add save-worker telemetry and surfaced recovery logs.
 - Add deterministic flush on app close and system shutdown events.
 - Add stress tests for rapid edits, many tabs, large buffers, and repeated
   crash/restart cycles.

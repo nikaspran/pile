@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crossbeam_channel::{Sender, bounded};
+use crossbeam_channel::{Receiver, Sender, bounded};
 use eframe::egui;
 use tracing::{info, warn};
 
@@ -14,7 +14,8 @@ use crate::{
     model::{AppState, DocumentId, PaneSnapshot, Selection, SessionSnapshot},
     native_menu::{NativeMenu, NativeMenuCommand},
     persistence::{
-        SaveMsg, SaveWorker, default_session_path, default_settings_path, load_session,
+        RecoveryEvent, RecoveryEventKind, SaveMsg, SaveTelemetry, SaveWorker, WorkerEvent,
+        default_session_path, default_settings_path, load_session,
         load_settings, quarantine_corrupt_session, save_settings,
     },
     search::{SearchMatch, SearchState},
@@ -100,13 +101,18 @@ pub struct PileApp {
     panes: Vec<EditorPane>,
     active_pane: usize,
     goto_line: GotoLineState,
+    telemetry: SaveTelemetry,
+    recovery_events: Vec<RecoveryEvent>,
+    worker_event_rx: Option<Receiver<WorkerEvent>>,
 }
 
 impl PileApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
         let session_path = default_session_path();
-        let (mut state, saved_panes) = match load_session(&session_path) {
+
+        let mut telemetry = SaveTelemetry::default();
+        let (mut state, saved_panes) = match load_session(&session_path, &mut telemetry) {
             Ok(Some(mut snapshot)) => {
                 snapshot.state.validate();
                 let panes = if snapshot.schema_version >= 2 {
@@ -119,12 +125,13 @@ impl PileApp {
             Ok(None) => (AppState::empty(), None),
             Err(err) => {
                 warn!(error = %err, path = %session_path.display(), "failed to restore session");
-                quarantine_corrupt_session(&session_path);
+                quarantine_corrupt_session(&session_path, &mut telemetry);
                 (AppState::empty(), None)
             }
         };
 
-        let save_worker = SaveWorker::spawn(session_path);
+        let (event_tx, event_rx) = bounded(128);
+        let save_worker = SaveWorker::spawn_with_events(session_path, event_tx);
         let save_tx = save_worker.sender();
         let syntax = GrammarRegistry::default();
         let last_detection = state
@@ -208,6 +215,9 @@ impl PileApp {
             panes,
             active_pane,
             goto_line: GotoLineState::new(),
+            telemetry,
+            recovery_events: Vec::new(),
+            worker_event_rx: Some(event_rx),
         }
     }
 
@@ -216,11 +226,19 @@ impl PileApp {
         let _ = self.save_tx.send(SaveMsg::Changed(snapshot));
     }
 
-    fn flush_session(&self) {
+    fn flush_session(&mut self) {
         let (ack_tx, ack_rx) = bounded(1);
         let snapshot = create_snapshot(&self.state, &self.panes, self.active_pane);
         let _ = self.save_tx.send(SaveMsg::Flush(snapshot, ack_tx));
-        let _ = ack_rx.recv_timeout(Duration::from_secs(2));
+        if let Ok(result) = ack_rx.recv_timeout(Duration::from_secs(2)) {
+            if let Err(err) = result {
+                self.recovery_events.push(RecoveryEvent {
+                    timestamp: std::time::SystemTime::now(),
+                    kind: RecoveryEventKind::SaveFailed,
+                    message: format!("Flush save failed: {}", err),
+                });
+            }
+        }
     }
 
     fn refresh_active_document_detection(&mut self) {
@@ -1663,6 +1681,20 @@ impl eframe::App for PileApp {
         self.handle_native_menu_commands();
         self.handle_keyboard_shortcuts(ctx);
 
+        // Drain worker events
+        if let Some(rx) = &self.worker_event_rx {
+            while let Ok(event) = rx.try_recv() {
+                match event {
+                    WorkerEvent::Recovery(recovery) => {
+                        self.recovery_events.push(recovery);
+                    }
+                    WorkerEvent::Telemetry(tel) => {
+                        self.telemetry = tel;
+                    }
+                }
+            }
+        }
+
         egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("+").on_hover_text("New scratch").clicked() {
@@ -1701,6 +1733,27 @@ impl eframe::App for PileApp {
                 ui.separator();
             }
 
+            // Show recovery events as dismissable toasts
+            let mut dismissed = None;
+            for (idx, event) in self.recovery_events.iter().enumerate() {
+                let color = match event.kind {
+                    RecoveryEventKind::SaveFailed
+                    | RecoveryEventKind::QuarantineFailed
+                    | RecoveryEventKind::BackupFailed => egui::Color32::from_rgb(255, 120, 120),
+                    RecoveryEventKind::SessionCorrupt => egui::Color32::from_rgb(255, 180, 50),
+                    _ => egui::Color32::from_rgb(120, 200, 120),
+                };
+                ui.horizontal(|ui| {
+                    ui.colored_label(color, &event.message);
+                    if ui.small_button("×").clicked() {
+                        dismissed = Some(idx);
+                    }
+                });
+            }
+            if let Some(idx) = dismissed {
+                self.recovery_events.remove(idx);
+            }
+
             ui.horizontal(|ui| {
                 let (lang, confidence) =
                     (self.last_detection.language, self.last_detection.confidence);
@@ -1729,6 +1782,16 @@ impl eframe::App for PileApp {
                     .map(|document| document.rope.byte_len())
                     .unwrap_or_default();
                 ui.label(format!("{byte_len} bytes"));
+
+                // Telemetry summary
+                ui.separator();
+                ui.label(format!(
+                    "saves: {}/{}",
+                    self.telemetry.successful_saves, self.telemetry.total_saves
+                ));
+                if let Some(dur) = self.telemetry.last_save_duration_ms {
+                    ui.label(format!("last: {}ms", dur));
+                }
             });
         });
 
@@ -1793,6 +1856,7 @@ impl eframe::App for PileApp {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.flush_session();
+        self.worker_event_rx = None; // Drop receiver so worker can finish sending
         if let Some(worker) = self.save_worker.take() {
             worker.shutdown();
         }
@@ -1801,7 +1865,7 @@ impl eframe::App for PileApp {
 
 fn create_snapshot(state: &AppState, panes: &[EditorPane], active_pane: usize) -> SessionSnapshot {
     SessionSnapshot {
-        schema_version: 2,
+        schema_version: 3,
         state: state.clone(),
         panes: panes
             .iter()

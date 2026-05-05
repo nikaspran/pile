@@ -23,6 +23,34 @@ const BACKUP_ROTATION_COUNT: usize = 5;
 /// Current envelope version. Increment this when the session format changes.
 const ENVELOPE_VERSION: u32 = 3;
 
+/// A recoverable session event surfaced to the user.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RecoveryEvent {
+    pub timestamp: std::time::SystemTime,
+    pub kind: RecoveryEventKind,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum RecoveryEventKind {
+    SessionCorrupt,
+    BackupRestored,
+    BackupFailed,
+    QuarantineFailed,
+    SaveFailed,
+    SaveSucceeded,
+}
+
+/// Telemetry collected by the save worker across the session.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SaveTelemetry {
+    pub total_saves: u64,
+    pub successful_saves: u64,
+    pub failed_saves: u64,
+    pub last_save_duration_ms: Option<u64>,
+    pub recovery_events: Vec<RecoveryEvent>,
+}
+
 /// Versioned envelope that wraps the session payload.
 /// This separates envelope metadata from the payload and provides
 /// explicit migration hooks for version upgrades.
@@ -203,6 +231,13 @@ pub enum SaveMsg {
     Shutdown,
 }
 
+/// Messages sent from the save worker back to the UI thread.
+#[derive(Debug)]
+pub enum WorkerEvent {
+    Recovery(RecoveryEvent),
+    Telemetry(SaveTelemetry),
+}
+
 pub struct SaveWorker {
     tx: Sender<SaveMsg>,
     handle: Option<JoinHandle<()>>,
@@ -213,7 +248,28 @@ impl SaveWorker {
         let (tx, rx) = bounded(128);
         let handle = thread::Builder::new()
             .name("pile-session-save".to_owned())
-            .spawn(move || run_save_loop(rx, session_path))
+            .spawn(move || {
+                let mut telemetry = SaveTelemetry::default();
+                run_save_loop(rx, &session_path, &mut telemetry)
+            })
+            .expect("failed to spawn session save worker");
+
+        Self {
+            tx,
+            handle: Some(handle),
+        }
+    }
+
+    /// Spawn with a channel that receives telemetry and recovery events.
+    pub fn spawn_with_events(session_path: PathBuf, event_tx: Sender<WorkerEvent>) -> Self {
+        let (tx, rx) = bounded(128);
+        let handle = thread::Builder::new()
+            .name("pile-session-save".to_owned())
+            .spawn(move || {
+                let mut telemetry = SaveTelemetry::default();
+                run_save_loop(rx, &session_path, &mut telemetry);
+                let _ = event_tx.send(WorkerEvent::Telemetry(telemetry));
+            })
             .expect("failed to spawn session save worker");
 
         Self {
@@ -271,7 +327,10 @@ pub fn save_settings(path: &PathBuf, settings: &Settings) {
     }
 }
 
-pub fn load_session(path: &PathBuf) -> Result<Option<SessionSnapshot>> {
+pub fn load_session(
+    path: &PathBuf,
+    telemetry: &mut SaveTelemetry,
+) -> Result<Option<SessionSnapshot>> {
     if !path.exists() {
         return Ok(None);
     }
@@ -311,9 +370,9 @@ pub fn load_session(path: &PathBuf) -> Result<Option<SessionSnapshot>> {
                         path = %path.display(),
                         "main session corrupt, trying backups"
                     );
-                    quarantine_corrupt_session(path);
+                    quarantine_corrupt_session(path, telemetry);
 
-                    match load_session_from_backup(path) {
+                    match load_session_from_backup(path, telemetry) {
                         Ok(Some((snapshot, backup_path))) => {
                             // Restore from backup
                             let _ = fs::copy(&backup_path, path);
@@ -321,6 +380,14 @@ pub fn load_session(path: &PathBuf) -> Result<Option<SessionSnapshot>> {
                                 backup_path = %backup_path.display(),
                                 "restored session from backup"
                             );
+                            telemetry.recovery_events.push(RecoveryEvent {
+                                timestamp: std::time::SystemTime::now(),
+                                kind: RecoveryEventKind::BackupRestored,
+                                message: format!(
+                                    "Restored session from backup {}",
+                                    backup_path.display()
+                                ),
+                            });
                             Ok(Some(snapshot))
                         }
                         Ok(None) => {
@@ -338,7 +405,7 @@ pub fn load_session(path: &PathBuf) -> Result<Option<SessionSnapshot>> {
     }
 }
 
-fn run_save_loop(rx: Receiver<SaveMsg>, session_path: PathBuf) {
+fn run_save_loop(rx: Receiver<SaveMsg>, session_path: &PathBuf, telemetry: &mut SaveTelemetry) {
     while let Ok(message) = rx.recv() {
         match message {
             SaveMsg::Changed(snapshot) => {
@@ -348,22 +415,22 @@ fn run_save_loop(rx: Receiver<SaveMsg>, session_path: PathBuf) {
                         Ok(SaveMsg::Changed(snapshot)) => latest = snapshot,
                         Ok(SaveMsg::Flush(snapshot, ack)) => {
                             latest = snapshot;
-                            save_and_ack(&session_path, &latest, Some(ack));
+                            save_and_ack(&session_path, &latest, Some(ack), telemetry);
                             break;
                         }
                         Ok(SaveMsg::Shutdown) => {
-                            save_snapshot(&session_path, &latest);
+                            save_snapshot(&session_path, &latest, telemetry);
                             return;
                         }
                         Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                            save_snapshot(&session_path, &latest);
+                            save_snapshot(&session_path, &latest, telemetry);
                             break;
                         }
                         Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
                     }
                 }
             }
-            SaveMsg::Flush(snapshot, ack) => save_and_ack(&session_path, &snapshot, Some(ack)),
+            SaveMsg::Flush(snapshot, ack) => save_and_ack(&session_path, &snapshot, Some(ack), telemetry),
             SaveMsg::Shutdown => return,
         }
     }
@@ -373,25 +440,65 @@ fn save_and_ack(
     path: &PathBuf,
     snapshot: &SessionSnapshot,
     ack: Option<Sender<Result<(), String>>>,
+    telemetry: &mut SaveTelemetry,
 ) {
+    let start = std::time::Instant::now();
+    telemetry.total_saves += 1;
     let result = write_snapshot(path, snapshot).map_err(|err| {
         error!(error = %err, path = %path.display(), "session save failed");
         err.to_string()
     });
+
+    let elapsed = start.elapsed();
+    telemetry.last_save_duration_ms = Some(elapsed.as_millis() as u64);
+
+    match &result {
+        Ok(()) => {
+            telemetry.successful_saves += 1;
+            telemetry.recovery_events.push(RecoveryEvent {
+                timestamp: std::time::SystemTime::now(),
+                kind: RecoveryEventKind::SaveSucceeded,
+                message: format!("Session saved to {}", path.display()),
+            });
+        }
+        Err(err) => {
+            telemetry.failed_saves += 1;
+            telemetry.recovery_events.push(RecoveryEvent {
+                timestamp: std::time::SystemTime::now(),
+                kind: RecoveryEventKind::SaveFailed,
+                message: format!("Save failed: {}", err),
+            });
+        }
+    }
 
     if let Some(ack) = ack {
         let _ = ack.send(result);
     }
 }
 
-fn save_snapshot(path: &PathBuf, snapshot: &SessionSnapshot) {
+fn save_snapshot(path: &PathBuf, snapshot: &SessionSnapshot, telemetry: &mut SaveTelemetry) {
     // Backup current session before overwriting
-    backup_current_session(path);
+    backup_current_session(path, telemetry);
 
-    if let Err(err) = write_snapshot(path, snapshot) {
-        error!(error = %err, path = %path.display(), "session save failed");
-    } else {
-        debug!(path = %path.display(), "session saved");
+    let start = std::time::Instant::now();
+    telemetry.total_saves += 1;
+
+    match write_snapshot(path, snapshot) {
+        Ok(()) => {
+            telemetry.successful_saves += 1;
+            telemetry.last_save_duration_ms = Some(start.elapsed().as_millis() as u64);
+            debug!(path = %path.display(), "session saved");
+        }
+        Err(err) => {
+            telemetry.failed_saves += 1;
+            telemetry.last_save_duration_ms = Some(start.elapsed().as_millis() as u64);
+            error!(error = %err, path = %path.display(), "session save failed");
+            telemetry.recovery_events.push(RecoveryEvent {
+                timestamp: std::time::SystemTime::now(),
+                kind: RecoveryEventKind::SaveFailed,
+                message: format!("Save failed: {}", err),
+            });
+        }
     }
 }
 
@@ -415,7 +522,7 @@ fn write_snapshot(path: &PathBuf, snapshot: &SessionSnapshot) -> Result<()> {
     Ok(())
 }
 
-pub fn quarantine_corrupt_session(path: &PathBuf) {
+pub fn quarantine_corrupt_session(path: &PathBuf, telemetry: &mut SaveTelemetry) {
     let bad_path = path.with_extension("bin.bad");
     if let Err(err) = fs::rename(path, &bad_path) {
         warn!(
@@ -424,6 +531,17 @@ pub fn quarantine_corrupt_session(path: &PathBuf) {
             bad_path = %bad_path.display(),
             "failed to quarantine corrupt session"
         );
+        telemetry.recovery_events.push(RecoveryEvent {
+            timestamp: std::time::SystemTime::now(),
+            kind: RecoveryEventKind::QuarantineFailed,
+            message: format!("Failed to quarantine {}: {}", path.display(), err),
+        });
+    } else {
+        telemetry.recovery_events.push(RecoveryEvent {
+            timestamp: std::time::SystemTime::now(),
+            kind: RecoveryEventKind::SessionCorrupt,
+            message: format!("Quarantined corrupt session to {}", bad_path.display()),
+        });
     }
 }
 
@@ -451,7 +569,7 @@ fn rotate_backups(session_path: &PathBuf) {
 
 /// Create a backup of the current session file before overwriting.
 /// Rotates existing backups and copies current session to .session.bin.1
-pub fn backup_current_session(path: &PathBuf) {
+pub fn backup_current_session(path: &PathBuf, telemetry: &mut SaveTelemetry) {
     if !path.exists() {
         return;
     }
@@ -466,19 +584,33 @@ pub fn backup_current_session(path: &PathBuf) {
             backup_path = %backup_path.display(),
             "failed to create session backup"
         );
+        telemetry.recovery_events.push(RecoveryEvent {
+            timestamp: std::time::SystemTime::now(),
+            kind: RecoveryEventKind::BackupFailed,
+            message: format!("Failed to create backup {}: {}", backup_path.display(), err),
+        });
+    } else {
+        telemetry.recovery_events.push(RecoveryEvent {
+            timestamp: std::time::SystemTime::now(),
+            kind: RecoveryEventKind::BackupRestored,
+            message: format!("Created backup at {}", backup_path.display()),
+        });
     }
 }
 
 /// Try to load session from backup files, starting from the most recent.
 /// Returns the first loadable backup, or None if all backups are corrupt.
-pub fn load_session_from_backup(session_path: &PathBuf) -> Result<Option<(SessionSnapshot, PathBuf)>> {
+pub fn load_session_from_backup(
+    session_path: &PathBuf,
+    telemetry: &mut SaveTelemetry,
+) -> Result<Option<(SessionSnapshot, PathBuf)>> {
     for i in 1..=BACKUP_ROTATION_COUNT {
         let backup_path = session_path.with_extension(format!("bin.{}", i));
         if !backup_path.exists() {
             continue;
         }
 
-        match load_session(&backup_path) {
+        match load_session(&backup_path, telemetry) {
             Ok(Some(snapshot)) => {
                 info!(
                     backup_path = %backup_path.display(),
@@ -493,6 +625,11 @@ pub fn load_session_from_backup(session_path: &PathBuf) -> Result<Option<(Sessio
                     backup_path = %backup_path.display(),
                     "backup also corrupt, trying next"
                 );
+                telemetry.recovery_events.push(RecoveryEvent {
+                    timestamp: std::time::SystemTime::now(),
+                    kind: RecoveryEventKind::BackupFailed,
+                    message: format!("Backup {} also corrupt: {}", backup_path.display(), err),
+                });
                 continue;
             }
         }
@@ -515,6 +652,7 @@ mod tests {
         let worker = SaveWorker::spawn(path.clone());
         let (ack_tx, ack_rx) = bounded(1);
         let snapshot = SessionSnapshot::from(&AppState::empty());
+        let mut telemetry = SaveTelemetry::default();
 
         worker
             .sender()
@@ -525,7 +663,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        let loaded = load_session(&path).unwrap().unwrap();
+        let loaded = load_session(&path, &mut telemetry).unwrap().unwrap();
         assert_eq!(loaded.schema_version, 3); // Now using envelope v3
         assert_eq!(loaded.state.documents.len(), 1);
 
@@ -629,6 +767,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".session.bin");
+        let mut telemetry = SaveTelemetry::default();
 
         // Create initial session
         let snapshot = SessionSnapshot::from(&AppState::empty());
@@ -638,7 +777,7 @@ mod tests {
         assert!(!path.with_extension("bin.1").exists());
 
         // Create backup
-        backup_current_session(&path);
+        backup_current_session(&path, &mut telemetry);
 
         // Backup should now exist
         assert!(path.with_extension("bin.1").exists());
@@ -654,6 +793,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join(".session.bin");
+        let mut telemetry = SaveTelemetry::default();
 
         // Create a valid session and save it
         let worker = SaveWorker::spawn(path.clone());
@@ -667,14 +807,14 @@ mod tests {
         ack_rx.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
 
         // Verify main session exists and is valid
-        let loaded = load_session(&path).unwrap().unwrap();
+        let loaded = load_session(&path, &mut telemetry).unwrap().unwrap();
         assert_eq!(loaded.schema_version, 3);
 
         // Now corrupt the main session file
         fs::write(&path, "corrupted data").unwrap();
 
         // Main session should fail to load now
-        let result = load_session(&path);
+        let result = load_session(&path, &mut telemetry);
         assert!(result.is_err() || result.unwrap().is_none());
 
         // But we should have a backup (created before the corrupt write)
@@ -684,10 +824,10 @@ mod tests {
         write_snapshot(&backup_path, &SessionSnapshot::from(&AppState::empty())).unwrap();
 
         // Quarantine the corrupt main session
-        quarantine_corrupt_session(&path);
+        quarantine_corrupt_session(&path, &mut telemetry);
 
         // Try to load from backup
-        let backup_result = load_session_from_backup(&path).unwrap();
+        let backup_result = load_session_from_backup(&path, &mut telemetry).unwrap();
         assert!(backup_result.is_some());
 
         worker.shutdown();
