@@ -96,7 +96,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 - Completed: Store sessions in a versioned envelope with explicit migration hooks.
 - Completed: Add crash-resilient backup rotation for corrupt session files.
-- Add restore validation for tab order, active document, selections, scroll, and
+- Completed: Add restore validation for tab order, active document, selections, scroll, and
   syntax metadata.
 - Add save-worker telemetry and surfaced recovery logs.
 - Add deterministic flush on app close and system shutdown events.

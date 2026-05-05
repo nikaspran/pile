@@ -39,6 +39,48 @@ impl AppState {
         }
     }
 
+    /// Validate and repair restored state: stale tab_order entries,
+    /// missing or invalid active_document, out-of-bounds selections,
+    /// and unreasonable scroll values.
+    pub fn validate(&mut self) {
+        let valid_ids: std::collections::BTreeSet<DocumentId> =
+            self.documents.iter().map(|d| d.id).collect();
+
+        // Remove stale and duplicate tab_order entries
+        let mut seen = std::collections::BTreeSet::new();
+        self.tab_order.retain(|id| valid_ids.contains(id) && seen.insert(*id));
+
+        // Ensure tab_order has at least one entry
+        if self.tab_order.is_empty() {
+            if let Some(document) = self.documents.first() {
+                self.tab_order.push(document.id);
+            } else {
+                let document = Document::new_untitled(self.next_untitled_index);
+                self.next_untitled_index += 1;
+                self.documents.push(document);
+                self.tab_order.push(self.documents[0].id);
+            }
+        }
+
+        // Fix active_document if missing or not in tab_order
+        if !valid_ids.contains(&self.active_document)
+            || !self.tab_order.contains(&self.active_document)
+        {
+            self.active_document = self.tab_order[0];
+        }
+
+        // Drop stale recent_order entries
+        self.recent_order.retain(|id| valid_ids.contains(id));
+        if !self.recent_order.contains(&self.active_document) {
+            self.recent_order.insert(0, self.active_document);
+        }
+
+        // Validate per-document fields
+        for document in &mut self.documents {
+            document.validate();
+        }
+    }
+
     pub fn active_document(&self) -> Option<&Document> {
         self.document(self.active_document)
     }
@@ -407,6 +449,32 @@ impl Document {
             selections_before: vec![selection_before],
         });
         self.undo.commit_group();
+    }
+
+    /// Clamp selections to valid byte offsets and fix scroll values.
+    pub fn validate(&mut self) {
+        let len = self.rope.byte_len();
+
+        // Clamp selections to [0, len]
+        for sel in &mut self.selections {
+            sel.anchor = sel.anchor.min(len);
+            sel.head = sel.head.min(len);
+        }
+        if self.selections.is_empty() {
+            self.selections.push(Selection::caret(len));
+        }
+
+        // Clamp bookmarks to valid byte offsets
+        self.bookmarks.retain(|&offset| offset <= len);
+
+        // Clamp scroll to non-negative values
+        self.scroll.x = self.scroll.x.max(0.0);
+        self.scroll.y = self.scroll.y.max(0.0);
+
+        // Ensure reasonable tab width
+        if self.tab_width == 0 || self.tab_width > 16 {
+            self.tab_width = 4;
+        }
     }
 }
 
@@ -950,5 +1018,81 @@ mod tests {
         assert_eq!(document.text(), "a b c");
         assert_eq!(document.selections.len(), 1);
         assert_eq!(document.selections[0], sel1);
+    }
+
+    #[test]
+    fn validate_repairs_stale_tab_order() {
+        let mut state = AppState::empty();
+        let valid_id = state.active_document;
+        let stale_id = Uuid::new_v4();
+
+        state.tab_order.push(stale_id);
+        state.tab_order.push(valid_id); // duplicate
+
+        state.validate();
+
+        assert_eq!(state.tab_order.len(), 1);
+        assert_eq!(state.tab_order[0], valid_id);
+    }
+
+    #[test]
+    fn validate_fixes_missing_active_document() {
+        let mut state = AppState::empty();
+        state.active_document = Uuid::new_v4(); // missing
+
+        state.validate();
+
+        assert!(state.document(state.active_document).is_some());
+        assert!(state.tab_order.contains(&state.active_document));
+    }
+
+    #[test]
+    fn validate_creates_document_when_empty() {
+        let mut state = AppState {
+            documents: vec![],
+            tab_order: vec![],
+            active_document: Uuid::new_v4(),
+            next_untitled_index: 2,
+            recent_order: vec![],
+        };
+
+        state.validate();
+
+        assert!(!state.documents.is_empty());
+        assert!(!state.tab_order.is_empty());
+        assert!(state.document(state.active_document).is_some());
+    }
+
+    #[test]
+    fn document_validate_clamps_selections() {
+        let mut doc = Document::new_untitled(1);
+        doc.replace_text("hello");
+        let len = doc.rope.byte_len();
+
+        doc.selections = vec![
+            Selection { anchor: 0, head: len + 100 }, // out of bounds
+            Selection { anchor: len + 50, head: len + 50 }, // out of bounds
+        ];
+
+        doc.validate();
+
+        for sel in &doc.selections {
+            assert!(sel.anchor <= len);
+            assert!(sel.head <= len);
+        }
+    }
+
+    #[test]
+    fn document_validate_fixes_scroll_and_tab_width() {
+        let mut doc = Document::new_untitled(1);
+
+        doc.scroll = ScrollState { x: -5.0, y: -10.0 };
+        doc.tab_width = 0;
+
+        doc.validate();
+
+        assert!(doc.scroll.x >= 0.0);
+        assert!(doc.scroll.y >= 0.0);
+        assert_eq!(doc.tab_width, 4);
     }
 }

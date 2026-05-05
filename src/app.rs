@@ -107,7 +107,8 @@ impl PileApp {
         let ctx = cc.egui_ctx.clone();
         let session_path = default_session_path();
         let (mut state, saved_panes) = match load_session(&session_path) {
-            Ok(Some(snapshot)) => {
+            Ok(Some(mut snapshot)) => {
+                snapshot.state.validate();
                 let panes = if snapshot.schema_version >= 2 {
                     Some((snapshot.panes, snapshot.active_pane))
                 } else {
@@ -211,13 +212,13 @@ impl PileApp {
     }
 
     fn mark_changed(&self) {
-        let snapshot = create_snapshot(&self.state, &self.panes);
+        let snapshot = create_snapshot(&self.state, &self.panes, self.active_pane);
         let _ = self.save_tx.send(SaveMsg::Changed(snapshot));
     }
 
     fn flush_session(&self) {
         let (ack_tx, ack_rx) = bounded(1);
-        let snapshot = create_snapshot(&self.state, &self.panes);
+        let snapshot = create_snapshot(&self.state, &self.panes, self.active_pane);
         let _ = self.save_tx.send(SaveMsg::Flush(snapshot, ack_tx));
         let _ = ack_rx.recv_timeout(Duration::from_secs(2));
     }
@@ -1798,7 +1799,7 @@ impl eframe::App for PileApp {
     }
 }
 
-fn create_snapshot(state: &AppState, panes: &[EditorPane]) -> SessionSnapshot {
+fn create_snapshot(state: &AppState, panes: &[EditorPane], active_pane: usize) -> SessionSnapshot {
     SessionSnapshot {
         schema_version: 2,
         state: state.clone(),
@@ -1812,6 +1813,6 @@ fn create_snapshot(state: &AppState, panes: &[EditorPane]) -> SessionSnapshot {
                 column_selection_anchor_col: pane.view_state.column_selection_anchor_col,
             })
             .collect(),
-        active_pane: 0, // Will be set by caller if needed
+        active_pane,
     }
 }
