@@ -1,6 +1,6 @@
 use eframe::egui;
 
-use crate::command::{Command, CommandMetadata, all_commands};
+use crate::command::{Command, CommandMetadata, all_commands, format_shortcut};
 
 pub struct CommandPalette {
     pub visible: bool,
@@ -59,7 +59,7 @@ impl CommandPalette {
 
                 ui.separator();
 
-                self.render_list(ui);
+                self.render_list(ctx, ui);
             });
 
         if !open {
@@ -95,30 +95,59 @@ impl CommandPalette {
         self.selected_index = self.selected_index.min(self.filtered_indices.len().saturating_sub(1));
     }
 
-    fn render_list(&mut self, ui: &mut egui::Ui) {
+    fn render_list(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         let filtered_count = self.filtered_indices.len();
         if filtered_count == 0 {
             ui.label("No commands found");
             return;
         }
 
+        // Collect the data we need before rendering to avoid borrow issues
+        let items: Vec<(usize, Command, String, String)> = self
+            .filtered_indices
+            .iter()
+            .map(|&cmd_idx| {
+                let cmd = &self.commands[cmd_idx];
+                let shortcut_text = cmd
+                    .shortcut
+                    .as_ref()
+                    .map(|s| format_shortcut(s, ctx))
+                    .unwrap_or_default();
+                (cmd_idx, cmd.command, cmd.name.to_string(), shortcut_text)
+            })
+            .collect();
+
+        let selected_index = self.selected_index;
+        let mut clicked_command: Option<Command> = None;
+
         egui::ScrollArea::vertical()
             .max_height(300.0)
             .show(ui, |ui| {
-                for (list_idx, &cmd_idx) in self.filtered_indices.iter().enumerate() {
-                    let cmd = &self.commands[cmd_idx];
-                    let is_selected = list_idx == self.selected_index;
+                for (list_idx, (_cmd_idx, command, name, shortcut_text)) in items.iter().enumerate() {
+                    let is_selected = list_idx == selected_index;
 
-                    let response = ui.selectable_label(is_selected, cmd.name);
-                    if is_selected {
-                        response.scroll_to_me(Some(egui::Align::Center));
-                    }
-                    if response.clicked() {
-                        self.selected_index = list_idx;
-                        self.execute_command(cmd.command, &mut |_c| {});
-                    }
+                    ui.horizontal(|ui| {
+                        ui.set_min_width(ui.available_width());
+                        let response = ui.selectable_label(is_selected, name.as_str());
+                        if is_selected {
+                            response.scroll_to_me(Some(egui::Align::Center));
+                        }
+                        if response.clicked() {
+                            clicked_command = Some(*command);
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if !shortcut_text.is_empty() {
+                                ui.label(egui::RichText::new(shortcut_text.as_str()).weak());
+                            }
+                        });
+                    });
                 }
             });
+
+        // Execute the command after rendering
+        if let Some(cmd) = clicked_command {
+            self.execute_command(cmd, &mut |_c| {});
+        }
     }
 
     fn execute_selected(&mut self, on_command: &mut dyn FnMut(Command)) {

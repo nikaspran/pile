@@ -140,6 +140,104 @@ impl CommandMetadata {
     }
 }
 
+/// Format a keyboard shortcut using per-platform conventions.
+///
+/// On macOS: uses symbols (⌘, ⇧, ⌥, ⌃) and displays keys like "N", "F1".
+/// On other platforms: uses words (Ctrl, Shift, Alt) and displays keys like "N", "F1".
+pub fn format_shortcut(shortcut: &egui::KeyboardShortcut, _ctx: &egui::Context) -> String {
+    let modifiers = shortcut.modifiers;
+    let mut parts = Vec::new();
+
+    if cfg!(target_os = "macos") {
+        // macOS: use symbols
+        if modifiers.command {
+            parts.push("⌘");
+        }
+        if modifiers.shift {
+            parts.push("⇧");
+        }
+        if modifiers.alt {
+            parts.push("⌥");
+        }
+        if modifiers.ctrl {
+            parts.push("⌃");
+        }
+    } else {
+        // Windows/Linux: use words
+        if modifiers.command {
+            parts.push("Ctrl");
+        }
+        if modifiers.shift {
+            parts.push("Shift");
+        }
+        if modifiers.alt {
+            parts.push("Alt");
+        }
+        if modifiers.ctrl {
+            parts.push("Ctrl");
+        }
+    }
+
+    // Format the key
+    let key_text = format_key(&shortcut.logical_key);
+    parts.push(&key_text);
+
+    parts.join(if cfg!(target_os = "macos") { "" } else { "+" })
+}
+
+/// Format an egui Key into a human-readable string.
+fn format_key(key: &egui::Key) -> String {
+    match key {
+        egui::Key::ArrowDown => "↓".to_string(),
+        egui::Key::ArrowUp => "↑".to_string(),
+        egui::Key::ArrowLeft => "←".to_string(),
+        egui::Key::ArrowRight => "→".to_string(),
+        egui::Key::Escape => "Esc".to_string(),
+        egui::Key::Tab => "Tab".to_string(),
+        egui::Key::Space => "Space".to_string(),
+        egui::Key::Enter => "Enter".to_string(),
+        egui::Key::Backspace => "Backspace".to_string(),
+        egui::Key::Delete => "Delete".to_string(),
+        egui::Key::Home => "Home".to_string(),
+        egui::Key::End => "End".to_string(),
+        egui::Key::PageUp => "PgUp".to_string(),
+        egui::Key::PageDown => "PgDown".to_string(),
+        egui::Key::F1 => "F1".to_string(),
+        egui::Key::F2 => "F2".to_string(),
+        egui::Key::F3 => "F3".to_string(),
+        egui::Key::F4 => "F4".to_string(),
+        egui::Key::F5 => "F5".to_string(),
+        egui::Key::F6 => "F6".to_string(),
+        egui::Key::F7 => "F7".to_string(),
+        egui::Key::F8 => "F8".to_string(),
+        egui::Key::F9 => "F9".to_string(),
+        egui::Key::F10 => "F10".to_string(),
+        egui::Key::F11 => "F11".to_string(),
+        egui::Key::F12 => "F12".to_string(),
+        egui::Key::Insert => "Insert".to_string(),
+        egui::Key::Num0 => "0".to_string(),
+        egui::Key::Num1 => "1".to_string(),
+        egui::Key::Num2 => "2".to_string(),
+        egui::Key::Num3 => "3".to_string(),
+        egui::Key::Num4 => "4".to_string(),
+        egui::Key::Num5 => "5".to_string(),
+        egui::Key::Num6 => "6".to_string(),
+        egui::Key::Num7 => "7".to_string(),
+        egui::Key::Num8 => "8".to_string(),
+        egui::Key::Num9 => "9".to_string(),
+        _ => {
+            // For letter keys, just use the debug output and clean it up
+            let s = format!("{:?}", key);
+            // Remove "Character(" prefix and ")" suffix if present
+            if s.starts_with("Character(") && s.ends_with(')') {
+                s[9..s.len() - 1].to_string()
+            } else {
+                s
+            }
+        }
+    }
+}
+
 // Simple fuzzy match: characters of query must appear in order in target
 pub fn fuzzy_match(query: &str, target: &str) -> bool {
     if query.is_empty() {
