@@ -94,7 +94,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 ## Persistence and Reliability
 
-- Store sessions in a versioned envelope with explicit migration hooks.
+- Completed: Store sessions in a versioned envelope with explicit migration hooks.
 - Add crash-resilient backup rotation for corrupt session files.
 - Add restore validation for tab order, active document, selections, scroll, and
   syntax metadata.
