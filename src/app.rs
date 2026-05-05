@@ -1,8 +1,12 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender, bounded};
 use eframe::egui;
 use tracing::{info, warn};
+use signal_hook::consts::signal::{SIGTERM, SIGINT};
+use signal_hook::flag;
 
 use crate::{
     command::Command,
@@ -104,11 +108,21 @@ pub struct PileApp {
     telemetry: SaveTelemetry,
     recovery_events: Vec<RecoveryEvent>,
     worker_event_rx: Option<Receiver<WorkerEvent>>,
+    shutdown_flag: Arc<AtomicBool>,
 }
 
 impl PileApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
+
+        // Set up system shutdown signal handling
+        let shutdown_flag = Arc::new(AtomicBool::new(false));
+        #[cfg(unix)]
+        {
+            let _ = flag::register(SIGTERM, Arc::clone(&shutdown_flag));
+            let _ = flag::register(SIGINT, Arc::clone(&shutdown_flag));
+        }
+
         let session_path = default_session_path();
 
         let mut telemetry = SaveTelemetry::default();
@@ -218,6 +232,7 @@ impl PileApp {
             telemetry,
             recovery_events: Vec::new(),
             worker_event_rx: Some(event_rx),
+            shutdown_flag: shutdown_flag.clone(),
         }
     }
 
@@ -1678,6 +1693,13 @@ impl PileApp {
 
 impl eframe::App for PileApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Check for system shutdown signal
+        if self.shutdown_flag.load(Ordering::Relaxed) {
+            self.flush_session();
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+
         self.handle_native_menu_commands();
         self.handle_keyboard_shortcuts(ctx);
 

@@ -99,7 +99,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add restore validation for tab order, active document, selections, scroll, and
   syntax metadata.
 - Completed: Add save-worker telemetry and surfaced recovery logs.
-- Add deterministic flush on app close and system shutdown events.
+- Completed: Add deterministic flush on app close and system shutdown events.
 - Add stress tests for rapid edits, many tabs, large buffers, and repeated
   crash/restart cycles.
 - Add bounded snapshot memory accounting so huge sessions cannot stall the UI.
