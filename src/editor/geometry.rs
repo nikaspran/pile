@@ -57,7 +57,7 @@ pub(super) fn clamp_to_char_boundary(rope: &Rope, mut offset: usize) -> usize {
     offset
 }
 
-pub(super) fn selection_range(selection: Selection) -> (usize, usize) {
+pub fn selection_range(selection: Selection) -> (usize, usize) {
     if selection.anchor <= selection.head {
         (selection.anchor, selection.head)
     } else {

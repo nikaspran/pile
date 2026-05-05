@@ -200,6 +200,7 @@ pub struct PileApp {
     rename_text: String,
     rename_focus_pending: bool,
     editor_focus_pending: bool,
+    clipboard_text: Option<String>,
     native_menu: Option<NativeMenu>,
     search: SearchState,
     command_palette: CommandPalette,
@@ -323,6 +324,7 @@ impl PileApp {
             rename_text: String::new(),
             rename_focus_pending: false,
             editor_focus_pending: true,
+            clipboard_text: None,
             native_menu: NativeMenu::install(),
             search: SearchState::default(),
             command_palette: CommandPalette::new(),
@@ -335,6 +337,18 @@ impl PileApp {
             worker_event_rx: Some(event_rx),
             shutdown_flag: shutdown_flag.clone(),
         }
+    }
+
+    fn extract_selected_text(document: &crate::model::Document) -> String {
+        use crate::editor::selection_range;
+        let mut parts = Vec::new();
+        for selection in &document.selections {
+            let (start, end) = selection_range(*selection);
+            if start < end {
+                parts.push(document.rope.byte_slice(start..end).to_string());
+            }
+        }
+        parts.join("\n")
     }
 
     fn mark_changed(&self) {
@@ -614,12 +628,23 @@ impl PileApp {
                 }
             }
             AppCommand::Cut => {
-                // Cutting is handled by the text editor component
-                // Just ensure editor has focus
+                if let Some(document) = self.state.active_document_mut() {
+                    let text = Self::extract_selected_text(document);
+                    if !text.is_empty() {
+                        self.clipboard_text = Some(text);
+                        crate::editor::delete_all(document);
+                        self.document_edited();
+                    }
+                }
                 self.editor_focus_pending = true;
             }
             AppCommand::Copy => {
-                // Copying is handled by the text editor component
+                if let Some(document) = self.state.active_document() {
+                    let text = Self::extract_selected_text(document);
+                    if !text.is_empty() {
+                        self.clipboard_text = Some(text);
+                    }
+                }
                 self.editor_focus_pending = true;
             }
             AppCommand::Paste => {
@@ -2304,6 +2329,11 @@ impl eframe::App for PileApp {
             .show(ctx, &self.state, &mut |id| switch_to = Some(id));
         if let Some(document_id) = switch_to {
             self.set_active_document(document_id);
+        }
+
+        // Apply pending clipboard text
+        if let Some(text) = self.clipboard_text.take() {
+            ctx.copy_text(text);
         }
     }
 

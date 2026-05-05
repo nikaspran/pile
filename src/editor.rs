@@ -18,7 +18,7 @@ mod replace;
 use geometry::*;
 pub use geometry::{
     decimal_digits, primary_selection, select_line_at_offset, select_word_at_offset,
-    set_primary_selection, visual_line_count, word_at_selection,
+    selection_range, set_primary_selection, visual_line_count, word_at_selection,
 };
 use input::handle_input;
 use layout::TextLayoutPipeline;
