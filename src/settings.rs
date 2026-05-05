@@ -23,6 +23,8 @@ impl WrapMode {
         }
     }
 
+    #[allow(dead_code)]
+    #[allow(dead_code)]
     pub fn label(self) -> &'static str {
         match self {
             WrapMode::NoWrap => "No Wrap",

@@ -22,7 +22,6 @@ pub use geometry::{
 };
 use input::handle_input;
 use layout::TextLayoutPipeline;
-use line_ops::*;
 pub use line_ops::{
     delete_selected_lines, duplicate_selected_lines, indent_selection, join_selected_lines,
     move_selected_lines_down, move_selected_lines_up, normalize_whitespace, outdent_selection,

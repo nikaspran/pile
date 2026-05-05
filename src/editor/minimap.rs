@@ -156,6 +156,7 @@ pub fn show_minimap(
 }
 
 /// Calculate the target scroll position from a click on the minimap.
+#[allow(dead_code)]
 pub fn minimap_scroll_target(
     click_y: f32,
     minimap_rect_top: f32,

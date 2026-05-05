@@ -11,12 +11,16 @@ pub struct TextLayoutPipeline {
     pub row_height: f32,
     pub char_width: f32,
     pub font_id: egui::FontId,
+    /// Gutter width in points.
+    #[allow(dead_code)]
     pub gutter_width: f32,
     pub text_origin_x: f32,
     pub content_width: f32,
     pub content_height: f32,
     pub line_count: usize,
     wrap_mode: WrapMode,
+    /// Width available for text wrapping, in characters.
+    #[allow(dead_code)]
     wrap_width_chars: usize,
     visual_line_map: Vec<(usize, usize, usize)>,
 }

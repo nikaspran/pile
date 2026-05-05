@@ -1,7 +1,5 @@
 use crop::Rope;
 
-use content_inspector::{ContentType, inspect};
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum LanguageId {
     PlainText,
@@ -28,6 +26,7 @@ impl LanguageId {
     }
 
     /// Returns the block comment delimiters (open, close) for this language, if any.
+    #[allow(dead_code)]
     pub fn block_comment_delimiters(&self) -> Option<(&'static str, &'static str)> {
         match self {
             LanguageId::Rust | LanguageId::JavaScript | LanguageId::TypeScript => {
@@ -642,6 +641,7 @@ impl Default for ScoredDetector {
     }
 }
 
+#[allow(dead_code)]
 fn bounded_sample(text: &str) -> &str {
     let max = 16 * 1024;
     if text.len() <= max {
@@ -657,12 +657,14 @@ fn bounded_sample(text: &str) -> &str {
     }
 }
 
+#[allow(dead_code)]
 fn bounded_rope_sample(rope: &Rope) -> String {
     let max = 16 * 1024;
     let end = floor_char_boundary(rope, rope.byte_len().min(max));
     rope.byte_slice(..end).to_string()
 }
 
+#[allow(dead_code)]
 fn floor_char_boundary(rope: &Rope, mut offset: usize) -> usize {
     offset = offset.min(rope.byte_len());
     while offset > 0 && !rope.is_char_boundary(offset) {

@@ -175,6 +175,7 @@ impl DocumentSyntaxState {
     /// Apply an edit to the stored tree so the next parse is properly incremental.
     ///
     /// Call this *before* the actual text change so the tree knows the expected edit.
+    #[allow(dead_code)]
     pub fn edit(&mut self, start_byte: usize, old_end_byte: usize, new_end_byte: usize) {
         if let Some(tree) = &mut self.tree {
             let start_position =
@@ -197,11 +198,13 @@ impl DocumentSyntaxState {
 
     /// Invalidate cached spans (e.g., when the document revision changes externally
     /// or when the visible range changes significantly).
+    #[allow(dead_code)]
     pub fn invalidate_cache(&mut self) {
         self.cached_spans = None;
     }
 
     /// Returns the tree-sitter `Tree` if available.
+    #[allow(dead_code)]
     pub fn tree(&self) -> Option<&Tree> {
         self.tree.as_ref()
     }
@@ -219,7 +222,7 @@ impl DocumentSyntaxState {
     }
 
     /// Check if the given byte offset is inside a comment node.
-    pub fn is_inside_comment(&self, text: &str, offset: usize) -> bool {
+    pub fn is_inside_comment(&self, _text: &str, offset: usize) -> bool {
         let Some(tree) = self.tree.as_ref() else {
             return false;
         };
@@ -238,7 +241,7 @@ impl DocumentSyntaxState {
     }
 
     /// Check if the given byte offset is inside a string node.
-    pub fn is_inside_string(&self, text: &str, offset: usize) -> bool {
+    pub fn is_inside_string(&self, _text: &str, offset: usize) -> bool {
         let Some(tree) = self.tree.as_ref() else {
             return false;
         };
@@ -257,6 +260,7 @@ impl DocumentSyntaxState {
     }
 
     /// Get the node type at the given byte offset.
+    #[allow(dead_code)]
     pub fn node_type_at(&self, offset: usize) -> Option<String> {
         let tree = self.tree.as_ref()?;
         let node = tree.root_node();
@@ -268,7 +272,7 @@ impl DocumentSyntaxState {
     /// Returns the indentation string (spaces or tabs) to use.
     pub fn indentation_at(
         &self,
-        text: &str,
+        _text: &str,
         offset: usize,
         tab_width: usize,
         use_soft_tabs: bool,
@@ -344,6 +348,7 @@ fn find_leaf_at_offset(node: tree_sitter::Node, offset: usize) -> Option<tree_si
 }
 
 /// Convert a byte offset into a tree-sitter `Point` (row, column in bytes).
+#[allow(dead_code)]
 fn byte_offset_to_point(text: &str, byte_offset: usize) -> Point {
     let byte_offset = byte_offset.min(text.len());
     let prefix = &text[..byte_offset];

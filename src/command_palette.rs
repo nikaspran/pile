@@ -115,7 +115,7 @@ impl CommandPalette {
                     }
                     if response.clicked() {
                         self.selected_index = list_idx;
-                        self.execute_command(cmd.command, &mut |c| {});
+                        self.execute_command(cmd.command, &mut |_c| {});
                     }
                 }
             });

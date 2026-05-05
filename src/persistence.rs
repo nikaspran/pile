@@ -13,7 +13,7 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, warn};
 
-use crate::model::{PaneSnapshot, SessionSnapshot};
+use crate::model::SessionSnapshot;
 use crate::settings::Settings;
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -232,7 +232,7 @@ fn migrate_v1_to_v2(envelope: SessionEnvelope) -> Result<SessionEnvelope> {
 
 /// Migration from envelope v2 to v3.
 /// v2 had schema_version in the payload; v3 moves versioning to the envelope.
-fn migrate_v2_to_v3(mut envelope: SessionEnvelope) -> Result<SessionEnvelope> {
+fn migrate_v2_to_v3(envelope: SessionEnvelope) -> Result<SessionEnvelope> {
     // v2 payload is SessionSnapshot with schema_version field
     let mut snapshot: SessionSnapshot = bincode::deserialize(&envelope.payload_bytes)
         .with_context(|| "failed to deserialize v2 session")?;
@@ -260,6 +260,7 @@ pub enum SaveMsg {
 /// Messages sent from the save worker back to the UI thread.
 #[derive(Debug)]
 pub enum WorkerEvent {
+    #[allow(dead_code)]
     Recovery(RecoveryEvent),
     Telemetry(SaveTelemetry),
 }
@@ -270,6 +271,7 @@ pub struct SaveWorker {
 }
 
 impl SaveWorker {
+    #[allow(dead_code)]
     pub fn spawn(session_path: PathBuf) -> Self {
         let (tx, rx) = bounded(128);
         let handle = thread::Builder::new()

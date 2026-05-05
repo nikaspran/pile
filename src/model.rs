@@ -4,7 +4,7 @@ use crop::{Rope, RopeSlice};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
-use crate::syntax::{LanguageDetection, LanguageId};
+use crate::syntax::LanguageDetection;
 use crate::syntax_highlighting::DocumentSyntaxState;
 
 pub type DocumentId = Uuid;
@@ -164,7 +164,7 @@ impl AppState {
     }
 }
 
-fn serialize_recent_order<S>(order: &Vec<DocumentId>, serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_recent_order<S>(_order: &Vec<DocumentId>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
@@ -385,6 +385,7 @@ impl Document {
         self.undo.can_undo()
     }
 
+    #[allow(dead_code)]
     pub fn can_redo(&self) -> bool {
         self.undo.can_redo()
     }
@@ -643,6 +644,7 @@ impl UndoState {
         !self.undo_stack.is_empty() || self.is_typing && !self.typing_group.is_empty()
     }
 
+    #[allow(dead_code)]
     pub fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
     }

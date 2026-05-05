@@ -27,7 +27,7 @@ use crate::{
     syntax::LanguageDetection,
     grammar_registry::GrammarRegistry,
     tab_switcher::TabSwitcher,
-    theme::{self, apply_theme},
+    theme::apply_theme,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -191,7 +191,6 @@ pub struct PileApp {
     save_tx: Sender<SaveMsg>,
     save_worker: Option<SaveWorker>,
     syntax: GrammarRegistry,
-    editor_view: EditorViewState,
     last_detection: LanguageDetection,
     renaming_document: Option<DocumentId>,
     rename_text: String,
@@ -315,7 +314,6 @@ impl PileApp {
             save_tx,
             save_worker: Some(save_worker),
             syntax,
-            editor_view: EditorViewState::default(),
             last_detection,
             renaming_document: None,
             rename_text: String::new(),
@@ -1993,7 +1991,7 @@ impl PileApp {
                     &config,
                     self.settings.theme,
                 );
-                drop(doc); // Drop immutable borrow
+                let _ = doc; // Drop immutable borrow
 
                 if let Some(target_scroll_y) = minimap_result.target_scroll_y {
                     let doc = self
@@ -2179,7 +2177,7 @@ impl eframe::App for PileApp {
                             .map(|(idx, pane)| (idx, pane.document_id))
                             .collect();
 
-                        for (idx, document_id) in pane_data {
+                        for (idx, _document_id) in pane_data {
                             let pane_rect = egui::Rect::from_min_size(
                                 egui::pos2(
                                     available.left() + pane_width * idx as f32,

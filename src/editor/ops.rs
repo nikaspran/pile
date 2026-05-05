@@ -1,8 +1,6 @@
 use crop::Rope;
 
 use crate::model::{Document, DocumentEdit, Selection};
-use crate::syntax_highlighting::DocumentSyntaxState;
-
 use super::{
     byte_of_visual_line, clamp_primary_selection, line_index_of_byte, next_grapheme_boundary,
     previous_grapheme_boundary, primary_selection, selection_range,

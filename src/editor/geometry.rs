@@ -242,6 +242,7 @@ pub(super) fn visual_line_text(rope: &Rope, line_index: usize) -> String {
 }
 
 /// Get the text for a wrapped line given the visual line map.
+#[allow(dead_code)]
 pub fn wrapped_line_text(
     rope: &Rope,
     visual_line_map: &[(usize, usize, usize)],

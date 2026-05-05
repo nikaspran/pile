@@ -1,8 +1,6 @@
 use crop::Rope;
 
 use crate::model::{Document, DocumentEdit, EditTransaction, Selection};
-use crate::syntax_highlighting::DocumentSyntaxState;
-
 use super::{
     byte_of_visual_line, clamp_primary_selection, line_index_of_byte, primary_selection,
     record_full_document_undo, selection_range, set_primary_selection, visual_line_bounds,
@@ -292,7 +290,6 @@ pub fn toggle_comments(document: &mut Document, comment_prefix: &str) -> bool {
 
     let lines: Vec<&str> = body.split('\n').collect();
     let mut result = String::new();
-    let mut toggled = false;
     let mut any_commented = false;
     let mut any_uncommented = false;
 
@@ -399,8 +396,8 @@ pub fn toggle_comments(document: &mut Document, comment_prefix: &str) -> bool {
         }
     }
 
-    toggled = any_commented || any_uncommented;
-
+    let toggled = any_commented || any_uncommented;
+    
     if !toggled {
         return false;
     }

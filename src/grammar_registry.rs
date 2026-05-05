@@ -28,8 +28,10 @@ pub struct GrammarConfig {
     /// The locals query source.
     pub locals_query: &'static str,
     /// Line comment prefix, if any.
+    #[allow(dead_code)]
     pub comment_prefix: Option<&'static str>,
     /// Block comment delimiters (open, close), if any.
+    #[allow(dead_code)]
     pub block_comment: Option<(&'static str, &'static str)>,
     /// Detection rules for content-based language detection.
     pub detection_rules: &'static [DetectionRule],
@@ -37,6 +39,7 @@ pub struct GrammarConfig {
 
 impl GrammarConfig {
     /// Returns true if this language uses tree-sitter for syntax awareness.
+    #[allow(dead_code)]
     pub fn has_tree_sitter(&self) -> bool {
         self.ts_language.is_some()
     }
@@ -128,11 +131,13 @@ impl GrammarRegistry {
     }
 
     /// Returns the grammar config for the given language ID.
+    #[allow(dead_code)]
     pub fn get(&self, id: LanguageId) -> Option<&GrammarConfig> {
         self.grammars.get(&id)
     }
 
     /// Returns the language ID for a given name or alias.
+    #[allow(dead_code)]
     pub fn get_id_by_name(&self, name: &str) -> Option<LanguageId> {
         self.name_to_id.get(name).copied()
     }
@@ -209,16 +214,19 @@ impl GrammarRegistry {
     }
 
     /// Returns the comment prefix for the given language, if any.
+    #[allow(dead_code)]
     pub fn comment_prefix(&self, id: LanguageId) -> Option<&'static str> {
         self.grammars.get(&id)?.comment_prefix
     }
 
     /// Returns the block comment delimiters for the given language, if any.
+    #[allow(dead_code)]
     pub fn block_comment_delimiters(&self, id: LanguageId) -> Option<(&'static str, &'static str)> {
         self.grammars.get(&id)?.block_comment
     }
 
     /// Returns true if the language uses tree-sitter.
+    #[allow(dead_code)]
     pub fn has_tree_sitter(&self, id: LanguageId) -> bool {
         self.grammars
             .get(&id)

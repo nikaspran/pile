@@ -32,13 +32,21 @@ pub enum Command {
     SelectWordRight,
     SelectUp,
     SelectDown,
+    #[allow(dead_code)]
     SelectDocumentStart,
+    #[allow(dead_code)]
     SelectDocumentEnd,
+    #[allow(dead_code)]
     SelectLineStart,
+    #[allow(dead_code)]
     SelectLineEnd,
+    #[allow(dead_code)]
     SelectParagraphUp,
+    #[allow(dead_code)]
     SelectParagraphDown,
+    #[allow(dead_code)]
     SelectPageUp,
+    #[allow(dead_code)]
     SelectPageDown,
 
     // Editor - selection expansion
@@ -109,7 +117,9 @@ pub struct CommandMetadata {
     pub command: Command,
     pub name: &'static str,
     pub description: &'static str,
+    #[allow(dead_code)]
     pub category: CommandCategory,
+    #[allow(dead_code)]
     pub shortcut: Option<egui::KeyboardShortcut>,
 }
 

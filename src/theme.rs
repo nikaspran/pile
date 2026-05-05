@@ -9,6 +9,7 @@ pub enum Theme {
 }
 
 impl Theme {
+    #[allow(dead_code)]
     pub fn label(self) -> &'static str {
         match self {
             Theme::Dark => "Dark",

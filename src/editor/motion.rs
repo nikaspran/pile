@@ -514,9 +514,9 @@ pub fn find_matching_bracket_at(rope: &Rope, offset: usize) -> Option<(usize, us
 
 /// Syntax-aware bracket matching using tree-sitter.
 /// Returns `Some((open_offset, close_offset))` if a matching pair is found.
+#[allow(dead_code)]
 pub fn find_matching_bracket_at_syntax(rope: &Rope, offset: usize, syntax_state: &DocumentSyntaxState) -> Option<(usize, usize)> {
     let tree = syntax_state.tree()?;
-    let text = rope.byte_slice(..).to_string();
     
     // Find the leaf node at the offset
     let root = tree.root_node();
@@ -561,6 +561,7 @@ pub fn find_matching_bracket_at_syntax(rope: &Rope, offset: usize, syntax_state:
 }
 
 /// Find matching bracket using tree-sitter tree structure.
+#[allow(dead_code)]
 fn find_matching_bracket_in_tree(rope: &Rope, open_offset: usize, open_char: char) -> Option<(usize, usize)> {
     let close_char = match open_char {
         '(' => ')',
@@ -595,6 +596,7 @@ fn find_matching_bracket_in_tree(rope: &Rope, open_offset: usize, open_char: cha
 }
 
 /// Find matching opening bracket using tree-sitter tree structure (backward search).
+#[allow(dead_code)]
 fn find_matching_bracket_in_tree_backward(rope: &Rope, close_offset: usize, open_char: char) -> Option<(usize, usize)> {
     let mut depth = 1usize;
     let mut current_pos = close_offset;
@@ -620,6 +622,7 @@ fn find_matching_bracket_in_tree_backward(rope: &Rope, close_offset: usize, open
 }
 
 /// Find the leaf node at the given byte offset.
+#[allow(dead_code)]
 fn find_leaf_node_at_offset(node: tree_sitter::Node, offset: usize) -> Option<tree_sitter::Node> {
     if node.start_byte() > offset || offset >= node.end_byte() {
         return None;
