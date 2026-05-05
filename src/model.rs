@@ -237,7 +237,7 @@ impl Document {
     }
 
     pub fn detect_syntax(&self) -> Option<LanguageDetection> {
-        let registry = crate::syntax::LanguageRegistry::default();
+        let registry = crate::grammar_registry::GrammarRegistry::default();
         Some(registry.detect_rope(&self.rope))
     }
 
@@ -305,7 +305,10 @@ impl Document {
             let adjusted_start = (edit.range.start as isize + offset) as usize;
             let adjusted_end = (edit.range.end as isize + offset) as usize;
 
-            let deleted_text = self.rope.byte_slice(adjusted_start..adjusted_end).to_string();
+            let deleted_text = self
+                .rope
+                .byte_slice(adjusted_start..adjusted_end)
+                .to_string();
 
             // Store the ADJUSTED position (where edit was actually applied).
             // This is the correct position to use during undo.
@@ -893,14 +896,12 @@ mod tests {
         document.revision = 0;
 
         // Single edit via multi_edit
-        let edits = vec![
-            DocumentEdit {
-                range: 0..5,
-                inserted_text: "hi".to_owned(),
-                selections_before: vec![Selection::caret(0)],
-                selections_after: vec![Selection::caret(2)],
-            },
-        ];
+        let edits = vec![DocumentEdit {
+            range: 0..5,
+            inserted_text: "hi".to_owned(),
+            selections_before: vec![Selection::caret(0)],
+            selections_after: vec![Selection::caret(2)],
+        }];
 
         document.apply_multi_edit(edits);
         assert_eq!(document.text(), "hi");

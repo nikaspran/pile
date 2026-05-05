@@ -19,7 +19,8 @@ use crate::{
     },
     search::{SearchMatch, SearchState},
     settings::Settings,
-    syntax::{LanguageDetection, LanguageRegistry},
+    syntax::LanguageDetection,
+    grammar_registry::GrammarRegistry,
     tab_switcher::TabSwitcher,
     theme::{self, apply_theme},
 };
@@ -85,7 +86,7 @@ pub struct PileApp {
     settings: Settings,
     save_tx: Sender<SaveMsg>,
     save_worker: Option<SaveWorker>,
-    syntax: LanguageRegistry,
+    syntax: GrammarRegistry,
     editor_view: EditorViewState,
     last_detection: LanguageDetection,
     renaming_document: Option<DocumentId>,
@@ -124,7 +125,7 @@ impl PileApp {
 
         let save_worker = SaveWorker::spawn(session_path);
         let save_tx = save_worker.sender();
-        let syntax = LanguageRegistry::default();
+        let syntax = GrammarRegistry::default();
         let last_detection = state
             .active_document()
             .map(|document| syntax.detect_rope(&document.rope))
@@ -180,7 +181,11 @@ impl PileApp {
         // Apply the loaded theme
         apply_theme(&ctx, settings.theme);
 
-        info!(documents = state.documents.len(), panes = panes.len(), "pile started");
+        info!(
+            documents = state.documents.len(),
+            panes = panes.len(),
+            "pile started"
+        );
 
         Self {
             ctx,
@@ -386,7 +391,9 @@ impl PileApp {
         } else {
             self.state.documents.retain(|doc| doc.id != document_id);
             self.state.tab_order.retain(|id| *id != document_id);
-            self.state.recent_order_mut().retain(|id| *id != document_id);
+            self.state
+                .recent_order_mut()
+                .retain(|id| *id != document_id);
             // Update any panes that were pointing to the closed document
             for pane in &mut self.panes {
                 if pane.document_id == document_id {
@@ -398,7 +405,12 @@ impl PileApp {
     }
 
     fn move_tab_left(&mut self, document_id: DocumentId) {
-        if let Some(pos) = self.state.tab_order.iter().position(|id| *id == document_id) {
+        if let Some(pos) = self
+            .state
+            .tab_order
+            .iter()
+            .position(|id| *id == document_id)
+        {
             if pos > 0 {
                 self.state.tab_order.swap(pos, pos - 1);
                 self.mark_changed();
@@ -407,7 +419,12 @@ impl PileApp {
     }
 
     fn move_tab_right(&mut self, document_id: DocumentId) {
-        if let Some(pos) = self.state.tab_order.iter().position(|id| *id == document_id) {
+        if let Some(pos) = self
+            .state
+            .tab_order
+            .iter()
+            .position(|id| *id == document_id)
+        {
             if pos < self.state.tab_order.len() - 1 {
                 self.state.tab_order.swap(pos, pos + 1);
                 self.mark_changed();
@@ -603,9 +620,15 @@ impl PileApp {
             UpperCase => {
                 if let Some(document) = self.state.active_document_mut() {
                     if document.selections.len() > 1 {
-                        crate::editor::convert_case_all_selections(document, crate::editor::CaseType::Upper);
+                        crate::editor::convert_case_all_selections(
+                            document,
+                            crate::editor::CaseType::Upper,
+                        );
                     } else {
-                        crate::editor::convert_case_selection(document, crate::editor::CaseType::Upper);
+                        crate::editor::convert_case_selection(
+                            document,
+                            crate::editor::CaseType::Upper,
+                        );
                     }
                     self.document_edited();
                 }
@@ -613,9 +636,15 @@ impl PileApp {
             LowerCase => {
                 if let Some(document) = self.state.active_document_mut() {
                     if document.selections.len() > 1 {
-                        crate::editor::convert_case_all_selections(document, crate::editor::CaseType::Lower);
+                        crate::editor::convert_case_all_selections(
+                            document,
+                            crate::editor::CaseType::Lower,
+                        );
                     } else {
-                        crate::editor::convert_case_selection(document, crate::editor::CaseType::Lower);
+                        crate::editor::convert_case_selection(
+                            document,
+                            crate::editor::CaseType::Lower,
+                        );
                     }
                     self.document_edited();
                 }
@@ -623,9 +652,15 @@ impl PileApp {
             TitleCase => {
                 if let Some(document) = self.state.active_document_mut() {
                     if document.selections.len() > 1 {
-                        crate::editor::convert_case_all_selections(document, crate::editor::CaseType::Title);
+                        crate::editor::convert_case_all_selections(
+                            document,
+                            crate::editor::CaseType::Title,
+                        );
                     } else {
-                        crate::editor::convert_case_selection(document, crate::editor::CaseType::Title);
+                        crate::editor::convert_case_selection(
+                            document,
+                            crate::editor::CaseType::Title,
+                        );
                     }
                     self.document_edited();
                 }
@@ -882,9 +917,8 @@ impl PileApp {
             self.toggle_bookmark();
         }
 
-        let next_bookmark = ctx.input_mut(|input| {
-            input.consume_key(egui::Modifiers::NONE, egui::Key::F4)
-        });
+        let next_bookmark =
+            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F4));
         if next_bookmark {
             self.jump_to_next_bookmark();
         }
@@ -1205,10 +1239,16 @@ impl PileApp {
         if let Some(document) = self.state.active_document_mut() {
             let caret = crate::editor::primary_selection(document).head;
             if let Some(&next) = document.bookmarks.iter().find(|&&bm| bm > caret) {
-                crate::editor::set_primary_selection(document, crate::model::Selection::caret(next));
+                crate::editor::set_primary_selection(
+                    document,
+                    crate::model::Selection::caret(next),
+                );
             } else if let Some(&first) = document.bookmarks.first() {
                 // Wrap around
-                crate::editor::set_primary_selection(document, crate::model::Selection::caret(first));
+                crate::editor::set_primary_selection(
+                    document,
+                    crate::model::Selection::caret(first),
+                );
             }
             self.editor_focus_pending = true;
         }
@@ -1256,11 +1296,7 @@ impl PileApp {
                     };
 
                     let response = ui.horizontal(|ui| {
-                        ui.painter().rect_filled(
-                            ui.max_rect(),
-                            0.0,
-                            bg,
-                        );
+                        ui.painter().rect_filled(ui.max_rect(), 0.0, bg);
                         ui.add_sized(
                             [16.0, ui.spacing().interact_size.y],
                             egui::Label::new(
@@ -1283,30 +1319,18 @@ impl PileApp {
                             let title = doc_title.as_deref().unwrap_or("Unknown");
                             ui.add_sized(
                                 [120.0, ui.spacing().interact_size.y],
-                                egui::Label::new(
-                                    egui::RichText::new(title)
-                                        .monospace()
-                                        .weak(),
-                                ),
+                                egui::Label::new(egui::RichText::new(title).monospace().weak()),
                             );
                         }
 
-                        ui.label(
-                            egui::RichText::new(before)
-                                .monospace()
-                                .weak(),
-                        );
+                        ui.label(egui::RichText::new(before).monospace().weak());
                         ui.label(
                             egui::RichText::new(matched)
                                 .monospace()
                                 .strong()
                                 .background_color(ui.style().visuals.selection.bg_fill),
                         );
-                        ui.label(
-                            egui::RichText::new(after)
-                                .monospace()
-                                .weak(),
-                        );
+                        ui.label(egui::RichText::new(after).monospace().weak());
                     });
 
                     if response.response.clicked() {
@@ -1515,7 +1539,10 @@ impl PileApp {
 
         // Check if minimap should be shown (before borrowing document mutably)
         let show_minimap = self.settings.show_minimap && {
-            let doc = self.state.document(document_id).expect("document must exist");
+            let doc = self
+                .state
+                .document(document_id)
+                .expect("document must exist");
             minimap::should_show_minimap(&doc.rope)
         };
 
@@ -1528,7 +1555,10 @@ impl PileApp {
 
                 // Render editor
                 let editor_response = {
-                    let document = self.state.document_mut(document_id).expect("document must exist");
+                    let document = self
+                        .state
+                        .document_mut(document_id)
+                        .expect("document must exist");
                     ui.allocate_ui_with_layout(
                         egui::vec2(editor_width, ui.available_height()),
                         egui::Layout::top_down(egui::Align::LEFT),
@@ -1559,14 +1589,24 @@ impl PileApp {
 
                 // Render minimap
                 let (scroll_y, content_height) = {
-                    let doc = self.state.document(document_id).expect("document must exist");
-                    (doc.scroll.y, doc.rope.lines().count() as f32 * ui.text_style_height(&egui::TextStyle::Monospace))
+                    let doc = self
+                        .state
+                        .document(document_id)
+                        .expect("document must exist");
+                    (
+                        doc.scroll.y,
+                        doc.rope.lines().count() as f32
+                            * ui.text_style_height(&egui::TextStyle::Monospace),
+                    )
                 };
 
                 let config = MinimapConfig::new(self.settings.theme);
                 let viewport_height = ui.available_height();
 
-                let doc = self.state.document(document_id).expect("document must exist");
+                let doc = self
+                    .state
+                    .document(document_id)
+                    .expect("document must exist");
                 let minimap_result = minimap::show_minimap(
                     ui,
                     &doc.rope,
@@ -1579,13 +1619,19 @@ impl PileApp {
                 drop(doc); // Drop immutable borrow
 
                 if let Some(target_scroll_y) = minimap_result.target_scroll_y {
-                    let doc = self.state.document_mut(document_id).expect("document must exist");
+                    let doc = self
+                        .state
+                        .document_mut(document_id)
+                        .expect("document must exist");
                     doc.scroll.y = target_scroll_y;
                     ui.ctx().request_repaint();
                 }
             });
         } else {
-            let document = self.state.document_mut(document_id).expect("document must exist");
+            let document = self
+                .state
+                .document_mut(document_id)
+                .expect("document must exist");
             let response = show_editor(
                 ui,
                 document,
@@ -1655,10 +1701,8 @@ impl eframe::App for PileApp {
             }
 
             ui.horizontal(|ui| {
-                let (lang, confidence) = (
-                    self.last_detection.language,
-                    self.last_detection.confidence,
-                );
+                let (lang, confidence) =
+                    (self.last_detection.language, self.last_detection.confidence);
                 let has_parse_errors = self
                     .state
                     .active_document()
@@ -1739,7 +1783,8 @@ impl eframe::App for PileApp {
         }
 
         let mut switch_to = None;
-        self.tab_switcher.show(ctx, &self.state, &mut |id| switch_to = Some(id));
+        self.tab_switcher
+            .show(ctx, &self.state, &mut |id| switch_to = Some(id));
         if let Some(document_id) = switch_to {
             self.set_active_document(document_id);
         }

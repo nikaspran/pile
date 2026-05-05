@@ -2,7 +2,7 @@ use crop::Rope;
 
 use content_inspector::{ContentType, inspect};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum LanguageId {
     PlainText,
     Markdown,
@@ -30,10 +30,16 @@ impl LanguageId {
     /// Returns the block comment delimiters (open, close) for this language, if any.
     pub fn block_comment_delimiters(&self) -> Option<(&'static str, &'static str)> {
         match self {
-            LanguageId::Rust | LanguageId::JavaScript | LanguageId::TypeScript => Some(("/*", "*/")),
+            LanguageId::Rust | LanguageId::JavaScript | LanguageId::TypeScript => {
+                Some(("/*", "*/"))
+            }
             LanguageId::Python => Some(("\"\"\"", "\"\"\"")),
             LanguageId::Bash => Some((":", ":")), // Bash uses heredoc, not typical block comments
-            LanguageId::PlainText | LanguageId::Markdown | LanguageId::Json | LanguageId::Toml | LanguageId::Yaml => None,
+            LanguageId::PlainText
+            | LanguageId::Markdown
+            | LanguageId::Json
+            | LanguageId::Toml
+            | LanguageId::Yaml => None,
         }
     }
 
@@ -50,238 +56,563 @@ pub struct LanguageDetection {
 }
 
 /// A detection rule that contributes to a language score.
-struct DetectionRule {
+#[derive(Clone)]
+pub struct DetectionRule {
     /// Weight of this rule in the total score (0.0 to 1.0).
-    weight: f32,
+    pub weight: f32,
     /// The check function that returns a score contribution (0.0 to 1.0).
-    check: fn(&str) -> f32,
+    pub check: fn(&str) -> f32,
 }
 
 /// Scored content detector that evaluates all languages and returns the best match.
-struct ScoredDetector {
+pub struct ScoredDetector {
     rules: Vec<(LanguageId, Vec<DetectionRule>)>,
 }
 
 impl ScoredDetector {
     fn new() -> Self {
-        let rules = vec![
-            (
-                LanguageId::Markdown,
-                vec![
-                    DetectionRule { weight: 0.3, check: |text| {
-                        let heading = text.lines().filter(|l| l.starts_with("# ") || l.starts_with("## ")).count();
+        let mut detector = Self { rules: Vec::new() };
+
+        // Markdown
+        detector.add_rules(
+            LanguageId::Markdown,
+            &[
+                DetectionRule {
+                    weight: 0.3,
+                    check: |text| {
+                        let heading = text
+                            .lines()
+                            .filter(|l| l.starts_with("# ") || l.starts_with("## "))
+                            .count();
                         (heading as f32 / 10.0).min(1.0)
-                    }},
-                    DetectionRule { weight: 0.2, check: |text| {
-                        if text.lines().any(|l| l.starts_with("```")) { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.2, check: |text| {
-                        let list = text.lines().filter(|l| l.starts_with("- ") || l.starts_with("* ")).count();
+                    },
+                },
+                DetectionRule {
+                    weight: 0.2,
+                    check: |text| {
+                        if text.lines().any(|l| l.starts_with("```")) {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.2,
+                    check: |text| {
+                        let list = text
+                            .lines()
+                            .filter(|l| l.starts_with("- ") || l.starts_with("* "))
+                            .count();
                         (list as f32 / 20.0).min(1.0)
-                    }},
-                    DetectionRule { weight: 0.15, check: |text| {
-                        if text.contains("**") || text.contains("__") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.15, check: |text| {
-                        if text.contains("[") && text.contains("](") { 1.0 } else { 0.0 }
-                    }},
-                ],
-            ),
-            (
-                LanguageId::Json,
-                vec![
-                    DetectionRule { weight: 0.5, check: |text| {
+                    },
+                },
+                DetectionRule {
+                    weight: 0.15,
+                    check: |text| {
+                        if text.contains("**") || text.contains("__") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.15,
+                    check: |text| {
+                        if text.contains("[") && text.contains("](") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+            ],
+        );
+
+        // Json
+        detector.add_rules(
+            LanguageId::Json,
+            &[
+                DetectionRule {
+                    weight: 0.5,
+                    check: |text| {
                         let trimmed = text.trim_start();
-                        if !trimmed.starts_with('{') && !trimmed.starts_with('[') { return 0.0; }
-                        // For JSON arrays, check for comma-separated values pattern
-                        if trimmed.starts_with('[') {
-                            let rest = &trimmed[1..];
-                            // JSON array should have values separated by commas, not newlines with "key ="
-                            if rest.contains(" = ") { return 0.0; }
-                            if rest.contains(',') || rest.contains(']') { return 1.0; }
+                        if !trimmed.starts_with('{') && !trimmed.starts_with('[') {
                             return 0.0;
                         }
-                        // For JSON objects, check for quoted keys pattern
+                        if trimmed.starts_with('[') {
+                            let rest = &trimmed[1..];
+                            if rest.contains(" = ") {
+                                return 0.0;
+                            }
+                            if rest.contains(',') || rest.contains(']') {
+                                return 1.0;
+                            }
+                            return 0.0;
+                        }
                         if trimmed.starts_with('{') {
                             let rest = &trimmed[1..];
-                            if rest.contains(" = ") { return 0.0; }
+                            if rest.contains(" = ") {
+                                return 0.0;
+                            }
                             return 1.0;
                         }
                         0.0
-                    }},
-                    DetectionRule { weight: 0.25, check: |text| {
-                        // Must have quoted keys for JSON objects: "key": value
+                    },
+                },
+                DetectionRule {
+                    weight: 0.25,
+                    check: |text| {
                         let kv_pairs = text.matches('"').count() / 2;
-                        if kv_pairs >= 1 && text.contains(": ") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.25, check: |text| {
-                        // JSON has specific literals
-                        if text.contains("true") || text.contains("false") || text.contains("null") { 1.0 } else { 0.0 }
-                    }},
-                ],
-            ),
-            (
-                LanguageId::Rust,
-                vec![
-                    DetectionRule { weight: 0.25, check: |text| {
+                        if kv_pairs >= 1 && text.contains(": ") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.25,
+                    check: |text| {
+                        if text.contains("true") || text.contains("false") || text.contains("null")
+                        {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+            ],
+        );
+
+        // Rust
+        detector.add_rules(
+            LanguageId::Rust,
+            &[
+                DetectionRule {
+                    weight: 0.25,
+                    check: |text| {
                         let count = text.matches("fn ").count() + text.matches("pub fn ").count();
                         (count as f32 / 3.0).min(1.0)
-                    }},
-                    DetectionRule { weight: 0.20, check: |text| {
-                        if text.contains("use ") || text.contains("mod ") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.20, check: |text| {
-                        if text.contains("impl ") || text.contains("trait ") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.15, check: |text| {
-                        if text.contains("let ") && text.contains(" = ") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.10, check: |text| {
-                        if text.contains("-> ") || text.contains("::") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.10, check: |text| {
-                        if text.contains("#[") && text.contains(']') { 1.0 } else { 0.0 }
-                    }},
-                ],
-            ),
-            (
-                LanguageId::Python,
-                vec![
-                    DetectionRule { weight: 0.40, check: |text| {
-                        // Python function or class definition is strong signal
-                        if text.contains("def ") || text.contains("class ") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.25, check: |text| {
-                        if text.contains("import ") || text.contains("from ") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.15, check: |text| {
-                        if text.contains("if __name__") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.10, check: |text| {
-                        // Colon-based indentation (Python blocks)
-                        if text.contains(":") && (text.contains("def ") || text.contains("if ") || text.contains("for ")) { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.10, check: |text| {
-                        if text.contains("print(") || text.contains("return ") { 1.0 } else { 0.0 }
-                    }},
-                ],
-            ),
-            (
-                LanguageId::JavaScript,
-                vec![
-                    DetectionRule { weight: 0.25, check: |text| {
-                        if text.contains("function ") || text.contains("=>") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.20, check: |text| {
-                        if text.contains("const ") || text.contains("let ") || text.contains("var ") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.20, check: |text| {
-                        if text.contains("console.log") || text.contains("export ") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.15, check: |text| {
-                        if text.contains("require(") || text.contains("import ") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.20, check: |text| {
-                        if text.contains("document.") || text.contains("window.") { 1.0 } else { 0.0 }
-                    }},
-                ],
-            ),
-            (
-                LanguageId::TypeScript,
-                vec![
-                    DetectionRule { weight: 0.30, check: |text| {
-                        if text.contains(": string") || text.contains(": number") || text.contains(": boolean") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.25, check: |text| {
-                        if text.contains("interface ") || text.contains("type ") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.20, check: |text| {
-                        if text.contains("<T>") || text.contains("<T,") || text.contains("extends ") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.25, check: |text| {
-                        if text.contains("import ") && text.contains("from ") { 1.0 } else { 0.0 }
-                    }},
-                ],
-            ),
-            (
-                LanguageId::Toml,
-                vec![
-                    DetectionRule { weight: 0.45, check: |text| {
-                        // TOML sections are like [section] - must be at line start (no quotes)
-                        let count = text.lines().filter(|l| {
-                            let trimmed = l.trim_start();
-                            trimmed.starts_with('[') && trimmed.ends_with(']') && 
-                            !trimmed.starts_with("[[") && !trimmed.contains('"')
-                        }).count();
-                        (count as f32 / 2.0).min(1.0)
-                    }},
-                    DetectionRule { weight: 0.30, check: |text| {
-                        // TOML key-value pairs use key = value (with space around =)
-                        // Should not have quotes around the key typically
-                        let kv = text.lines().filter(|l| {
-                            let trimmed = l.trim_start();
-                            !trimmed.starts_with('[') && trimmed.contains(" = ") && !trimmed.starts_with('"')
-                        }).count();
-                        (kv as f32 / 3.0).min(1.0)
-                    }},
-                    DetectionRule { weight: 0.15, check: |text| {
-                        // TOML arrays use [[ ]]
-                        if text.contains("[[") && text.contains("]]") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.10, check: |text| {
-                        // TOML uses # for comments
-                        if text.lines().any(|l| l.trim_start().starts_with('#')) { 1.0 } else { 0.0 }
-                    }},
-                ],
-            ),
-            (
-                LanguageId::Yaml,
-                vec![
-                    DetectionRule { weight: 0.30, check: |text| {
-                        let kv = text.lines().filter(|l| {
-                            let trimmed = l.trim_start();
-                            !trimmed.starts_with("//") && trimmed.contains(": ")
-                        }).count();
-                        (kv as f32 / 10.0).min(1.0)
-                    }},
-                    DetectionRule { weight: 0.25, check: |text| {
-                        if text.starts_with("---") || text.contains("\n---") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.20, check: |text| {
-                        if text.contains("- ") && text.lines().filter(|l| l.trim_start().starts_with("- ")).count() > 1 { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.25, check: |text| {
-                        if text.contains(": true") || text.contains(": false") || text.contains(": null") { 1.0 } else { 0.0 }
-                    }},
-                ],
-            ),
-            (
-                LanguageId::Bash,
-                vec![
-                    DetectionRule { weight: 0.30, check: |text| {
-                        if text.starts_with("#!/bin/bash") || text.starts_with("#!/usr/bin/env bash") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.25, check: |text| {
-                        if text.contains("set -e") || text.contains("set -u") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.20, check: |text| {
-                        if text.contains("export ") && text.contains("=") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.15, check: |text| {
-                        if text.contains("echo ") || text.contains("printf ") { 1.0 } else { 0.0 }
-                    }},
-                    DetectionRule { weight: 0.10, check: |text| {
-                        if text.contains("if [") || text.contains("for ") || text.contains("while ") { 1.0 } else { 0.0 }
-                    }},
-                ],
-            ),
-        ];
+                    },
+                },
+                DetectionRule {
+                    weight: 0.20,
+                    check: |text| {
+                        if text.contains("use ") || text.contains("mod ") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.20,
+                    check: |text| {
+                        if text.contains("impl ") || text.contains("trait ") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.15,
+                    check: |text| {
+                        if text.contains("let ") && text.contains(" = ") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.10,
+                    check: |text| {
+                        if text.contains("-> ") || text.contains("::") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.10,
+                    check: |text| {
+                        if text.contains("#[") && text.contains(']') {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+            ],
+        );
 
-        Self { rules }
+        // Python
+        detector.add_rules(
+            LanguageId::Python,
+            &[
+                DetectionRule {
+                    weight: 0.40,
+                    check: |text| {
+                        if text.contains("def ") || text.contains("class ") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.25,
+                    check: |text| {
+                        if text.contains("import ") || text.contains("from ") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.15,
+                    check: |text| {
+                        if text.contains("if __name__") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.10,
+                    check: |text| {
+                        if text.contains(":")
+                            && (text.contains("def ")
+                                || text.contains("if ")
+                                || text.contains("for "))
+                        {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.10,
+                    check: |text| {
+                        if text.contains("print(") || text.contains("return ") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+            ],
+        );
+
+        // JavaScript
+        detector.add_rules(
+            LanguageId::JavaScript,
+            &[
+                DetectionRule {
+                    weight: 0.25,
+                    check: |text| {
+                        if text.contains("function ") || text.contains("=>") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.20,
+                    check: |text| {
+                        if text.contains("const ") || text.contains("let ") || text.contains("var ")
+                        {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.20,
+                    check: |text| {
+                        if text.contains("console.log") || text.contains("export ") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.15,
+                    check: |text| {
+                        if text.contains("require(") || text.contains("import ") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.20,
+                    check: |text| {
+                        if text.contains("document.") || text.contains("window.") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+            ],
+        );
+
+        // TypeScript
+        detector.add_rules(
+            LanguageId::TypeScript,
+            &[
+                DetectionRule {
+                    weight: 0.30,
+                    check: |text| {
+                        if text.contains(": string")
+                            || text.contains(": number")
+                            || text.contains(": boolean")
+                        {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.25,
+                    check: |text| {
+                        if text.contains("interface ") || text.contains("type ") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.20,
+                    check: |text| {
+                        if text.contains("<T>") || text.contains("<T,") || text.contains("extends ")
+                        {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.25,
+                    check: |text| {
+                        if text.contains("import ") && text.contains("from ") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+            ],
+        );
+
+        // Toml
+        detector.add_rules(
+            LanguageId::Toml,
+            &[
+                DetectionRule {
+                    weight: 0.45,
+                    check: |text| {
+                        let count = text
+                            .lines()
+                            .filter(|l| {
+                                let trimmed = l.trim_start();
+                                trimmed.starts_with('[')
+                                    && trimmed.ends_with(']')
+                                    && !trimmed.starts_with("[[")
+                                    && !trimmed.contains('"')
+                            })
+                            .count();
+                        (count as f32 / 2.0).min(1.0)
+                    },
+                },
+                DetectionRule {
+                    weight: 0.30,
+                    check: |text| {
+                        let kv = text
+                            .lines()
+                            .filter(|l| {
+                                let trimmed = l.trim_start();
+                                !trimmed.starts_with('[')
+                                    && trimmed.contains(" = ")
+                                    && !trimmed.starts_with('"')
+                            })
+                            .count();
+                        (kv as f32 / 3.0).min(1.0)
+                    },
+                },
+                DetectionRule {
+                    weight: 0.15,
+                    check: |text| {
+                        if text.contains("[[") && text.contains("]]") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.10,
+                    check: |text| {
+                        if text.lines().any(|l| l.trim_start().starts_with('#')) {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+            ],
+        );
+
+        // Yaml
+        detector.add_rules(
+            LanguageId::Yaml,
+            &[
+                DetectionRule {
+                    weight: 0.30,
+                    check: |text| {
+                        let kv = text
+                            .lines()
+                            .filter(|l| {
+                                let trimmed = l.trim_start();
+                                !trimmed.starts_with("//") && trimmed.contains(": ")
+                            })
+                            .count();
+                        (kv as f32 / 10.0).min(1.0)
+                    },
+                },
+                DetectionRule {
+                    weight: 0.25,
+                    check: |text| {
+                        if text.starts_with("---") || text.contains("\n---") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.20,
+                    check: |text| {
+                        if text.contains("- ")
+                            && text
+                                .lines()
+                                .filter(|l| l.trim_start().starts_with("- "))
+                                .count()
+                                > 1
+                        {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.25,
+                    check: |text| {
+                        if text.contains(": true")
+                            || text.contains(": false")
+                            || text.contains(": null")
+                        {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+            ],
+        );
+
+        // Bash
+        detector.add_rules(
+            LanguageId::Bash,
+            &[
+                DetectionRule {
+                    weight: 0.30,
+                    check: |text| {
+                        if text.starts_with("#!/bin/bash")
+                            || text.starts_with("#!/usr/bin/env bash")
+                        {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.25,
+                    check: |text| {
+                        if text.contains("set -e") || text.contains("set -u") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.20,
+                    check: |text| {
+                        if text.contains("export ") && text.contains("=") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.15,
+                    check: |text| {
+                        if text.contains("echo ") || text.contains("printf ") {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+                DetectionRule {
+                    weight: 0.10,
+                    check: |text| {
+                        if text.contains("if [") || text.contains("for ") || text.contains("while ")
+                        {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    },
+                },
+            ],
+        );
+
+        detector
+    }
+
+    /// Creates a new empty detector with no rules.
+    pub fn new_empty() -> Self {
+        Self { rules: Vec::new() }
+    }
+
+    /// Adds detection rules for a language.
+    pub fn add_rules(&mut self, lang: LanguageId, rules: &[DetectionRule]) {
+        let owned_rules: Vec<DetectionRule> = rules.to_vec();
+        self.rules.push((lang, owned_rules));
     }
 
     /// Score all languages against the text and return the best match.
-    fn detect(&self, text: &str) -> LanguageDetection {
+    pub fn detect(&self, text: &str) -> LanguageDetection {
         let mut best_lang = LanguageId::PlainText;
         let mut best_score = 0.2; // Threshold for plain text detection
 
@@ -308,30 +639,6 @@ impl ScoredDetector {
 impl Default for ScoredDetector {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[derive(Default)]
-pub struct LanguageRegistry {
-    detector: ScoredDetector,
-}
-
-impl LanguageRegistry {
-    pub fn detect_rope(&self, rope: &Rope) -> LanguageDetection {
-        let text = bounded_rope_sample(rope);
-        self.detect(&text)
-    }
-
-    pub fn detect(&self, text: &str) -> LanguageDetection {
-        if matches!(inspect(text.as_bytes()), ContentType::BINARY) {
-            return LanguageDetection {
-                language: LanguageId::PlainText,
-                confidence: 1.0,
-            };
-        }
-
-        let sample = bounded_sample(text);
-        self.detector.detect(sample)
     }
 }
 
@@ -367,10 +674,11 @@ fn floor_char_boundary(rope: &Rope, mut offset: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::grammar_registry::GrammarRegistry;
 
     #[test]
     fn detects_markdown_before_embedded_code() {
-        let registry = LanguageRegistry::default();
+        let registry = GrammarRegistry::default();
         let detection = registry.detect("# Notes\n\n```rust\nfn main() {}\n```\n");
 
         assert_eq!(detection.language, LanguageId::Markdown);
@@ -379,7 +687,7 @@ mod tests {
 
     #[test]
     fn detects_common_structured_scratch_content() {
-        let registry = LanguageRegistry::default();
+        let registry = GrammarRegistry::default();
 
         let rust = registry.detect("fn main() { let value = 1; }");
         assert_eq!(rust.language, LanguageId::Rust);
@@ -396,7 +704,7 @@ mod tests {
 
     #[test]
     fn detects_javascript_with_function_and_const() {
-        let registry = LanguageRegistry::default();
+        let registry = GrammarRegistry::default();
         let detection = registry.detect("const add = (a, b) => a + b;");
         assert_eq!(detection.language, LanguageId::JavaScript);
         assert!(detection.confidence > 0.2);
@@ -404,7 +712,7 @@ mod tests {
 
     #[test]
     fn detects_typescript_with_interface() {
-        let registry = LanguageRegistry::default();
+        let registry = GrammarRegistry::default();
         let detection = registry.detect("interface User {\n  name: string;\n  age: number;\n}");
         assert_eq!(detection.language, LanguageId::TypeScript);
         assert!(detection.confidence > 0.2);
@@ -412,7 +720,7 @@ mod tests {
 
     #[test]
     fn detects_toml_with_sections() {
-        let registry = LanguageRegistry::default();
+        let registry = GrammarRegistry::default();
         let detection = registry.detect("[server]\nport = 8080\nhost = \"localhost\"\n");
         assert_eq!(detection.language, LanguageId::Toml);
         assert!(detection.confidence > 0.2);
@@ -420,7 +728,7 @@ mod tests {
 
     #[test]
     fn detects_yaml_with_mappings() {
-        let registry = LanguageRegistry::default();
+        let registry = GrammarRegistry::default();
         let detection = registry.detect("name: John\nage: 30\nactive: true\n");
         assert_eq!(detection.language, LanguageId::Yaml);
         assert!(detection.confidence > 0.2);
@@ -428,7 +736,7 @@ mod tests {
 
     #[test]
     fn detects_bash_with_shebang() {
-        let registry = LanguageRegistry::default();
+        let registry = GrammarRegistry::default();
         let detection = registry.detect("#!/bin/bash\nset -e\nexport PATH=/usr/local/bin:$PATH\n");
         assert_eq!(detection.language, LanguageId::Bash);
         assert!(detection.confidence > 0.2);
@@ -436,8 +744,9 @@ mod tests {
 
     #[test]
     fn detects_plain_text_for_unknown_content() {
-        let registry = LanguageRegistry::default();
-        let detection = registry.detect("Just some random text without any code.\nNothing special here.\n");
+        let registry = GrammarRegistry::default();
+        let detection =
+            registry.detect("Just some random text without any code.\nNothing special here.\n");
         assert_eq!(detection.language, LanguageId::PlainText);
     }
 
@@ -450,13 +759,14 @@ mod tests {
         assert_eq!(json_score.language, LanguageId::Json);
 
         // Rust should score highest for Rust input
-        let rust_score = detector.detect("pub fn main() {\n    let x = 42;\n    println!(\"{}\", x);\n}");
+        let rust_score =
+            detector.detect("pub fn main() {\n    let x = 42;\n    println!(\"{}\", x);\n}");
         assert_eq!(rust_score.language, LanguageId::Rust);
     }
 
     #[test]
     fn binary_content_detected_as_plaintext() {
-        let registry = LanguageRegistry::default();
+        let registry = GrammarRegistry::default();
         // Use binary data with null bytes - clearly binary
         let binary: Vec<u8> = vec![0x00, 0x01, 0x02, 0x89, 0x50, 0x4E, 0x47];
         let text = String::from_utf8_lossy(&binary);

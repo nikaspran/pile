@@ -2,6 +2,7 @@ mod app;
 mod command;
 mod command_palette;
 mod editor;
+mod grammar_registry;
 mod model;
 mod native_menu;
 mod persistence;

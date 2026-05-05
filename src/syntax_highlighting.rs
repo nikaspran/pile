@@ -6,276 +6,21 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use tree_sitter::{InputEdit, Language, Parser, Point, Tree};
+use tree_sitter::{InputEdit, Parser, Point, Tree};
 use tree_sitter_highlight::{Highlight, HighlightConfiguration, HighlightEvent, Highlighter};
 
+use crate::grammar_registry::GrammarRegistry;
 use crate::syntax::LanguageId;
 
-/// Highlight configuration stored per language to avoid rebuilding queries.
-struct PerLanguageConfig {
-    config: HighlightConfiguration,
+/// Returns the static grammar registry.
+fn grammar_registry() -> &'static GrammarRegistry {
+    static REGISTRY: OnceLock<GrammarRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(GrammarRegistry::default)
 }
 
-/// Converts a `LanguageId` to a tree-sitter `Language` and highlight config.
-fn language_config(lang: LanguageId) -> Option<PerLanguageConfig> {
-    let (language, name, highlights, injections, locals): (
-        Language,
-        &str,
-        &str,
-        &str,
-        &str,
-    ) = match lang {
-        LanguageId::PlainText => return None,
-        LanguageId::Rust => (
-            tree_sitter_rust::LANGUAGE.into(),
-            "rust",
-            tree_sitter_rust::HIGHLIGHTS_QUERY,
-            tree_sitter_rust::INJECTIONS_QUERY,
-            tree_sitter_rust::TAGS_QUERY,
-        ),
-        LanguageId::JavaScript => (
-            tree_sitter_javascript::LANGUAGE.into(),
-            "javascript",
-            tree_sitter_javascript::HIGHLIGHT_QUERY,
-            tree_sitter_javascript::INJECTIONS_QUERY,
-            tree_sitter_javascript::LOCALS_QUERY,
-        ),
-        LanguageId::TypeScript => (
-            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-            "typescript",
-            tree_sitter_typescript::HIGHLIGHTS_QUERY,
-            "",
-            tree_sitter_typescript::LOCALS_QUERY,
-        ),
-        LanguageId::Python => (
-            tree_sitter_python::LANGUAGE.into(),
-            "python",
-            tree_sitter_python::HIGHLIGHTS_QUERY,
-            "",
-            tree_sitter_python::TAGS_QUERY,
-        ),
-        LanguageId::Json => (
-            tree_sitter_json::LANGUAGE.into(),
-            "json",
-            tree_sitter_json::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ),
-        LanguageId::Toml => (
-            tree_sitter_toml_ng::LANGUAGE.into(),
-            "toml",
-            tree_sitter_toml_ng::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ),
-        LanguageId::Yaml => (
-            tree_sitter_yaml::LANGUAGE.into(),
-            "yaml",
-            tree_sitter_yaml::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ),
-        LanguageId::Bash => (
-            tree_sitter_bash::LANGUAGE.into(),
-            "bash",
-            tree_sitter_bash::HIGHLIGHT_QUERY,
-            "",
-            "",
-        ),
-        LanguageId::Markdown => (
-            tree_sitter_md::LANGUAGE.into(),
-            "markdown",
-            tree_sitter_md::HIGHLIGHT_QUERY_BLOCK,
-            tree_sitter_md::INJECTION_QUERY_BLOCK,
-            "",
-        ),
-    };
-
-    let mut config = HighlightConfiguration::new(language, name, highlights, injections, locals).ok()?;
-
-    // Standard highlight names recognized by tree-sitter-highlight
-    let highlight_names: &[&str] = &[
-        "attribute",
-        "comment",
-        "constant",
-        "constant.builtin",
-        "constructor",
-        "embedded",
-        "function",
-        "function.builtin",
-        "keyword",
-        "module",
-        "number",
-        "operator",
-        "property",
-        "property.builtin",
-        "punctuation",
-        "punctuation.bracket",
-        "punctuation.delimiter",
-        "punctuation.special",
-        "string",
-        "string.special",
-        "tag",
-        "type",
-        "type.builtin",
-        "variable",
-        "variable.builtin",
-        "variable.parameter",
-    ];
-    config.configure(highlight_names);
-
-    Some(PerLanguageConfig { config })
-}
-
-/// Returns a static map of language name to `HighlightConfiguration` for injection resolution.
+/// Returns the injection language registry using the grammar registry.
 fn injection_language_registry() -> &'static HashMap<&'static str, Arc<HighlightConfiguration>> {
-    static REGISTRY: OnceLock<HashMap<&'static str, Arc<HighlightConfiguration>>> = OnceLock::new();
-    REGISTRY.get_or_init(|| {
-        let mut map: HashMap<&'static str, Arc<HighlightConfiguration>> = HashMap::new();
-
-        let highlight_names: &[&str] = &[
-            "attribute", "comment", "constant", "constant.builtin", "constructor",
-            "embedded", "function", "function.builtin", "keyword", "module",
-            "number", "operator", "property", "property.builtin", "punctuation",
-            "punctuation.bracket", "punctuation.delimiter", "punctuation.special",
-            "string", "string.special", "tag", "type", "type.builtin",
-            "variable", "variable.builtin", "variable.parameter",
-        ];
-
-        // Rust
-        if let Ok(mut config) = HighlightConfiguration::new(
-            tree_sitter_rust::LANGUAGE.into(),
-            "rust",
-            tree_sitter_rust::HIGHLIGHTS_QUERY,
-            tree_sitter_rust::INJECTIONS_QUERY,
-            tree_sitter_rust::TAGS_QUERY,
-        ) {
-            config.configure(highlight_names);
-            map.insert("rust", Arc::new(config));
-        }
-
-        // JavaScript
-        if let Ok(mut config) = HighlightConfiguration::new(
-            tree_sitter_javascript::LANGUAGE.into(),
-            "javascript",
-            tree_sitter_javascript::HIGHLIGHT_QUERY,
-            tree_sitter_javascript::INJECTIONS_QUERY,
-            tree_sitter_javascript::LOCALS_QUERY,
-        ) {
-            config.configure(highlight_names);
-            let arc_config = Arc::new(config);
-            map.insert("javascript", arc_config.clone());
-            map.insert("js", arc_config);
-        }
-
-        // TypeScript
-        if let Ok(mut config) = HighlightConfiguration::new(
-            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-            "typescript",
-            tree_sitter_typescript::HIGHLIGHTS_QUERY,
-            "",
-            tree_sitter_typescript::LOCALS_QUERY,
-        ) {
-            config.configure(highlight_names);
-            let arc_config = Arc::new(config);
-            map.insert("typescript", arc_config.clone());
-            map.insert("ts", arc_config);
-        }
-
-        // TSX
-        if let Ok(mut config) = HighlightConfiguration::new(
-            tree_sitter_typescript::LANGUAGE_TSX.into(),
-            "tsx",
-            tree_sitter_typescript::HIGHLIGHTS_QUERY,
-            "",
-            tree_sitter_typescript::LOCALS_QUERY,
-        ) {
-            config.configure(highlight_names);
-            map.insert("tsx", Arc::new(config));
-        }
-
-        // Python
-        if let Ok(mut config) = HighlightConfiguration::new(
-            tree_sitter_python::LANGUAGE.into(),
-            "python",
-            tree_sitter_python::HIGHLIGHTS_QUERY,
-            "",
-            tree_sitter_python::TAGS_QUERY,
-        ) {
-            config.configure(highlight_names);
-            let arc_config = Arc::new(config);
-            map.insert("python", arc_config.clone());
-            map.insert("py", arc_config);
-        }
-
-        // JSON
-        if let Ok(mut config) = HighlightConfiguration::new(
-            tree_sitter_json::LANGUAGE.into(),
-            "json",
-            tree_sitter_json::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ) {
-            config.configure(highlight_names);
-            map.insert("json", Arc::new(config));
-        }
-
-        // TOML
-        if let Ok(mut config) = HighlightConfiguration::new(
-            tree_sitter_toml_ng::LANGUAGE.into(),
-            "toml",
-            tree_sitter_toml_ng::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ) {
-            config.configure(highlight_names);
-            map.insert("toml", Arc::new(config));
-        }
-
-        // YAML
-        if let Ok(mut config) = HighlightConfiguration::new(
-            tree_sitter_yaml::LANGUAGE.into(),
-            "yaml",
-            tree_sitter_yaml::HIGHLIGHTS_QUERY,
-            "",
-            "",
-        ) {
-            config.configure(highlight_names);
-            let arc_config = Arc::new(config);
-            map.insert("yaml", arc_config.clone());
-            map.insert("yml", arc_config);
-        }
-
-        // Bash
-        if let Ok(mut config) = HighlightConfiguration::new(
-            tree_sitter_bash::LANGUAGE.into(),
-            "bash",
-            tree_sitter_bash::HIGHLIGHT_QUERY,
-            "",
-            "",
-        ) {
-            config.configure(highlight_names);
-            let arc_config = Arc::new(config);
-            map.insert("bash", arc_config.clone());
-            map.insert("sh", arc_config);
-        }
-
-        // Markdown (for embedded code blocks)
-        if let Ok(mut config) = HighlightConfiguration::new(
-            tree_sitter_md::LANGUAGE.into(),
-            "markdown",
-            tree_sitter_md::HIGHLIGHT_QUERY_BLOCK,
-            tree_sitter_md::INJECTION_QUERY_BLOCK,
-            "",
-        ) {
-            config.configure(highlight_names);
-            let arc_config = Arc::new(config);
-            map.insert("markdown", arc_config.clone());
-            map.insert("md", arc_config);
-        }
-
-        map
-    })
+    grammar_registry().injection_registry()
 }
 
 /// Per-document syntax highlighting state.
@@ -332,8 +77,16 @@ impl DocumentSyntaxState {
             return Vec::new();
         }
 
-        // Get or rebuild language config
-        let Some(per_lang) = language_config(language) else {
+        // Get language and config from grammar registry
+        let registry = grammar_registry();
+        let Some(ts_language) = registry.get_language(language) else {
+            self.tree = None;
+            self.parsed_as = Some(language);
+            self.cached_spans = Some((revision, Vec::new()));
+            return Vec::new();
+        };
+
+        let Some(config) = registry.highlight_config(language) else {
             self.tree = None;
             self.parsed_as = Some(language);
             self.cached_spans = Some((revision, Vec::new()));
@@ -343,7 +96,7 @@ impl DocumentSyntaxState {
         // Perform incremental or full parse
         let mut parser = Parser::new();
         parser
-            .set_language(&per_lang.config.language)
+            .set_language(ts_language)
             .expect("tree-sitter language should be valid");
 
         let tree = if self.parsed_as == Some(language) && self.tree.is_some() {
@@ -361,7 +114,7 @@ impl DocumentSyntaxState {
         self.parsed_as = Some(language);
 
         // Generate highlight spans using tree-sitter-highlight
-        let spans = Self::generate_highlight_spans(&per_lang.config, text);
+        let spans = Self::generate_highlight_spans(&config, text);
 
         self.cached_spans = Some((revision, spans.clone()));
         spans
@@ -377,7 +130,9 @@ impl DocumentSyntaxState {
         let registry = injection_language_registry();
 
         let Ok(events) = highlighter.highlight(config, text.as_bytes(), None, |lang_name| {
-            registry.get(lang_name).map(|c| &**c as &HighlightConfiguration)
+            registry
+                .get(lang_name)
+                .map(|c| &**c as &HighlightConfiguration)
         }) else {
             return Vec::new();
         };
@@ -416,9 +171,12 @@ impl DocumentSyntaxState {
     /// Call this *before* the actual text change so the tree knows the expected edit.
     pub fn edit(&mut self, start_byte: usize, old_end_byte: usize, new_end_byte: usize) {
         if let Some(tree) = &mut self.tree {
-            let start_position = byte_offset_to_point(tree.root_node().utf8_text(&[]).unwrap_or(""), start_byte);
-            let old_end_position = byte_offset_to_point(tree.root_node().utf8_text(&[]).unwrap_or(""), old_end_byte);
-            let new_end_position = byte_offset_to_point(tree.root_node().utf8_text(&[]).unwrap_or(""), new_end_byte);
+            let start_position =
+                byte_offset_to_point(tree.root_node().utf8_text(&[]).unwrap_or(""), start_byte);
+            let old_end_position =
+                byte_offset_to_point(tree.root_node().utf8_text(&[]).unwrap_or(""), old_end_byte);
+            let new_end_position =
+                byte_offset_to_point(tree.root_node().utf8_text(&[]).unwrap_or(""), new_end_byte);
 
             tree.edit(&InputEdit {
                 start_byte,
@@ -501,41 +259,51 @@ impl DocumentSyntaxState {
 
     /// Calculate syntax-aware indentation for a new line at the given offset.
     /// Returns the indentation string (spaces or tabs) to use.
-    pub fn indentation_at(&self, text: &str, offset: usize, tab_width: usize, use_soft_tabs: bool) -> Option<String> {
+    pub fn indentation_at(
+        &self,
+        text: &str,
+        offset: usize,
+        tab_width: usize,
+        use_soft_tabs: bool,
+    ) -> Option<String> {
         let tree = self.tree.as_ref()?;
         let root = tree.root_node();
-        
+
         // Find the node at the current position
         let node = find_leaf_at_offset(root, offset)?;
-        
+
         // Walk up the tree to find the enclosing structure
         let mut current: Option<tree_sitter::Node> = Some(node);
         let mut depth = 0usize;
-        
+
         while let Some(n) = current {
             let kind = n.kind();
-            
+
             // For Python, check if we're after a line ending with `:`
             if kind == "block" || kind == "suite" || kind.contains("_block") {
                 depth += 1;
             }
-            
+
             // Count indentation depth based on brace-delimited blocks
             if n.start_byte() <= offset && offset <= n.end_byte() {
                 if kind == "{" || kind.ends_with("_block") {
                     depth += 1;
                 }
             }
-            
+
             current = n.parent();
         }
-        
+
         if depth == 0 {
             return None;
         }
-        
+
         let indent_char = if use_soft_tabs { " " } else { "\t" };
-        let indent_count = if use_soft_tabs { tab_width * depth } else { depth };
+        let indent_count = if use_soft_tabs {
+            tab_width * depth
+        } else {
+            depth
+        };
         Some(indent_char.repeat(indent_count))
     }
 }
@@ -549,7 +317,7 @@ fn find_leaf_at_offset(node: tree_sitter::Node, offset: usize) -> Option<tree_si
     let mut current = node;
     loop {
         let child_count = current.child_count();
-        if child_count ==0 {
+        if child_count == 0 {
             return Some(current);
         }
         let mut found = None;
@@ -624,59 +392,61 @@ pub fn highlight_name(index: usize) -> &'static str {
 }
 
 /// Map a tree-sitter highlight name to an egui text color for the given theme.
-pub fn highlight_color(name: &str, theme: crate::settings::Theme) -> egui::Color32 {
+pub fn highlight_color(name: &str, theme: crate::theme::Theme) -> egui::Color32 {
     match name {
         "keyword" | "keyword.*" => match theme {
-            crate::settings::Theme::Dark => egui::Color32::from_rgb(255, 150, 100),
-            crate::settings::Theme::Light => egui::Color32::from_rgb(200, 80, 30),
+            crate::theme::Theme::Dark => egui::Color32::from_rgb(255, 150, 100),
+            crate::theme::Theme::Light => egui::Color32::from_rgb(200, 80, 30),
         },
         "string" | "string.*" => match theme {
-            crate::settings::Theme::Dark => egui::Color32::from_rgb(150, 220, 150),
-            crate::settings::Theme::Light => egui::Color32::from_rgb(50, 160, 50),
+            crate::theme::Theme::Dark => egui::Color32::from_rgb(150, 220, 150),
+            crate::theme::Theme::Light => egui::Color32::from_rgb(50, 160, 50),
         },
         "number" => match theme {
-            crate::settings::Theme::Dark => egui::Color32::from_rgb(180, 200, 255),
-            crate::settings::Theme::Light => egui::Color32::from_rgb(80, 120, 200),
+            crate::theme::Theme::Dark => egui::Color32::from_rgb(180, 200, 255),
+            crate::theme::Theme::Light => egui::Color32::from_rgb(80, 120, 200),
         },
         "comment" | "comment.*" => match theme {
-            crate::settings::Theme::Dark => egui::Color32::from_rgba_premultiplied(150, 150, 150, 180),
-            crate::settings::Theme::Light => egui::Color32::from_rgba_premultiplied(120, 120, 120, 180),
+            crate::theme::Theme::Dark => egui::Color32::from_rgba_premultiplied(150, 150, 150, 180),
+            crate::theme::Theme::Light => {
+                egui::Color32::from_rgba_premultiplied(120, 120, 120, 180)
+            }
         },
         "function" | "function.*" => match theme {
-            crate::settings::Theme::Dark => egui::Color32::from_rgb(130, 200, 255),
-            crate::settings::Theme::Light => egui::Color32::from_rgb(30, 120, 210),
+            crate::theme::Theme::Dark => egui::Color32::from_rgb(130, 200, 255),
+            crate::theme::Theme::Light => egui::Color32::from_rgb(30, 120, 210),
         },
         "type" | "type.*" => match theme {
-            crate::settings::Theme::Dark => egui::Color32::from_rgb(220, 180, 255),
-            crate::settings::Theme::Light => egui::Color32::from_rgb(150, 80, 200),
+            crate::theme::Theme::Dark => egui::Color32::from_rgb(220, 180, 255),
+            crate::theme::Theme::Light => egui::Color32::from_rgb(150, 80, 200),
         },
         "variable.parameter" | "variable.builtin" => match theme {
-            crate::settings::Theme::Dark => egui::Color32::from_rgb(255, 200, 130),
-            crate::settings::Theme::Light => egui::Color32::from_rgb(200, 120, 40),
+            crate::theme::Theme::Dark => egui::Color32::from_rgb(255, 200, 130),
+            crate::theme::Theme::Light => egui::Color32::from_rgb(200, 120, 40),
         },
         "operator" | "punctuation" | "punctuation.*" => match theme {
-            crate::settings::Theme::Dark => egui::Color32::from_rgb(200, 200, 200),
-            crate::settings::Theme::Light => egui::Color32::from_rgb(80, 80, 80),
+            crate::theme::Theme::Dark => egui::Color32::from_rgb(200, 200, 200),
+            crate::theme::Theme::Light => egui::Color32::from_rgb(80, 80, 80),
         },
         "constant" | "constant.*" => match theme {
-            crate::settings::Theme::Dark => egui::Color32::from_rgb(200, 180, 255),
-            crate::settings::Theme::Light => egui::Color32::from_rgb(120, 80, 200),
+            crate::theme::Theme::Dark => egui::Color32::from_rgb(200, 180, 255),
+            crate::theme::Theme::Light => egui::Color32::from_rgb(120, 80, 200),
         },
         "tag" => match theme {
-            crate::settings::Theme::Dark => egui::Color32::from_rgb(255, 130, 180),
-            crate::settings::Theme::Light => egui::Color32::from_rgb(200, 60, 120),
+            crate::theme::Theme::Dark => egui::Color32::from_rgb(255, 130, 180),
+            crate::theme::Theme::Light => egui::Color32::from_rgb(200, 60, 120),
         },
         "attribute" => match theme {
-            crate::settings::Theme::Dark => egui::Color32::from_rgb(180, 220, 180),
-            crate::settings::Theme::Light => egui::Color32::from_rgb(80, 160, 80),
+            crate::theme::Theme::Dark => egui::Color32::from_rgb(180, 220, 180),
+            crate::theme::Theme::Light => egui::Color32::from_rgb(80, 160, 80),
         },
         "embedded" => match theme {
-            crate::settings::Theme::Dark => egui::Color32::from_rgb(200, 200, 160),
-            crate::settings::Theme::Light => egui::Color32::from_rgb(140, 140, 80),
+            crate::theme::Theme::Dark => egui::Color32::from_rgb(200, 200, 160),
+            crate::theme::Theme::Light => egui::Color32::from_rgb(140, 140, 80),
         },
         _ => match theme {
-            crate::settings::Theme::Dark => egui::Color32::from_rgb(220, 220, 220),
-            crate::settings::Theme::Light => egui::Color32::from_rgb(30, 30, 30),
+            crate::theme::Theme::Dark => egui::Color32::from_rgb(220, 220, 220),
+            crate::theme::Theme::Light => egui::Color32::from_rgb(30, 30, 30),
         },
     }
 }
