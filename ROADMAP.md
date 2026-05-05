@@ -106,7 +106,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 ## Native App Integration
 
-- Complete native menu support across supported desktop platforms.
+- Completed: Complete native menu support across supported desktop platforms.
 - Add macOS application bundle metadata, icon, and signing-ready packaging.
 - Add native file import/export commands without making files the primary
   workflow.

@@ -35,11 +35,59 @@ enum AppCommand {
     NewScratch,
     CloseScratch,
     RenameTab,
+    Quit,
     Undo,
     Redo,
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+    ToggleComments,
+    UpperCase,
+    LowerCase,
+    TitleCase,
+    ExpandWord,
+    ContractWord,
+    ExpandLine,
+    ContractLine,
+    ExpandBracketPair,
+    ContractBracketPair,
+    ExpandIndentBlock,
+    ContractIndentBlock,
+    Indent,
+    Outdent,
+    DuplicateLines,
+    DeleteLines,
+    MoveLinesUp,
+    MoveLinesDown,
+    JoinLines,
+    SortLines,
+    ReverseLines,
+    TrimTrailingWhitespace,
+    AddNextMatch,
+    AddAllMatches,
+    SplitSelectionIntoLines,
+    ClearSecondaryCursors,
+    Find,
+    FindReplace,
+    FindUnderCursor,
+    SearchInTabs,
+    CommandPalette,
+    ToggleWrapMode,
+    ToggleVisibleWhitespace,
+    ToggleIndentGuides,
+    ToggleMinimap,
+    ToggleTheme,
+    GoToLine,
     ToggleBookmark,
     JumpToNextBookmark,
     ClearBookmarks,
+    SplitPaneHorizontal,
+    SplitPaneVertical,
+    ClosePane,
+    PinTab,
+    MoveTabLeft,
+    MoveTabRight,
 }
 
 impl From<NativeMenuCommand> for AppCommand {
@@ -48,8 +96,59 @@ impl From<NativeMenuCommand> for AppCommand {
             NativeMenuCommand::NewScratch => Self::NewScratch,
             NativeMenuCommand::CloseScratch => Self::CloseScratch,
             NativeMenuCommand::RenameTab => Self::RenameTab,
+            NativeMenuCommand::Quit => Self::Quit,
             NativeMenuCommand::Undo => Self::Undo,
             NativeMenuCommand::Redo => Self::Redo,
+            NativeMenuCommand::Cut => Self::Cut,
+            NativeMenuCommand::Copy => Self::Copy,
+            NativeMenuCommand::Paste => Self::Paste,
+            NativeMenuCommand::SelectAll => Self::SelectAll,
+            NativeMenuCommand::ToggleComments => Self::ToggleComments,
+            NativeMenuCommand::UpperCase => Self::UpperCase,
+            NativeMenuCommand::LowerCase => Self::LowerCase,
+            NativeMenuCommand::TitleCase => Self::TitleCase,
+            NativeMenuCommand::ExpandWord => Self::ExpandWord,
+            NativeMenuCommand::ContractWord => Self::ContractWord,
+            NativeMenuCommand::ExpandLine => Self::ExpandLine,
+            NativeMenuCommand::ContractLine => Self::ContractLine,
+            NativeMenuCommand::ExpandBracketPair => Self::ExpandBracketPair,
+            NativeMenuCommand::ContractBracketPair => Self::ContractBracketPair,
+            NativeMenuCommand::ExpandIndentBlock => Self::ExpandIndentBlock,
+            NativeMenuCommand::ContractIndentBlock => Self::ContractIndentBlock,
+            NativeMenuCommand::Indent => Self::Indent,
+            NativeMenuCommand::Outdent => Self::Outdent,
+            NativeMenuCommand::DuplicateLines => Self::DuplicateLines,
+            NativeMenuCommand::DeleteLines => Self::DeleteLines,
+            NativeMenuCommand::MoveLinesUp => Self::MoveLinesUp,
+            NativeMenuCommand::MoveLinesDown => Self::MoveLinesDown,
+            NativeMenuCommand::JoinLines => Self::JoinLines,
+            NativeMenuCommand::SortLines => Self::SortLines,
+            NativeMenuCommand::ReverseLines => Self::ReverseLines,
+            NativeMenuCommand::TrimTrailingWhitespace => Self::TrimTrailingWhitespace,
+            NativeMenuCommand::AddNextMatch => Self::AddNextMatch,
+            NativeMenuCommand::AddAllMatches => Self::AddAllMatches,
+            NativeMenuCommand::SplitSelectionIntoLines => Self::SplitSelectionIntoLines,
+            NativeMenuCommand::ClearSecondaryCursors => Self::ClearSecondaryCursors,
+            NativeMenuCommand::Find => Self::Find,
+            NativeMenuCommand::FindReplace => Self::FindReplace,
+            NativeMenuCommand::FindUnderCursor => Self::FindUnderCursor,
+            NativeMenuCommand::SearchInTabs => Self::SearchInTabs,
+            NativeMenuCommand::CommandPalette => Self::CommandPalette,
+            NativeMenuCommand::ToggleWrapMode => Self::ToggleWrapMode,
+            NativeMenuCommand::ToggleVisibleWhitespace => Self::ToggleVisibleWhitespace,
+            NativeMenuCommand::ToggleIndentGuides => Self::ToggleIndentGuides,
+            NativeMenuCommand::ToggleMinimap => Self::ToggleMinimap,
+            NativeMenuCommand::ToggleTheme => Self::ToggleTheme,
+            NativeMenuCommand::GoToLine => Self::GoToLine,
+            NativeMenuCommand::ToggleBookmark => Self::ToggleBookmark,
+            NativeMenuCommand::JumpToNextBookmark => Self::JumpToNextBookmark,
+            NativeMenuCommand::ClearBookmarks => Self::ClearBookmarks,
+            NativeMenuCommand::SplitPaneHorizontal => Self::SplitPaneHorizontal,
+            NativeMenuCommand::SplitPaneVertical => Self::SplitPaneVertical,
+            NativeMenuCommand::ClosePane => Self::ClosePane,
+            NativeMenuCommand::PinTab => Self::PinTab,
+            NativeMenuCommand::MoveTabLeft => Self::MoveTabLeft,
+            NativeMenuCommand::MoveTabRight => Self::MoveTabRight,
         }
     }
 }
@@ -496,6 +595,7 @@ impl PileApp {
             AppCommand::NewScratch => self.new_scratch(),
             AppCommand::CloseScratch => self.close_active_scratch(),
             AppCommand::RenameTab => self.begin_rename(self.state.active_document),
+            AppCommand::Quit => self.ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             AppCommand::Undo => {
                 if let Some(document) = self.state.active_document_mut()
                     && document.can_undo()
@@ -511,9 +611,252 @@ impl PileApp {
                     self.document_edited();
                 }
             }
+            AppCommand::Cut => {
+                // Cutting is handled by the text editor component
+                // Just ensure editor has focus
+                self.editor_focus_pending = true;
+            }
+            AppCommand::Copy => {
+                // Copying is handled by the text editor component
+                self.editor_focus_pending = true;
+            }
+            AppCommand::Paste => {
+                // Pasting is handled by the text editor component
+                self.editor_focus_pending = true;
+            }
+            AppCommand::SelectAll => {
+                if let Some(document) = self.state.active_document_mut() {
+                    let len = document.rope.byte_len();
+                    document.selections = vec![crate::model::Selection::caret(len)];
+                    // For select all, we need to select from 0 to len
+                    if let Some(sel) = document.selections.last_mut() {
+                        sel.anchor = 0;
+                    }
+                    self.editor_focus_pending = true;
+                }
+            }
+            AppCommand::ToggleComments => {
+                if let Some(document) = self.state.active_document_mut() {
+                    let comment_prefix = document
+                        .detect_syntax()
+                        .and_then(|d| d.language.comment_prefix())
+                        .unwrap_or("//");
+                    crate::editor::toggle_comments(document, comment_prefix);
+                    self.document_edited();
+                }
+            }
+            AppCommand::UpperCase => {
+                if let Some(document) = self.state.active_document_mut() {
+                    if document.selections.len() > 1 {
+                        crate::editor::convert_case_all_selections(
+                            document,
+                            crate::editor::CaseType::Upper,
+                        );
+                    } else {
+                        crate::editor::convert_case_selection(
+                            document,
+                            crate::editor::CaseType::Upper,
+                        );
+                    }
+                    self.document_edited();
+                }
+            }
+            AppCommand::LowerCase => {
+                if let Some(document) = self.state.active_document_mut() {
+                    if document.selections.len() > 1 {
+                        crate::editor::convert_case_all_selections(
+                            document,
+                            crate::editor::CaseType::Lower,
+                        );
+                    } else {
+                        crate::editor::convert_case_selection(
+                            document,
+                            crate::editor::CaseType::Lower,
+                        );
+                    }
+                    self.document_edited();
+                }
+            }
+            AppCommand::TitleCase => {
+                if let Some(document) = self.state.active_document_mut() {
+                    if document.selections.len() > 1 {
+                        crate::editor::convert_case_all_selections(
+                            document,
+                            crate::editor::CaseType::Title,
+                        );
+                    } else {
+                        crate::editor::convert_case_selection(
+                            document,
+                            crate::editor::CaseType::Title,
+                        );
+                    }
+                    self.document_edited();
+                }
+            }
+            AppCommand::ExpandWord => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::expand_selection_by_word(document);
+                    self.editor_focus_pending = true;
+                }
+            }
+            AppCommand::ContractWord => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::contract_selection_by_word(document);
+                    self.editor_focus_pending = true;
+                }
+            }
+            AppCommand::ExpandLine => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::expand_selection_by_line(document);
+                    self.editor_focus_pending = true;
+                }
+            }
+            AppCommand::ContractLine => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::contract_selection_by_line(document);
+                    self.editor_focus_pending = true;
+                }
+            }
+            AppCommand::ExpandBracketPair => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::expand_selection_by_bracket_pair(document);
+                    self.editor_focus_pending = true;
+                }
+            }
+            AppCommand::ContractBracketPair => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::contract_selection_by_bracket_pair(document);
+                    self.editor_focus_pending = true;
+                }
+            }
+            AppCommand::ExpandIndentBlock => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::expand_selection_by_indent_block(document);
+                    self.editor_focus_pending = true;
+                }
+            }
+            AppCommand::ContractIndentBlock => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::contract_selection_by_indent_block(document);
+                    self.editor_focus_pending = true;
+                }
+            }
+            AppCommand::Indent => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::indent_selection(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::Outdent => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::outdent_selection(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::DuplicateLines => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::duplicate_selected_lines(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::DeleteLines => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::delete_selected_lines(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::MoveLinesUp => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::move_selected_lines_up(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::MoveLinesDown => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::move_selected_lines_down(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::JoinLines => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::join_selected_lines(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::SortLines => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::sort_selected_lines(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::ReverseLines => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::reverse_selected_lines(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::TrimTrailingWhitespace => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::trim_trailing_whitespace(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::AddNextMatch => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::add_next_match(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::AddAllMatches => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::add_all_matches(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::SplitSelectionIntoLines => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::split_selection_into_lines(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::ClearSecondaryCursors => {
+                if let Some(document) = self.state.active_document_mut() {
+                    crate::editor::clear_secondary_cursors(document);
+                    self.document_edited();
+                }
+            }
+            AppCommand::Find => self.handle_command(crate::command::Command::Find),
+            AppCommand::FindReplace => self.handle_command(crate::command::Command::FindReplace),
+            AppCommand::FindUnderCursor => self.handle_command(crate::command::Command::FindUnderCursor),
+            AppCommand::SearchInTabs => self.handle_command(crate::command::Command::SearchInTabs),
+            AppCommand::CommandPalette => self.handle_command(crate::command::Command::CommandPalette),
+            AppCommand::ToggleWrapMode => self.handle_command(crate::command::Command::ToggleWrapMode),
+            AppCommand::ToggleVisibleWhitespace => self.handle_command(crate::command::Command::ToggleVisibleWhitespace),
+            AppCommand::ToggleIndentGuides => self.handle_command(crate::command::Command::ToggleIndentGuides),
+            AppCommand::ToggleMinimap => self.handle_command(crate::command::Command::ToggleMinimap),
+            AppCommand::ToggleTheme => self.handle_command(crate::command::Command::ToggleTheme),
+            AppCommand::GoToLine => {
+                self.goto_line.visible = true;
+                self.goto_line.focus_pending = true;
+            }
             AppCommand::ToggleBookmark => self.toggle_bookmark(),
             AppCommand::JumpToNextBookmark => self.jump_to_next_bookmark(),
             AppCommand::ClearBookmarks => self.clear_bookmarks(),
+            AppCommand::SplitPaneHorizontal => self.split_pane_horizontal(),
+            AppCommand::SplitPaneVertical => self.split_pane_vertical(),
+            AppCommand::ClosePane => self.close_pane(),
+            AppCommand::PinTab => {
+                let active = self.state.active_document;
+                self.toggle_pin_tab(active);
+            }
+            AppCommand::MoveTabLeft => {
+                let active = self.state.active_document;
+                self.move_tab_left(active);
+            }
+            AppCommand::MoveTabRight => {
+                let active = self.state.active_document;
+                self.move_tab_right(active);
+            }
         }
     }
 

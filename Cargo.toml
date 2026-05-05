@@ -45,8 +45,7 @@ regex = "1.11"
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
 
-[target.'cfg(target_os = "macos")'.dependencies]
-muda = { version = "0.19.1", default-features = false }
+muda = { version = "0.19.1", default-features = false, features = ["common-controls-v6"] }
 
 [profile.release]
 codegen-units = 1
