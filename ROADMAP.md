@@ -100,9 +100,9 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
   syntax metadata.
 - Completed: Add save-worker telemetry and surfaced recovery logs.
 - Completed: Add deterministic flush on app close and system shutdown events.
-- Add stress tests for rapid edits, many tabs, large buffers, and repeated
-  crash/restart cycles.
-- Add bounded snapshot memory accounting so huge sessions cannot stall the UI.
+- Completed: Add stress tests for rapid edits, many tabs, large buffers, and repeated
+   crash/restart cycles.
+- Completed: Add bounded snapshot memory accounting so huge sessions cannot stall the UI.
 
 ## Native App Integration
 
@@ -149,7 +149,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 ## Documentation
 
-- In progress: document the command model and keybinding conventions.
+- Completed: document the command model and keybinding conventions.
 - Completed: document the current editor split and transaction direction.
 - Document persistence guarantees and recovery behavior.
 - Document language detection and injection architecture.

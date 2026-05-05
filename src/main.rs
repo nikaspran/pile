@@ -8,6 +8,7 @@ mod native_menu;
 mod persistence;
 mod search;
 mod settings;
+mod stress_tests;
 mod syntax;
 mod syntax_highlighting;
 mod tab_switcher;
