@@ -15,7 +15,7 @@ use crate::{
         EditorViewState, SearchHighlight, minimap::{self, MinimapConfig},
         replace_all_matches, replace_match, show_editor,
     },
-    model::{AppState, DocumentId, PaneSnapshot, Selection, SessionSnapshot},
+    model::{AppState, Document, DocumentId, PaneSnapshot, Selection, SessionSnapshot},
     native_menu::{NativeMenu, NativeMenuCommand},
     persistence::{
         RecoveryEvent, RecoveryEventKind, SaveMsg, SaveTelemetry, SaveWorker, WorkerEvent,
@@ -1386,25 +1386,42 @@ impl PileApp {
             .set_title("Import File")
             .pick_file()
         {
-            match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    if let Some(document) = self.state.active_document_mut() {
-                        let old_title = document.title_hint.clone();
-                        document.replace_text(&content);
-                        // Set tab name to file name
-                        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                            document.rename(file_name);
-                        }
-                        if document.title_hint != old_title {
-                            self.mark_changed();
-                        }
-                        self.document_edited();
-                    }
+            self.import_dropped_file(&path);
+        }
+    }
+
+    fn import_dropped_file(&mut self, path: &std::path::Path) {
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                // Create a new document for the dropped file
+                let index = self.state.next_untitled_index;
+                let mut doc = Document::new_untitled(index);
+                self.state.next_untitled_index += 1;
+                doc.rope = crop::Rope::from(content);
+                doc.revision += 1;
+                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                    doc.rename(file_name);
                 }
-                Err(err) => {
-                    tracing::error!(error = %err, path = %path.display(), "failed to import file");
-                }
+                let doc_id = doc.id;
+                self.state.documents.push(doc);
+                self.state.tab_order.push(doc_id);
+                self.state.set_active(doc_id);
+                self.document_edited();
             }
+            Err(err) => {
+                tracing::error!(error = %err, path = %path.display(), "failed to import dropped file");
+            }
+        }
+    }
+
+    fn import_dropped_text(&mut self, text: &str) {
+        if let Some(document) = self.state.active_document_mut() {
+            let old_title = document.title_hint.clone();
+            document.replace_text(text);
+            if document.title_hint != old_title {
+                self.mark_changed();
+            }
+            self.document_edited();
         }
     }
 
@@ -2169,6 +2186,20 @@ impl eframe::App for PileApp {
                     WorkerEvent::Telemetry(tel) => {
                         self.telemetry = tel;
                     }
+                }
+            }
+        }
+
+        // Handle drag-and-drop files/text
+        let dropped_files: Vec<egui::DroppedFile> = ctx.input(|i| i.raw.dropped_files.clone());
+        if !dropped_files.is_empty() {
+            for file in &dropped_files {
+                if let Some(path) = &file.path {
+                    self.import_dropped_file(path);
+                } else if let Some(bytes) = &file.bytes
+                    && let Ok(text) = String::from_utf8(bytes.to_vec())
+                {
+                    self.import_dropped_text(&text);
                 }
             }
         }
