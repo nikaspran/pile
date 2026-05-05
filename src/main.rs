@@ -17,6 +17,8 @@ mod theme;
 
 use anyhow::Result;
 
+use eframe::egui;
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -25,7 +27,25 @@ fn main() -> Result<()> {
         )
         .init();
 
-    let options = eframe::NativeOptions::default();
+    let settings_path = persistence::default_settings_path();
+    let settings = persistence::load_settings(&settings_path);
+    let window_state = &settings.window_state;
+
+    let mut options = eframe::NativeOptions::default();
+
+    if let Some(size) = window_state.size {
+        options.viewport.inner_size = Some(egui::Vec2::new(size[0], size[1]));
+    }
+    if let Some(position) = window_state.position {
+        options.viewport.position = Some(egui::Pos2::new(position[0], position[1]));
+    }
+    if let Some(fullscreen) = window_state.fullscreen {
+        options.viewport.fullscreen = Some(fullscreen);
+    }
+    if let Some(maximized) = window_state.maximized {
+        options.viewport.maximized = Some(maximized);
+    }
+
     eframe::run_native(
         "pile",
         options,

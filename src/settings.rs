@@ -34,6 +34,30 @@ impl WrapMode {
     }
 }
 
+/// Window state for persistence across sessions.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WindowState {
+    /// Window inner size (width, height) in logical points.
+    pub size: Option<[f32; 2]>,
+    /// Window outer position (x, y) in logical points.
+    pub position: Option<[f32; 2]>,
+    /// Whether the window is in fullscreen mode.
+    pub fullscreen: Option<bool>,
+    /// Whether the window is maximized.
+    pub maximized: Option<bool>,
+}
+
+impl Default for WindowState {
+    fn default() -> Self {
+        Self {
+            size: None,
+            position: None,
+            fullscreen: None,
+            maximized: None,
+        }
+    }
+}
+
 /// Application-wide settings that persist separately from session state.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Settings {
@@ -49,6 +73,8 @@ pub struct Settings {
     pub show_indentation_guides: bool,
     /// Show minimap with viewport indicator.
     pub show_minimap: bool,
+    /// Window state for restore on startup.
+    pub window_state: WindowState,
 }
 
 impl Default for Settings {
@@ -60,6 +86,7 @@ impl Default for Settings {
             show_visible_whitespace: false,
             show_indentation_guides: true,
             show_minimap: false,
+            window_state: WindowState::default(),
         }
     }
 }

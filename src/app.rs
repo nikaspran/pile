@@ -2379,6 +2379,19 @@ impl eframe::App for PileApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Capture window state before exit
+        self.ctx.input(|i| {
+            let vp = i.viewport();
+            self.settings.window_state = crate::settings::WindowState {
+                size: vp.inner_rect.map(|r| [r.width(), r.height()]),
+                position: vp.outer_rect.map(|r| [r.min.x, r.min.y]),
+                fullscreen: vp.fullscreen,
+                maximized: vp.maximized,
+            };
+        });
+        let settings_path = crate::persistence::default_settings_path();
+        crate::persistence::save_settings(&settings_path, &self.settings);
+
         self.flush_session();
         self.worker_event_rx = None; // Drop receiver so worker can finish sending
         if let Some(worker) = self.save_worker.take() {

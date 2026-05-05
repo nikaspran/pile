@@ -114,7 +114,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add drag-and-drop text/file import.
 - Completed: Add native preferences window for editor settings.
 - Completed: Add per-platform keyboard shortcut conventions.
-- Add window state restore: size, position, fullscreen, and display.
+- Completed: Add window state restore: size, position, fullscreen, and display.
 
 ## Settings and Customization
 
