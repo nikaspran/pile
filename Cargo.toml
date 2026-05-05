@@ -54,3 +54,14 @@ strip = "symbols"
 
 [profile.dev.package."*"]
 opt-level = 2
+
+[package.metadata.bundle]
+name = "pile"
+identifier = "ai.opencode.pile"
+icon = ["assets/pile.icns"]
+version = "0.1.0"
+short_description = "A minimalist infinite scratchpad editor."
+category = "Developer-tool"
+copyright = "MIT OR Apache-2.0"
+macos_min_system_version = "11.0"
+macos_info_plist = "assets/Info.plist"
