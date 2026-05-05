@@ -16,26 +16,26 @@ mod ops;
 mod replace;
 
 use geometry::*;
-use layout::TextLayoutPipeline;
 pub use geometry::{
     decimal_digits, primary_selection, select_line_at_offset, select_word_at_offset,
     set_primary_selection, visual_line_count, word_at_selection,
 };
 use input::handle_input;
+use layout::TextLayoutPipeline;
 use line_ops::*;
 pub use line_ops::{
     delete_selected_lines, duplicate_selected_lines, indent_selection, join_selected_lines,
     move_selected_lines_down, move_selected_lines_up, normalize_whitespace, outdent_selection,
     reverse_selected_lines, sort_selected_lines, toggle_comments, trim_trailing_whitespace,
 };
+use motion::find_matching_bracket_at;
 pub use motion::*;
 pub use multicursor::{
-    add_all_matches, add_next_match, clear_secondary_cursors, delete_all,
-    replace_selection_all, split_selection_into_lines,
+    add_all_matches, add_next_match, clear_secondary_cursors, delete_all, replace_selection_all,
+    split_selection_into_lines,
 };
 use ops::*;
-use motion::find_matching_bracket_at;
-pub use ops::{convert_case_all_selections, convert_case_selection, CaseType};
+pub use ops::{CaseType, convert_case_all_selections, convert_case_selection};
 pub use replace::{replace_all_matches, replace_match};
 
 const LINE_GUTTER_MIN_WIDTH: f32 = 44.0;
@@ -94,7 +94,13 @@ pub struct EditorViewState {
     /// Active smooth scroll animation, if any.
     pub scroll_animation: Option<ScrollAnimation>,
     /// Cached layout pipeline, invalidated on revision/width/wrap/ruler changes.
-    pub cached_layout: Option<(u64, f32, crate::settings::WrapMode, Vec<usize>, TextLayoutPipeline)>,
+    pub cached_layout: Option<(
+        u64,
+        f32,
+        crate::settings::WrapMode,
+        Vec<usize>,
+        TextLayoutPipeline,
+    )>,
 }
 
 #[derive(Debug)]
@@ -187,8 +193,14 @@ pub fn show_editor(
     }
 
     if need_rebuild {
-        let pipeline =
-            TextLayoutPipeline::new(ui, &document.rope, available_width, available_height, wrap_mode, rulers);
+        let pipeline = TextLayoutPipeline::new(
+            ui,
+            &document.rope,
+            available_width,
+            available_height,
+            wrap_mode,
+            rulers,
+        );
         view_state.cached_layout = Some((
             document.revision,
             available_width,
@@ -203,7 +215,14 @@ pub fn show_editor(
         .as_ref()
         .map(|(_, _, _, _, pl)| pl.clone())
         .unwrap_or_else(|| {
-            TextLayoutPipeline::new(ui, &document.rope, available_width, available_height, wrap_mode, rulers)
+            TextLayoutPipeline::new(
+                ui,
+                &document.rope,
+                available_width,
+                available_height,
+                wrap_mode,
+                rulers,
+            )
         });
 
     let mut changed = false;
@@ -221,10 +240,8 @@ pub fn show_editor(
         .scroll_offset(scroll_offset)
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {
-            let (rect, response) = ui.allocate_exact_size(
-                layout.content_size(),
-                egui::Sense::click_and_drag(),
-            );
+            let (rect, response) =
+                ui.allocate_exact_size(layout.content_size(), egui::Sense::click_and_drag());
 
             if *focus_pending {
                 response.request_focus();
@@ -236,9 +253,9 @@ pub fn show_editor(
                 response.request_focus();
                 if let Some(pointer_position) = response.interact_pointer_pos() {
                     let now = Instant::now();
-                    let is_multi = view_state
-                        .last_click_time
-                        .is_some_and(|t| now.duration_since(t).as_secs_f32() < TRIPLE_CLICK_DURATION);
+                    let is_multi = view_state.last_click_time.is_some_and(|t| {
+                        now.duration_since(t).as_secs_f32() < TRIPLE_CLICK_DURATION
+                    });
                     view_state.last_click_time = Some(now);
                     if is_multi {
                         view_state.click_count = (view_state.click_count % 3) + 1;
@@ -258,13 +275,21 @@ pub fn show_editor(
                         view_state.column_selection = true;
                         let anchor_col = view_state.column_selection_anchor_col.unwrap_or(column);
                         let start_line = line_index_of_byte(&document.rope, offset);
-                        create_column_selection(document, anchor_col, column, start_line, start_line);
+                        create_column_selection(
+                            document, anchor_col, column, start_line, start_line,
+                        );
                     } else if view_state.click_count == 3 {
-                        set_primary_selection(document, select_line_at_offset(&document.rope, offset));
+                        set_primary_selection(
+                            document,
+                            select_line_at_offset(&document.rope, offset),
+                        );
                         view_state.column_selection = false;
                         view_state.column_selection_anchor_col = None;
                     } else if view_state.click_count == 2 {
-                        set_primary_selection(document, select_word_at_offset(&document.rope, offset));
+                        set_primary_selection(
+                            document,
+                            select_word_at_offset(&document.rope, offset),
+                        );
                         view_state.column_selection = false;
                         view_state.column_selection_anchor_col = None;
                     } else {
@@ -290,10 +315,8 @@ pub fn show_editor(
                         }
                         view_state.column_selection = true;
                         let anchor_col = view_state.column_selection_anchor_col.unwrap_or(column);
-                        let anchor_line = line_index_of_byte(
-                            &document.rope,
-                            primary_selection(document).anchor,
-                        );
+                        let anchor_line =
+                            line_index_of_byte(&document.rope, primary_selection(document).anchor);
                         create_column_selection(document, anchor_col, column, anchor_line, line);
                     } else {
                         let mut selection = primary_selection(document);
@@ -311,7 +334,10 @@ pub fn show_editor(
                         || pointer_position.y > viewport_bottom_abs
                     {
                         let scroll_rect = egui::Rect::from_min_size(
-                            egui::pos2(pointer_position.x, pointer_position.y - layout.row_height * 0.5),
+                            egui::pos2(
+                                pointer_position.x,
+                                pointer_position.y - layout.row_height * 0.5,
+                            ),
                             egui::vec2(1.0, layout.row_height),
                         );
                         ui.scroll_to_rect(scroll_rect, None);
@@ -344,6 +370,14 @@ pub fn show_editor(
             let (first_line, last_line) = layout.visible_line_range(&viewport);
             let primary = primary_selection(document);
             let caret_line = line_index_of_byte(&document.rope, primary.head);
+
+            // Calculate visible byte range for cache keying
+            let visible_start = layout.wrapped_line_byte_start(&document.rope, first_line);
+            let visible_end = if last_line < layout.line_count {
+                layout.wrapped_line_byte_start(&document.rope, last_line)
+            } else {
+                document.rope.byte_len()
+            };
 
             // Detect large files for performance guards
             let is_large_file = layout.line_count > LARGE_FILE_LINE_COUNT
@@ -496,161 +530,175 @@ pub fn show_editor(
                     ui.visuals(),
                 );
 
-                 let line_text = layout.wrapped_line_text(&document.rope, line_index);
-                 let line_start_byte = layout.wrapped_line_byte_start(&document.rope, line_index);
+                let line_text = layout.wrapped_line_text(&document.rope, line_index);
+                let line_start_byte = layout.wrapped_line_byte_start(&document.rope, line_index);
 
-                 // Get syntax highlight spans for this line
-                 let highlight_spans: Vec<(usize, usize, egui::Color32)> = if !is_large_file {
-                     if let Some(detection) = document.detect_syntax() {
-                         if detection.language != crate::syntax::LanguageId::PlainText {
-                             let text = document.text();
-                             let spans = document.syntax_state.highlight(
-                                 &text,
-                                 detection.language,
-                                 document.revision,
-                             );
-                             let line_end_byte = line_start_byte + line_text.len();
-                             spans.iter()
-                                 .filter_map(|span| {
-                                     let start = span.start.max(line_start_byte);
-                                     let end = span.end.min(line_end_byte);
-                                     if start < end {
-                                         let color = highlight_color(&highlight_name(span.highlight), theme);
-                                         Some((start - line_start_byte, end - line_start_byte, color))
-                                     } else {
-                                         None
-                                     }
-                                 })
-                                 .collect()
-                         } else {
-                             Vec::new()
-                         }
-                     } else {
-                         Vec::new()
-                     }
-                 } else {
-                     Vec::new()
-                 };
+                // Get syntax highlight spans for this line
+                let highlight_spans: Vec<(usize, usize, egui::Color32)> = if !is_large_file {
+                    if let Some(detection) = document.detect_syntax() {
+                        if detection.language != crate::syntax::LanguageId::PlainText {
+                            let text = document.text();
+                            let spans = document.syntax_state.highlight(
+                                &text,
+                                detection.language,
+                                document.revision,
+                                visible_start,
+                                visible_end,
+                            );
+                            let line_end_byte = line_start_byte + line_text.len();
+                            spans
+                                .iter()
+                                .filter_map(|span| {
+                                    let start = span.start.max(line_start_byte);
+                                    let end = span.end.min(line_end_byte);
+                                    if start < end {
+                                        let color =
+                                            highlight_color(&highlight_name(span.highlight), theme);
+                                        Some((
+                                            start - line_start_byte,
+                                            end - line_start_byte,
+                                            color,
+                                        ))
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect()
+                        } else {
+                            Vec::new()
+                        }
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
 
-                 if show_visible_whitespace {
-                     let whitespace_color = ui.visuals().weak_text_color();
-                     let mut x_offset = 0.0;
-                     let mut span_idx = 0;
+                if show_visible_whitespace {
+                    let whitespace_color = ui.visuals().weak_text_color();
+                    let mut x_offset = 0.0;
+                    let mut span_idx = 0;
 
-                     for (i, ch) in line_text.chars().enumerate() {
-                         let byte_pos = line_text.char_indices().nth(i).map(|(b, _)| b).unwrap_or(0);
-                         let (display_ch, mut color) = match ch {
-                             ' ' => ('·', whitespace_color),
-                             '\t' => ('→', whitespace_color),
-                             _ => (ch, ui.visuals().text_color()),
-                         };
+                    for (i, ch) in line_text.chars().enumerate() {
+                        let byte_pos = line_text.char_indices().nth(i).map(|(b, _)| b).unwrap_or(0);
+                        let (display_ch, mut color) = match ch {
+                            ' ' => ('·', whitespace_color),
+                            '\t' => ('→', whitespace_color),
+                            _ => (ch, ui.visuals().text_color()),
+                        };
 
-                         // Check if this character is within a highlight span
-                         while span_idx < highlight_spans.len() && highlight_spans[span_idx].1 <= byte_pos {
-                             span_idx += 1;
-                         }
-                         if span_idx < highlight_spans.len()
-                             && byte_pos >= highlight_spans[span_idx].0
-                             && byte_pos < highlight_spans[span_idx].1
-                         {
-                             if ch != ' ' && ch != '\t' {
-                                 color = highlight_spans[span_idx].2;
-                             }
-                         }
+                        // Check if this character is within a highlight span
+                        while span_idx < highlight_spans.len()
+                            && highlight_spans[span_idx].1 <= byte_pos
+                        {
+                            span_idx += 1;
+                        }
+                        if span_idx < highlight_spans.len()
+                            && byte_pos >= highlight_spans[span_idx].0
+                            && byte_pos < highlight_spans[span_idx].1
+                        {
+                            if ch != ' ' && ch != '\t' {
+                                color = highlight_spans[span_idx].2;
+                            }
+                        }
 
-                         painter.text(
-                             text_pos + egui::vec2(x_offset, 0.0),
-                             egui::Align2::LEFT_TOP,
-                             display_ch.to_string(),
-                             layout.font_id.clone(),
-                             color,
-                         );
-                         x_offset += layout.char_width;
-                     }
-                 } else {
-                     // Render with syntax highlighting
-                     if highlight_spans.is_empty() {
-                         // No highlights: render entire line with default color
-                         painter.text(
-                             text_pos,
-                             egui::Align2::LEFT_TOP,
-                             line_text,
-                             layout.font_id.clone(),
-                             ui.visuals().text_color(),
-                         );
-                     } else {
-                         // Render line piece-by-piece with different colors
-                         let mut x_offset = 0.0;
-                         let mut last_byte = 0;
-                         let default_color = ui.visuals().text_color();
+                        painter.text(
+                            text_pos + egui::vec2(x_offset, 0.0),
+                            egui::Align2::LEFT_TOP,
+                            display_ch.to_string(),
+                            layout.font_id.clone(),
+                            color,
+                        );
+                        x_offset += layout.char_width;
+                    }
+                } else {
+                    // Render with syntax highlighting
+                    if highlight_spans.is_empty() {
+                        // No highlights: render entire line with default color
+                        painter.text(
+                            text_pos,
+                            egui::Align2::LEFT_TOP,
+                            line_text,
+                            layout.font_id.clone(),
+                            ui.visuals().text_color(),
+                        );
+                    } else {
+                        // Render line piece-by-piece with different colors
+                        let mut x_offset = 0.0;
+                        let mut last_byte = 0;
+                        let default_color = ui.visuals().text_color();
 
-                         // Sort spans by start position
-                         let mut sorted_spans = highlight_spans.clone();
-                         sorted_spans.sort_by_key(|(start, _, _)| *start);
+                        // Sort spans by start position
+                        let mut sorted_spans = highlight_spans.clone();
+                        sorted_spans.sort_by_key(|(start, _, _)| *start);
 
-                         for (span_start, span_end, color) in sorted_spans {
-                             // Render unhighlighted text before this span
-                             if span_start > last_byte {
-                                 let text_segment = &line_text[last_byte..span_start.min(line_text.len())];
-                                 if !text_segment.is_empty() {
-                                     painter.text(
-                                         text_pos + egui::vec2(x_offset, 0.0),
-                                         egui::Align2::LEFT_TOP,
-                                         text_segment,
-                                         layout.font_id.clone(),
-                                         default_color,
-                                     );
-                                     x_offset += layout.char_width * text_segment.chars().count() as f32;
-                                 }
-                             }
+                        for (span_start, span_end, color) in sorted_spans {
+                            // Render unhighlighted text before this span
+                            if span_start > last_byte {
+                                let text_segment =
+                                    &line_text[last_byte..span_start.min(line_text.len())];
+                                if !text_segment.is_empty() {
+                                    painter.text(
+                                        text_pos + egui::vec2(x_offset, 0.0),
+                                        egui::Align2::LEFT_TOP,
+                                        text_segment,
+                                        layout.font_id.clone(),
+                                        default_color,
+                                    );
+                                    x_offset +=
+                                        layout.char_width * text_segment.chars().count() as f32;
+                                }
+                            }
 
-                             // Render highlighted text
-                             let segment_start = span_start.min(line_text.len());
-                             let segment_end = span_end.min(line_text.len());
-                             if segment_start < segment_end {
-                                 let text_segment = &line_text[segment_start..segment_end];
-                                 if !text_segment.is_empty() {
-                                     painter.text(
-                                         text_pos + egui::vec2(x_offset, 0.0),
-                                         egui::Align2::LEFT_TOP,
-                                         text_segment,
-                                         layout.font_id.clone(),
-                                         color,
-                                     );
-                                     x_offset += layout.char_width * text_segment.chars().count() as f32;
-                                 }
-                             }
+                            // Render highlighted text
+                            let segment_start = span_start.min(line_text.len());
+                            let segment_end = span_end.min(line_text.len());
+                            if segment_start < segment_end {
+                                let text_segment = &line_text[segment_start..segment_end];
+                                if !text_segment.is_empty() {
+                                    painter.text(
+                                        text_pos + egui::vec2(x_offset, 0.0),
+                                        egui::Align2::LEFT_TOP,
+                                        text_segment,
+                                        layout.font_id.clone(),
+                                        color,
+                                    );
+                                    x_offset +=
+                                        layout.char_width * text_segment.chars().count() as f32;
+                                }
+                            }
 
-                             last_byte = segment_end;
-                         }
+                            last_byte = segment_end;
+                        }
 
-                         // Render remaining unhighlighted text
-                         if last_byte < line_text.len() {
-                             let text_segment = &line_text[last_byte..];
-                             if !text_segment.is_empty() {
-                                 painter.text(
-                                     text_pos + egui::vec2(x_offset, 0.0),
-                                     egui::Align2::LEFT_TOP,
-                                     text_segment,
-                                     layout.font_id.clone(),
-                                     default_color,
-                                 );
-                             }
-                         }
-                     }
-                 }
+                        // Render remaining unhighlighted text
+                        if last_byte < line_text.len() {
+                            let text_segment = &line_text[last_byte..];
+                            if !text_segment.is_empty() {
+                                painter.text(
+                                    text_pos + egui::vec2(x_offset, 0.0),
+                                    egui::Align2::LEFT_TOP,
+                                    text_segment,
+                                    layout.font_id.clone(),
+                                    default_color,
+                                );
+                            }
+                        }
+                    }
+                }
             }
 
-    // Handle reveal_selection with smooth scroll animation
-    if reveal_selection.is_some() {
-        let primary = primary_selection(document);
-        let caret_pos = layout.caret_position(&document.rope, primary.head, rect.top());
-        let target_y = caret_pos.y - viewport.height() * 0.5 + layout.row_height * 0.5;
-        let target_y = target_y.max(0.0);
-        if (target_y - document.scroll.y).abs() > 1.0 {
-            view_state.scroll_animation = Some(ScrollAnimation::new(document.scroll.y, target_y));
-        }
-    }
+            // Handle reveal_selection with smooth scroll animation
+            if reveal_selection.is_some() {
+                let primary = primary_selection(document);
+                let caret_pos = layout.caret_position(&document.rope, primary.head, rect.top());
+                let target_y = caret_pos.y - viewport.height() * 0.5 + layout.row_height * 0.5;
+                let target_y = target_y.max(0.0);
+                if (target_y - document.scroll.y).abs() > 1.0 {
+                    view_state.scroll_animation =
+                        Some(ScrollAnimation::new(document.scroll.y, target_y));
+                }
+            }
 
             // Draw carets for all selections
             for (i, sel) in document.selections.iter().enumerate() {

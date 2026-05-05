@@ -26,15 +26,15 @@ fn injection_language_registry() -> &'static HashMap<&'static str, Arc<Highlight
 /// Per-document syntax highlighting state.
 ///
 /// Stores the parsed tree-sitter `Tree` for incremental reparsing and
-/// caches highlight spans keyed by document revision.
+/// caches highlight spans keyed by document revision and visible byte range.
 #[derive(Clone, Debug)]
 pub struct DocumentSyntaxState {
     /// The most recent parse tree. `None` for plain text.
     tree: Option<Tree>,
     /// The language used to produce `tree`.
     parsed_as: Option<LanguageId>,
-    /// Cached highlight spans for the last processed revision.
-    cached_spans: Option<(u64, Vec<HighlightSpan>)>,
+    /// Cached highlight spans for the last processed revision and visible range.
+    cached_spans: Option<(u64, usize, usize, Vec<HighlightSpan>)>, // (revision, start_byte, end_byte, spans)
 }
 
 impl Default for DocumentSyntaxState {
@@ -55,16 +55,21 @@ impl DocumentSyntaxState {
     /// Returns highlight spans for the given document text and detected language.
     ///
     /// Uses incremental reparsing when the language hasn't changed and a prior
-    /// tree exists. Results are cached by document `revision`.
+    /// tree exists. Results are cached by document `revision` and visible byte range.
     pub fn highlight(
         &mut self,
         text: &str,
         language: LanguageId,
         revision: u64,
+        visible_start: usize,
+        visible_end: usize,
     ) -> Vec<HighlightSpan> {
-        // Return cached result if revision hasn't changed
-        if let Some((cached_rev, spans)) = &self.cached_spans {
-            if *cached_rev == revision && self.parsed_as == Some(language) {
+        // Return cached result if revision and visible range haven't changed
+        if let Some((cached_rev, cached_start, cached_end, spans)) = &self.cached_spans {
+            if *cached_rev == revision 
+                && *cached_start == visible_start 
+                && *cached_end == visible_end 
+                && self.parsed_as == Some(language) {
                 return spans.clone();
             }
         }
@@ -73,7 +78,7 @@ impl DocumentSyntaxState {
         if language == LanguageId::PlainText {
             self.tree = None;
             self.parsed_as = Some(LanguageId::PlainText);
-            self.cached_spans = Some((revision, Vec::new()));
+            self.cached_spans = Some((revision, visible_start, visible_end, Vec::new()));
             return Vec::new();
         }
 
@@ -82,14 +87,14 @@ impl DocumentSyntaxState {
         let Some(ts_language) = registry.get_language(language) else {
             self.tree = None;
             self.parsed_as = Some(language);
-            self.cached_spans = Some((revision, Vec::new()));
+            self.cached_spans = Some((revision, visible_start, visible_end, Vec::new()));
             return Vec::new();
         };
-
+        
         let Some(config) = registry.highlight_config(language) else {
             self.tree = None;
             self.parsed_as = Some(language);
-            self.cached_spans = Some((revision, Vec::new()));
+            self.cached_spans = Some((revision, visible_start, visible_end, Vec::new()));
             return Vec::new();
         };
 
@@ -114,9 +119,10 @@ impl DocumentSyntaxState {
         self.parsed_as = Some(language);
 
         // Generate highlight spans using tree-sitter-highlight
+        // For now, generate full spans but only cache based on visible range
         let spans = Self::generate_highlight_spans(&config, text);
 
-        self.cached_spans = Some((revision, spans.clone()));
+        self.cached_spans = Some((revision, visible_start, visible_end, spans.clone()));
         spans
     }
 
@@ -189,7 +195,8 @@ impl DocumentSyntaxState {
         }
     }
 
-    /// Invalidate cached spans (e.g., when the document revision changes externally).
+    /// Invalidate cached spans (e.g., when the document revision changes externally
+    /// or when the visible range changes significantly).
     pub fn invalidate_cache(&mut self) {
         self.cached_spans = None;
     }
@@ -460,7 +467,7 @@ mod tests {
     fn highlight_rust_code() {
         let mut state = DocumentSyntaxState::new();
         let code = "fn main() {\n    let x = 42;\n}\n";
-        let spans = state.highlight(code, LanguageId::Rust, 1);
+        let spans = state.highlight(code, LanguageId::Rust, 1, 0, code.len());
         // Should have some highlight spans for Rust code
         assert!(!spans.is_empty());
     }
@@ -469,7 +476,7 @@ mod tests {
     fn highlight_plain_text() {
         let mut state = DocumentSyntaxState::new();
         let text = "Just some plain text without code.";
-        let spans = state.highlight(text, LanguageId::PlainText, 1);
+        let spans = state.highlight(text, LanguageId::PlainText, 1, 0, text.len());
         // Plain text should have no spans
         assert!(spans.is_empty());
     }
@@ -486,9 +493,9 @@ mod tests {
     fn cache_works_for_same_revision() {
         let mut state = DocumentSyntaxState::new();
         let code = "fn main() {}";
-        let spans1 = state.highlight(code, LanguageId::Rust, 1);
-        let spans2 = state.highlight(code, LanguageId::Rust, 1);
-        // Same revision should return cached result
+        let spans1 = state.highlight(code, LanguageId::Rust, 1, 0, code.len());
+        let spans2 = state.highlight(code, LanguageId::Rust, 1, 0, code.len());
+        // Same revision and visible range should return cached result
         assert_eq!(spans1.len(), spans2.len());
     }
 }

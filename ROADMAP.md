@@ -89,7 +89,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add diagnostics-free parse status display for low-confidence detection.
 - Completed: Add grammar registry configuration for adding languages without changing
   editor core code.
-- Add highlight cache invalidation keyed by document revision and visible byte
+- Completed: Add highlight cache invalidation keyed by document revision and visible byte
   range.
 
 ## Persistence and Reliability
