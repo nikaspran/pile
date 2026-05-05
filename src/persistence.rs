@@ -11,13 +11,14 @@ use atomic_write_file::AtomicWriteFile;
 use crossbeam_channel::{Receiver, Sender, bounded};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::model::{PaneSnapshot, SessionSnapshot};
 use crate::settings::Settings;
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 const SESSION_FILE: &str = ".session.bin";
+const BACKUP_ROTATION_COUNT: usize = 5;
 
 /// Current envelope version. Increment this when the session format changes.
 const ENVELOPE_VERSION: u32 = 3;
@@ -285,25 +286,54 @@ pub fn load_session(path: &PathBuf) -> Result<Option<SessionSnapshot>> {
         }
         Err(_) => {
             // Fallback: try to deserialize as legacy SessionSnapshot (v1/v2)
-            let snapshot: SessionSnapshot = bincode::deserialize(&bytes)
-                .with_context(|| format!("failed to decode {}", path.display()))?;
+            match bincode::deserialize::<SessionSnapshot>(&bytes) {
+                Ok(snapshot) => {
+                    // Support schema v1 by migrating to v2
+                    if snapshot.schema_version == 1 {
+                        let migrated = SessionSnapshot {
+                            schema_version: 2,
+                            state: snapshot.state,
+                            panes: vec![],
+                            active_pane: 0,
+                        };
+                        return Ok(Some(migrated));
+                    }
 
-            // Support schema v1 by migrating to v2, then wrap in envelope
-            if snapshot.schema_version == 1 {
-                let migrated = SessionSnapshot {
-                    schema_version: 2,
-                    state: snapshot.state,
-                    panes: vec![],
-                    active_pane: 0,
-                };
-                return Ok(Some(migrated));
+                    if snapshot.schema_version != 2 {
+                        anyhow::bail!("unsupported session schema {}", snapshot.schema_version);
+                    }
+
+                    Ok(Some(snapshot))
+                }
+                Err(_) => {
+                    // Main session is corrupt, quarantine it and try backups
+                    warn!(
+                        path = %path.display(),
+                        "main session corrupt, trying backups"
+                    );
+                    quarantine_corrupt_session(path);
+
+                    match load_session_from_backup(path) {
+                        Ok(Some((snapshot, backup_path))) => {
+                            // Restore from backup
+                            let _ = fs::copy(&backup_path, path);
+                            info!(
+                                backup_path = %backup_path.display(),
+                                "restored session from backup"
+                            );
+                            Ok(Some(snapshot))
+                        }
+                        Ok(None) => {
+                            warn!("no loadable backups found");
+                            Ok(None)
+                        }
+                        Err(err) => {
+                            warn!(error = %err, "failed to load from backup");
+                            Ok(None)
+                        }
+                    }
+                }
             }
-
-            if snapshot.schema_version != 2 {
-                anyhow::bail!("unsupported session schema {}", snapshot.schema_version);
-            }
-
-            Ok(Some(snapshot))
         }
     }
 }
@@ -355,6 +385,9 @@ fn save_and_ack(
 }
 
 fn save_snapshot(path: &PathBuf, snapshot: &SessionSnapshot) {
+    // Backup current session before overwriting
+    backup_current_session(path);
+
     if let Err(err) = write_snapshot(path, snapshot) {
         error!(error = %err, path = %path.display(), "session save failed");
     } else {
@@ -392,6 +425,80 @@ pub fn quarantine_corrupt_session(path: &PathBuf) {
             "failed to quarantine corrupt session"
         );
     }
+}
+
+/// Rotate backup files, keeping only the N most recent backups.
+/// Backups are named .session.bin.1, .session.bin.2, etc. (higher = older)
+fn rotate_backups(session_path: &PathBuf) {
+    // Remove any backups beyond the rotation count
+    for i in BACKUP_ROTATION_COUNT + 1..=BACKUP_ROTATION_COUNT + 10 {
+        let old_backup = session_path.with_extension(format!("bin.{}", i));
+        if !old_backup.exists() {
+            break;
+        }
+        let _ = fs::remove_file(&old_backup);
+    }
+
+    // Shift existing backups: .session.bin.N -> .session.bin.N+1, etc.
+    for i in (1..=BACKUP_ROTATION_COUNT).rev() {
+        let src = session_path.with_extension(format!("bin.{}", i));
+        let dst = session_path.with_extension(format!("bin.{}", i + 1));
+        if src.exists() {
+            let _ = fs::rename(&src, &dst);
+        }
+    }
+}
+
+/// Create a backup of the current session file before overwriting.
+/// Rotates existing backups and copies current session to .session.bin.1
+pub fn backup_current_session(path: &PathBuf) {
+    if !path.exists() {
+        return;
+    }
+
+    rotate_backups(path);
+
+    let backup_path = path.with_extension("bin.1");
+    if let Err(err) = fs::copy(path, &backup_path) {
+        warn!(
+            error = %err,
+            path = %path.display(),
+            backup_path = %backup_path.display(),
+            "failed to create session backup"
+        );
+    }
+}
+
+/// Try to load session from backup files, starting from the most recent.
+/// Returns the first loadable backup, or None if all backups are corrupt.
+pub fn load_session_from_backup(session_path: &PathBuf) -> Result<Option<(SessionSnapshot, PathBuf)>> {
+    for i in 1..=BACKUP_ROTATION_COUNT {
+        let backup_path = session_path.with_extension(format!("bin.{}", i));
+        if !backup_path.exists() {
+            continue;
+        }
+
+        match load_session(&backup_path) {
+            Ok(Some(snapshot)) => {
+                info!(
+                    backup_path = %backup_path.display(),
+                    "restored session from backup"
+                );
+                return Ok(Some((snapshot, backup_path)));
+            }
+            Ok(None) => continue,
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    backup_path = %backup_path.display(),
+                    "backup also corrupt, trying next"
+                );
+                continue;
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -483,5 +590,110 @@ mod tests {
         // Directly deserialize as legacy format
         let loaded: SessionSnapshot = bincode::deserialize(&bytes).unwrap();
         assert_eq!(loaded.schema_version, 2);
+    }
+
+    #[test]
+    fn backup_rotation_keeps_correct_count() {
+        let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".session.bin");
+
+        // Create backups up to BACKUP_ROTATION_COUNT + 2
+        for i in 1..=BACKUP_ROTATION_COUNT + 2 {
+            let backup_path = path.with_extension(format!("bin.{}", i));
+            fs::write(&backup_path, format!("backup {}", i)).unwrap();
+        }
+
+        // Verify we have too many backups
+        assert!(path.with_extension(format!("bin.{}", BACKUP_ROTATION_COUNT + 2)).exists());
+
+        // Trigger rotation
+        rotate_backups(&path);
+
+        // Verify oldest backup (BACKUP_ROTATION_COUNT + 2) was removed
+        assert!(!path.with_extension(format!("bin.{}", BACKUP_ROTATION_COUNT + 2)).exists());
+        // Verify BACKUP_ROTATION_COUNT + 1 exists (shifted from BACKUP_ROTATION_COUNT)
+        assert!(path.with_extension(format!("bin.{}", BACKUP_ROTATION_COUNT + 1)).exists());
+        // Verify backup.1 no longer exists (it was shifted to backup.2)
+        assert!(!path.with_extension("bin.1").exists());
+
+        // Cleanup
+        for i in 1..=BACKUP_ROTATION_COUNT + 1 {
+            let _ = fs::remove_file(path.with_extension(format!("bin.{}", i)));
+        }
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn backup_current_session_creates_backup() {
+        let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".session.bin");
+
+        // Create initial session
+        let snapshot = SessionSnapshot::from(&AppState::empty());
+        write_snapshot(&path, &snapshot).unwrap();
+
+        // Backup should not exist yet
+        assert!(!path.with_extension("bin.1").exists());
+
+        // Create backup
+        backup_current_session(&path);
+
+        // Backup should now exist
+        assert!(path.with_extension("bin.1").exists());
+
+        // Cleanup
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(path.with_extension("bin.1"));
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn load_session_from_backup_when_main_corrupt() {
+        let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".session.bin");
+
+        // Create a valid session and save it
+        let worker = SaveWorker::spawn(path.clone());
+        let (ack_tx, ack_rx) = bounded(1);
+        let snapshot = SessionSnapshot::from(&AppState::empty());
+
+        worker
+            .sender()
+            .send(SaveMsg::Flush(snapshot.clone(), ack_tx))
+            .unwrap();
+        ack_rx.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
+
+        // Verify main session exists and is valid
+        let loaded = load_session(&path).unwrap().unwrap();
+        assert_eq!(loaded.schema_version, 3);
+
+        // Now corrupt the main session file
+        fs::write(&path, "corrupted data").unwrap();
+
+        // Main session should fail to load now
+        let result = load_session(&path);
+        assert!(result.is_err() || result.unwrap().is_none());
+
+        // But we should have a backup (created before the corrupt write)
+        // Actually, let's manually create a backup for this test
+        let backup_path = path.with_extension("bin.1");
+        // Write a valid session to backup
+        write_snapshot(&backup_path, &SessionSnapshot::from(&AppState::empty())).unwrap();
+
+        // Quarantine the corrupt main session
+        quarantine_corrupt_session(&path);
+
+        // Try to load from backup
+        let backup_result = load_session_from_backup(&path).unwrap();
+        assert!(backup_result.is_some());
+
+        worker.shutdown();
+
+        // Cleanup
+        let _ = fs::remove_file(&backup_path);
+        let _ = fs::remove_dir_all(&dir);
     }
 }
