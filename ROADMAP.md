@@ -108,8 +108,8 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 - Completed: Complete native menu support across supported desktop platforms.
 - Completed: Add macOS application bundle metadata, icon, and signing-ready packaging.
-- Add native file import/export commands without making files the primary
-  workflow.
+- Completed: Add native file import/export commands without making files the primary
+   workflow.
 - Add clipboard integration for rich/plain text where available.
 - Add drag-and-drop text/file import.
 - Add native preferences window for editor settings.

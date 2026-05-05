@@ -98,6 +98,10 @@ pub enum Command {
     ToggleIndentGuides,
     ToggleMinimap,
     ToggleTheme,
+
+    // File
+    ImportFile,
+    ExportFile,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -775,6 +779,27 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             description: "Switch between dark and light themes",
             category: View,
             shortcut: None,
+        },
+        // File commands
+        CommandMetadata {
+            command: ImportFile,
+            name: "Import File",
+            description: "Import text from a file into the current scratch buffer",
+            category: App,
+            shortcut: Some(KeyboardShortcut {
+                modifiers: Modifiers::COMMAND | Modifiers::SHIFT,
+                logical_key: Key::I,
+            }),
+        },
+        CommandMetadata {
+            command: ExportFile,
+            name: "Export File",
+            description: "Export the current scratch buffer content to a file",
+            category: App,
+            shortcut: Some(KeyboardShortcut {
+                modifiers: Modifiers::COMMAND | Modifiers::SHIFT,
+                logical_key: Key::E,
+            }),
         },
     ]
 }

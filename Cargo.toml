@@ -46,6 +46,7 @@ regex = "1.11"
 signal-hook = "0.3"
 
 muda = { version = "0.19.1", default-features = false, features = ["common-controls-v6"] }
+rfd = "0.16"
 
 [profile.release]
 codegen-units = 1

@@ -4,6 +4,8 @@ pub enum NativeMenuCommand {
     NewScratch,
     CloseScratch,
     RenameTab,
+    ImportFile,
+    ExportFile,
     Quit,
 
     // Edit
@@ -138,6 +140,8 @@ fn command_from_id(id: &str) -> Option<NativeMenuCommand> {
         "pile.new_scratch" => Some(NewScratch),
         "pile.close_scratch" => Some(CloseScratch),
         "pile.rename_tab" => Some(RenameTab),
+        "pile.import_file" => Some(ImportFile),
+        "pile.export_file" => Some(ExportFile),
         "pile.quit" => Some(Quit),
 
         // Edit
@@ -266,6 +270,18 @@ fn build_menu() -> muda::Result<muda::Menu> {
         true,
         Some(parse_accel("cmdorctrl+w")?),
     );
+    let import_file = MenuItem::with_id(
+        "pile.import_file",
+        "Import File...",
+        true,
+        Some(parse_accel("cmdorctrl+shift+i")?),
+    );
+    let export_file = MenuItem::with_id(
+        "pile.export_file",
+        "Export File...",
+        true,
+        Some(parse_accel("cmdorctrl+shift+e")?),
+    );
     let rename_tab = MenuItem::with_id("pile.rename_tab", "Rename Tab", true, None);
     let pin_tab = MenuItem::with_id("pile.pin_tab", "Pin/Unpin Tab", true, None);
 
@@ -273,6 +289,9 @@ fn build_menu() -> muda::Result<muda::Menu> {
     let file_items: &[&dyn muda::IsMenuItem] = &[
         &new_scratch,
         &close_scratch,
+        &PredefinedMenuItem::separator(),
+        &import_file,
+        &export_file,
         &PredefinedMenuItem::separator(),
         &rename_tab,
         &pin_tab,
@@ -282,6 +301,9 @@ fn build_menu() -> muda::Result<muda::Menu> {
     let file_items: &[&dyn muda::IsMenuItem] = &[
         &new_scratch,
         &close_scratch,
+        &PredefinedMenuItem::separator(),
+        &import_file,
+        &export_file,
         &PredefinedMenuItem::separator(),
         &rename_tab,
         &pin_tab,

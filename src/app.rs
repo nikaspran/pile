@@ -35,6 +35,8 @@ enum AppCommand {
     NewScratch,
     CloseScratch,
     RenameTab,
+    ImportFile,
+    ExportFile,
     Quit,
     Undo,
     Redo,
@@ -96,6 +98,8 @@ impl From<NativeMenuCommand> for AppCommand {
             NativeMenuCommand::NewScratch => Self::NewScratch,
             NativeMenuCommand::CloseScratch => Self::CloseScratch,
             NativeMenuCommand::RenameTab => Self::RenameTab,
+            NativeMenuCommand::ImportFile => Self::ImportFile,
+            NativeMenuCommand::ExportFile => Self::ExportFile,
             NativeMenuCommand::Quit => Self::Quit,
             NativeMenuCommand::Undo => Self::Undo,
             NativeMenuCommand::Redo => Self::Redo,
@@ -847,6 +851,8 @@ impl PileApp {
                 let active = self.state.active_document;
                 self.toggle_pin_tab(active);
             }
+            AppCommand::ImportFile => self.import_file(),
+            AppCommand::ExportFile => self.export_file(),
             AppCommand::MoveTabLeft => {
                 let active = self.state.active_document;
                 self.move_tab_left(active);
@@ -1082,6 +1088,10 @@ impl PileApp {
                 let settings_path = default_settings_path();
                 save_settings(&settings_path, &self.settings);
             }
+
+            // File operations
+            ImportFile => self.import_file(),
+            ExportFile => self.export_file(),
         }
     }
 
@@ -1269,6 +1279,28 @@ impl PileApp {
             self.close_pane();
         }
 
+        // Import file shortcut (Cmd+Shift+I)
+        let import_file = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::I,
+            })
+        });
+        if import_file {
+            self.import_file();
+        }
+
+        // Export file shortcut (Cmd+Shift+E)
+        let export_file = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::E,
+            })
+        });
+        if export_file {
+            self.export_file();
+        }
+
         // Go to line shortcut (Cmd+G)
         let goto_line = ctx.input_mut(|input| {
             input.consume_shortcut(&egui::KeyboardShortcut {
@@ -1322,6 +1354,64 @@ impl PileApp {
         self.mark_changed();
         self.refresh_active_document_metadata();
         self.editor_focus_pending = true;
+    }
+
+    fn import_file(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Import File")
+            .pick_file()
+        {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    if let Some(document) = self.state.active_document_mut() {
+                        let old_title = document.title_hint.clone();
+                        document.replace_text(&content);
+                        // Set tab name to file name
+                        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                            document.rename(file_name);
+                        }
+                        if document.title_hint != old_title {
+                            self.mark_changed();
+                        }
+                        self.document_edited();
+                    }
+                }
+                Err(err) => {
+                    tracing::error!(error = %err, path = %path.display(), "failed to import file");
+                }
+            }
+        }
+    }
+
+    fn export_file(&mut self) {
+        if let Some(document) = self.state.active_document() {
+            let content = document.text();
+            let suggested_name = document
+                .title_hint
+                .trim()
+                .strip_prefix("Scratch ")
+                .unwrap_or(&document.title_hint)
+                .to_owned();
+
+            if let Some(path) = rfd::FileDialog::new()
+                .set_title("Export File")
+                .set_file_name(if suggested_name.is_empty() {
+                    "untitled"
+                } else {
+                    &suggested_name
+                })
+                .save_file()
+            {
+                match std::fs::write(&path, content) {
+                    Ok(()) => {
+                        tracing::info!(path = %path.display(), "file exported successfully");
+                    }
+                    Err(err) => {
+                        tracing::error!(error = %err, path = %path.display(), "failed to export file");
+                    }
+                }
+            }
+        }
     }
 
     fn open_search(&mut self) {
