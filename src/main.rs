@@ -6,6 +6,7 @@ mod grammar_registry;
 mod model;
 mod native_menu;
 mod persistence;
+mod preferences;
 mod search;
 mod settings;
 mod stress_tests;

@@ -6,6 +6,7 @@ pub enum NativeMenuCommand {
     RenameTab,
     ImportFile,
     ExportFile,
+    Preferences,
     Quit,
 
     // Edit
@@ -142,6 +143,7 @@ fn command_from_id(id: &str) -> Option<NativeMenuCommand> {
         "pile.rename_tab" => Some(RenameTab),
         "pile.import_file" => Some(ImportFile),
         "pile.export_file" => Some(ExportFile),
+        "pile.preferences" => Some(Preferences),
         "pile.quit" => Some(Quit),
 
         // Edit
@@ -241,11 +243,19 @@ fn build_menu() -> muda::Result<muda::Menu> {
                 ..Default::default()
             }),
         );
+        let preferences = MenuItem::with_id(
+            "pile.preferences",
+            "Preferences...",
+            true,
+            Some(parse_accel("cmdorctrl+,")?),
+        );
         let app_menu = Submenu::with_items(
             "pile",
             true,
             &[
                 &about,
+                &PredefinedMenuItem::separator(),
+                &preferences,
                 &PredefinedMenuItem::separator(),
                 &PredefinedMenuItem::hide(None),
                 &PredefinedMenuItem::hide_others(None),
@@ -307,6 +317,8 @@ fn build_menu() -> muda::Result<muda::Menu> {
         &PredefinedMenuItem::separator(),
         &rename_tab,
         &pin_tab,
+        &PredefinedMenuItem::separator(),
+        &MenuItem::with_id("pile.preferences", "Preferences...", true, Some(parse_accel("cmdorctrl+,")?)),
         &PredefinedMenuItem::separator(),
         &PredefinedMenuItem::quit(None),
     ];

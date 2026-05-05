@@ -22,6 +22,7 @@ use crate::{
         default_session_path, default_settings_path, load_session,
         load_settings, quarantine_corrupt_session, save_settings,
     },
+    preferences::PreferencesState,
     search::{SearchMatch, SearchState},
     settings::Settings,
     syntax::LanguageDetection,
@@ -37,6 +38,7 @@ enum AppCommand {
     RenameTab,
     ImportFile,
     ExportFile,
+    Preferences,
     Quit,
     Undo,
     Redo,
@@ -100,6 +102,7 @@ impl From<NativeMenuCommand> for AppCommand {
             NativeMenuCommand::RenameTab => Self::RenameTab,
             NativeMenuCommand::ImportFile => Self::ImportFile,
             NativeMenuCommand::ExportFile => Self::ExportFile,
+            NativeMenuCommand::Preferences => Self::Preferences,
             NativeMenuCommand::Quit => Self::Quit,
             NativeMenuCommand::Undo => Self::Undo,
             NativeMenuCommand::Redo => Self::Redo,
@@ -205,6 +208,7 @@ pub struct PileApp {
     search: SearchState,
     command_palette: CommandPalette,
     tab_switcher: TabSwitcher,
+    preferences: PreferencesState,
     panes: Vec<EditorPane>,
     active_pane: usize,
     goto_line: GotoLineState,
@@ -329,6 +333,7 @@ impl PileApp {
             search: SearchState::default(),
             command_palette: CommandPalette::new(),
             tab_switcher: TabSwitcher::new(),
+            preferences: PreferencesState::new(),
             panes,
             active_pane,
             goto_line: GotoLineState::new(),
@@ -878,6 +883,7 @@ impl PileApp {
             }
             AppCommand::ImportFile => self.import_file(),
             AppCommand::ExportFile => self.export_file(),
+            AppCommand::Preferences => self.preferences.toggle(),
             AppCommand::MoveTabLeft => {
                 let active = self.state.active_document;
                 self.move_tab_left(active);
@@ -1117,6 +1123,7 @@ impl PileApp {
             // File operations
             ImportFile => self.import_file(),
             ExportFile => self.export_file(),
+            Preferences => self.preferences.toggle(),
         }
     }
 
@@ -2361,6 +2368,9 @@ impl eframe::App for PileApp {
         if let Some(document_id) = switch_to {
             self.set_active_document(document_id);
         }
+
+        // Show preferences window
+        self.preferences.show(ctx, &mut self.settings);
 
         // Apply pending clipboard text
         if let Some(text) = self.clipboard_text.take() {

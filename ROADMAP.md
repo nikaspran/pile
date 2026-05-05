@@ -112,7 +112,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
    workflow.
 - Completed: Add clipboard integration for rich/plain text where available.
 - Completed: Add drag-and-drop text/file import.
-- Add native preferences window for editor settings.
+- Completed: Add native preferences window for editor settings.
 - Add per-platform keyboard shortcut conventions.
 - Add window state restore: size, position, fullscreen, and display.
 

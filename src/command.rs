@@ -102,6 +102,7 @@ pub enum Command {
     // File
     ImportFile,
     ExportFile,
+    Preferences,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -779,6 +780,16 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             description: "Switch between dark and light themes",
             category: View,
             shortcut: None,
+        },
+        CommandMetadata {
+            command: Preferences,
+            name: "Preferences",
+            description: "Open the preferences window",
+            category: View,
+            shortcut: Some(KeyboardShortcut {
+                modifiers: Modifiers::COMMAND,
+                logical_key: Key::Comma,
+            }),
         },
         // File commands
         CommandMetadata {
