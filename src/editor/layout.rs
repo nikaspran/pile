@@ -42,12 +42,16 @@ impl TextLayoutPipeline {
         available_height: f32,
         wrap_mode: crate::settings::WrapMode,
         rulers: &[usize],
+        font_family: &crate::settings::FontFamily,
+        font_size: f32,
+        line_height_scale: f32,
     ) -> Self {
         let line_count = visual_line_count(rope);
         let line_digits = decimal_digits(line_count);
-        let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
-        let font_id = egui::TextStyle::Monospace.resolve(ui.style());
+        let base_row_height = ui.text_style_height(&egui::TextStyle::Monospace);
+        let font_id = egui::FontId::new(font_size, font_family.to_egui());
         let char_width = monospace_char_width(ui, font_id.clone());
+        let row_height = base_row_height * line_height_scale;
         let gutter_width =
             (line_digits as f32 * 8.0 + super::LINE_GUTTER_PADDING * 2.0).max(super::LINE_GUTTER_MIN_WIDTH);
         let text_origin_x = gutter_width + super::LINE_GUTTER_PADDING;

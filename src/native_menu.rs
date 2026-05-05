@@ -61,6 +61,7 @@ pub enum NativeMenuCommand {
     ToggleVisibleWhitespace,
     ToggleIndentGuides,
     ToggleMinimap,
+    ToggleStatusBar,
     ToggleTheme,
     GoToLine,
 
@@ -198,6 +199,7 @@ fn command_from_id(id: &str) -> Option<NativeMenuCommand> {
         "pile.toggle_whitespace" => Some(ToggleVisibleWhitespace),
         "pile.toggle_indent" => Some(ToggleIndentGuides),
         "pile.toggle_minimap" => Some(ToggleMinimap),
+        "pile.toggle_status_bar" => Some(ToggleStatusBar),
         "pile.toggle_theme" => Some(ToggleTheme),
         "pile.go_to_line" => Some(GoToLine),
 
@@ -636,6 +638,7 @@ fn build_menu() -> muda::Result<muda::Menu> {
         None,
     );
     let toggle_minimap = MenuItem::with_id("pile.toggle_minimap", "Toggle Minimap", true, None);
+    let toggle_status_bar = MenuItem::with_id("pile.toggle_status_bar", "Toggle Status Bar", true, None);
     let toggle_theme = MenuItem::with_id("pile.toggle_theme", "Toggle Theme", true, None);
 
     let view_menu = Submenu::with_items(
@@ -649,6 +652,7 @@ fn build_menu() -> muda::Result<muda::Menu> {
             &toggle_whitespace,
             &toggle_indent,
             &toggle_minimap,
+            &toggle_status_bar,
             &PredefinedMenuItem::separator(),
             &toggle_theme,
         ],

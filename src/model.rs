@@ -27,7 +27,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn empty() -> Self {
-        let document = Document::new_untitled(1);
+        let document = Document::new_untitled(1, 4, true);
         let active_document = document.id;
 
         Self {
@@ -55,7 +55,7 @@ impl AppState {
             if let Some(document) = self.documents.first() {
                 self.tab_order.push(document.id);
             } else {
-                let document = Document::new_untitled(self.next_untitled_index);
+                let document = Document::new_untitled(self.next_untitled_index, 4, true);
                 self.next_untitled_index += 1;
                 self.documents.push(document);
                 self.tab_order.push(self.documents[0].id);
@@ -101,11 +101,11 @@ impl AppState {
             .find(|document| document.id == document_id)
     }
 
-    pub fn open_untitled(&mut self) -> DocumentId {
+    pub fn open_untitled(&mut self, default_tab_width: usize, default_soft_tabs: bool) -> DocumentId {
         let index = self.next_untitled_index;
         self.next_untitled_index += 1;
 
-        let document = Document::new_untitled(index);
+        let document = Document::new_untitled(index, default_tab_width, default_soft_tabs);
         let id = document.id;
 
         self.documents.push(document);
@@ -115,7 +115,7 @@ impl AppState {
         id
     }
 
-    pub fn close_active(&mut self) {
+    pub fn close_active(&mut self, default_tab_width: usize, default_soft_tabs: bool) {
         if self.documents.len() <= 1 {
             if let Some(document) = self.active_document_mut() {
                 document.replace_text("");
@@ -128,7 +128,7 @@ impl AppState {
         self.tab_order.retain(|id| *id != old_active);
         self.recent_order.retain(|id| *id != old_active);
         self.active_document = self.tab_order.first().copied().unwrap_or_else(|| {
-            let document = Document::new_untitled(self.next_untitled_index);
+            let document = Document::new_untitled(self.next_untitled_index, default_tab_width, default_soft_tabs);
             let id = document.id;
             self.next_untitled_index += 1;
             self.documents.push(document);
@@ -229,7 +229,7 @@ mod rope_serde {
 }
 
 impl Document {
-    pub fn new_untitled(_index: u64) -> Self {
+    pub fn new_untitled(_index: u64, default_tab_width: usize, default_soft_tabs: bool) -> Self {
         Self {
             id: Uuid::new_v4(),
             title_hint: String::new(),
@@ -240,8 +240,8 @@ impl Document {
             occurrence_selections: Vec::new(),
             multi_cursor_query: None,
             undo: UndoState::default(),
-            tab_width: 4,
-            use_soft_tabs: true,
+            tab_width: default_tab_width,
+            use_soft_tabs: default_soft_tabs,
             pinned: false,
             bookmarks: BTreeSet::new(),
             syntax_state: DocumentSyntaxState::new(),
@@ -693,18 +693,18 @@ mod tests {
     fn opens_and_closes_scratch_documents_without_losing_last_buffer() {
         let mut state = AppState::empty();
         let first = state.active_document;
-        let second = state.open_untitled();
+        let second = state.open_untitled(4, true);
 
         assert_ne!(first, second);
         assert_eq!(state.documents.len(), 2);
         assert_eq!(state.active_document, second);
 
-        state.close_active();
+        state.close_active(4, true);
 
         assert_eq!(state.documents.len(), 1);
         assert_eq!(state.active_document, first);
 
-        state.close_active();
+        state.close_active(4, true);
 
         assert_eq!(state.documents.len(), 1);
         assert_eq!(state.active_document, first);
@@ -718,7 +718,7 @@ mod tests {
         assert!(!state.set_active(Uuid::new_v4()));
         assert_eq!(state.active_document, active);
 
-        let second = state.open_untitled();
+        let second = state.open_untitled(4, true);
         assert!(state.set_active(active));
         assert_eq!(state.active_document, active);
         assert!(state.set_active(second));
@@ -727,7 +727,7 @@ mod tests {
 
     #[test]
     fn document_title_tracks_first_non_empty_line_until_renamed() {
-        let mut document = Document::new_untitled(1);
+        let mut document = Document::new_untitled(1, 4, true);
         assert_eq!(document.display_title(), "Untitled");
 
         document.replace_text("\n  First real line  \nSecond line");
@@ -745,7 +745,7 @@ mod tests {
 
     #[test]
     fn document_edit_replaces_range_and_records_undo() {
-        let mut document = Document::new_untitled(1);
+        let mut document = Document::new_untitled(1, 4, true);
         document.replace_text("hello world");
         document.revision = 0;
         let selection = Selection {
@@ -766,7 +766,7 @@ mod tests {
 
     #[test]
     fn continuing_edits_share_undo_group_until_committed() {
-        let mut document = Document::new_untitled(1);
+        let mut document = Document::new_untitled(1, 4, true);
 
         document.apply_continuing_edit(DocumentEdit::replace_selection(
             Selection::caret(0),
@@ -787,7 +787,7 @@ mod tests {
 
     #[test]
     fn full_document_replacement_records_single_undo_step() {
-        let mut document = Document::new_untitled(1);
+        let mut document = Document::new_untitled(1, 4, true);
         document.replace_text("one\ntwo");
         document.revision = 0;
         let original = document.text();
@@ -929,7 +929,7 @@ mod tests {
 
     #[test]
     fn multi_edit_creates_single_undo_group() {
-        let mut document = Document::new_untitled(1);
+        let mut document = Document::new_untitled(1, 4, true);
         document.replace_text("hello world");
         document.revision = 0;
 
@@ -961,7 +961,7 @@ mod tests {
 
     #[test]
     fn multi_edit_undo_single_edit() {
-        let mut document = Document::new_untitled(1);
+        let mut document = Document::new_untitled(1, 4, true);
         document.replace_text("hello");
         document.revision = 0;
 
@@ -983,7 +983,7 @@ mod tests {
 
     #[test]
     fn multi_edit_undo_restores_all_selections() {
-        let mut document = Document::new_untitled(1);
+        let mut document = Document::new_untitled(1, 4, true);
         document.replace_text("a b c");
         document.revision = 0;
 
@@ -1067,7 +1067,7 @@ mod tests {
 
     #[test]
     fn document_validate_clamps_selections() {
-        let mut doc = Document::new_untitled(1);
+        let mut doc = Document::new_untitled(1, 4, true);
         doc.replace_text("hello");
         let len = doc.rope.byte_len();
 
@@ -1086,7 +1086,7 @@ mod tests {
 
     #[test]
     fn document_validate_fixes_scroll_and_tab_width() {
-        let mut doc = Document::new_untitled(1);
+        let mut doc = Document::new_untitled(1, 4, true);
 
         doc.scroll = ScrollState { x: -5.0, y: -10.0 };
         doc.tab_width = 0;

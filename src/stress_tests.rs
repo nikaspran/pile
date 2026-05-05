@@ -21,7 +21,7 @@ mod tests {
 
     // Helper to create a test document
     fn make_document(text: &str) -> Document {
-        let mut document = Document::new_untitled(1);
+        let mut document = Document::new_untitled(1, 4, true);
         document.replace_text(text);
         document.selections = vec![Selection { anchor: 0, head: 0 }];
         document.revision = 0;
@@ -31,7 +31,7 @@ mod tests {
     // Helper to create many documents using open_untitled pattern
     fn create_many_documents(state: &mut AppState, count: usize) {
         for _ in 0..count {
-            let doc_id = state.open_untitled();
+            let doc_id = state.open_untitled(4, true);
             if let Some(doc) = state.document_mut(doc_id) {
                 doc.replace_text("Document content");
             }

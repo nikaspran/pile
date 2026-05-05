@@ -81,6 +81,7 @@ enum AppCommand {
     ToggleVisibleWhitespace,
     ToggleIndentGuides,
     ToggleMinimap,
+    ToggleStatusBar,
     ToggleTheme,
     GoToLine,
     ToggleBookmark,
@@ -145,6 +146,7 @@ impl From<NativeMenuCommand> for AppCommand {
             NativeMenuCommand::ToggleVisibleWhitespace => Self::ToggleVisibleWhitespace,
             NativeMenuCommand::ToggleIndentGuides => Self::ToggleIndentGuides,
             NativeMenuCommand::ToggleMinimap => Self::ToggleMinimap,
+            NativeMenuCommand::ToggleStatusBar => Self::ToggleStatusBar,
             NativeMenuCommand::ToggleTheme => Self::ToggleTheme,
             NativeMenuCommand::GoToLine => Self::GoToLine,
             NativeMenuCommand::ToggleBookmark => Self::ToggleBookmark,
@@ -232,6 +234,10 @@ impl PileApp {
 
         let session_path = default_session_path();
 
+        // Load settings first so we can use them during state initialization
+        let settings_path = default_settings_path();
+        let settings = load_settings(&settings_path);
+
         let mut telemetry = SaveTelemetry::default();
         let (mut state, saved_panes) = match load_session(&session_path, &mut telemetry) {
             Ok(Some(mut snapshot)) => {
@@ -274,7 +280,7 @@ impl PileApp {
 
             if valid_panes.is_empty() {
                 // All saved panes were invalid, create a new document
-                state.open_untitled();
+                state.open_untitled(settings.default_tab_width, settings.default_soft_tabs);
                 (vec![EditorPane::new(state.active_document)], 0)
             } else {
                 let panes: Vec<EditorPane> = valid_panes
@@ -299,16 +305,14 @@ impl PileApp {
         } else {
             // No saved panes - ensure we have at least one document
             if state.documents.is_empty() {
-                state.open_untitled();
+                state.open_untitled(settings.default_tab_width, settings.default_soft_tabs);
             }
             (vec![EditorPane::new(state.active_document)], 0)
         };
 
-        let settings_path = default_settings_path();
-        let settings = load_settings(&settings_path);
-
-        // Apply the loaded theme
+        // Apply the loaded theme and font settings
         apply_theme(&ctx, settings.theme);
+        crate::settings::apply_font_settings(&ctx, &settings.font_family, settings.font_size, settings.line_height_scale);
 
         info!(
             documents = state.documents.len(),
@@ -377,11 +381,31 @@ impl PileApp {
     }
 
     fn refresh_active_document_detection(&mut self) {
-        self.last_detection = self
+        let mut detection = self
             .state
             .active_document()
             .map(|document| self.syntax.detect_rope(&document.rope))
             .unwrap_or_else(|| self.syntax.detect(""));
+        
+        // Override detection if language is in ignored list
+        let lang_name = match detection.language {
+            crate::syntax::LanguageId::PlainText => "PlainText",
+            crate::syntax::LanguageId::Markdown => "Markdown",
+            crate::syntax::LanguageId::Rust => "Rust",
+            crate::syntax::LanguageId::JavaScript => "JavaScript",
+            crate::syntax::LanguageId::TypeScript => "TypeScript",
+            crate::syntax::LanguageId::Python => "Python",
+            crate::syntax::LanguageId::Json => "Json",
+            crate::syntax::LanguageId::Toml => "Toml",
+            crate::syntax::LanguageId::Yaml => "Yaml",
+            crate::syntax::LanguageId::Bash => "Bash",
+        };
+        if self.settings.ignored_languages.contains(&lang_name.to_string()) {
+            detection.language = crate::syntax::LanguageId::PlainText;
+            detection.confidence = 0.0;
+        }
+        
+        self.last_detection = detection;
     }
 
     fn refresh_active_document_metadata(&mut self) {
@@ -515,7 +539,7 @@ impl PileApp {
 
     fn new_scratch(&mut self) {
         self.commit_rename();
-        self.state.open_untitled();
+        self.state.open_untitled(self.settings.default_tab_width, self.settings.default_soft_tabs);
         // Update the active pane to point to the new document
         if let Some(pane) = self.panes.get_mut(self.active_pane) {
             pane.document_id = self.state.active_document;
@@ -866,6 +890,7 @@ impl PileApp {
             AppCommand::ToggleVisibleWhitespace => self.handle_command(crate::command::Command::ToggleVisibleWhitespace),
             AppCommand::ToggleIndentGuides => self.handle_command(crate::command::Command::ToggleIndentGuides),
             AppCommand::ToggleMinimap => self.handle_command(crate::command::Command::ToggleMinimap),
+            AppCommand::ToggleStatusBar => self.handle_command(crate::command::Command::ToggleStatusBar),
             AppCommand::ToggleTheme => self.handle_command(crate::command::Command::ToggleTheme),
             AppCommand::GoToLine => {
                 self.goto_line.visible = true;
@@ -1110,6 +1135,11 @@ impl PileApp {
             }
             ToggleMinimap => {
                 self.settings.show_minimap = !self.settings.show_minimap;
+                let settings_path = default_settings_path();
+                save_settings(&settings_path, &self.settings);
+            }
+            ToggleStatusBar => {
+                self.settings.show_status_bar = !self.settings.show_status_bar;
                 let settings_path = default_settings_path();
                 save_settings(&settings_path, &self.settings);
             }
@@ -1376,7 +1406,7 @@ impl PileApp {
     fn close_active_scratch(&mut self) {
         self.commit_rename();
         let old_active = self.state.active_document;
-        self.state.close_active();
+        self.state.close_active(self.settings.default_tab_width, self.settings.default_soft_tabs);
         // Update any panes that were pointing to the closed document
         for pane in &mut self.panes {
             if pane.document_id == old_active {
@@ -1402,7 +1432,7 @@ impl PileApp {
             Ok(content) => {
                 // Create a new document for the dropped file
                 let index = self.state.next_untitled_index;
-                let mut doc = Document::new_untitled(index);
+                let mut doc = Document::new_untitled(index, self.settings.default_tab_width, self.settings.default_soft_tabs);
                 self.state.next_untitled_index += 1;
                 doc.rope = crop::Rope::from(content);
                 doc.revision += 1;
@@ -1991,7 +2021,7 @@ impl PileApp {
         // Ensure the document exists; if not, create a new one
         if self.state.document(pane.document_id).is_none() {
             tracing::warn!(?pane.document_id, pane_index, "document not found, creating new one");
-            self.state.open_untitled();
+            self.state.open_untitled(self.settings.default_tab_width, self.settings.default_soft_tabs);
             pane.document_id = self.state.active_document;
         }
 
@@ -2090,6 +2120,9 @@ impl PileApp {
                                 self.settings.show_visible_whitespace,
                                 self.settings.show_indentation_guides,
                                 self.settings.theme,
+                                &self.settings.font_family,
+                                self.settings.font_size,
+                                self.settings.line_height_scale,
                             )
                         },
                     )
@@ -2159,6 +2192,9 @@ impl PileApp {
                 self.settings.show_visible_whitespace,
                 self.settings.show_indentation_guides,
                 self.settings.theme,
+                &self.settings.font_family,
+                self.settings.font_size,
+                self.settings.line_height_scale,
             );
 
             if response.changed {
@@ -2234,82 +2270,84 @@ impl eframe::App for PileApp {
             });
         });
 
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            if self.search.visible {
-                self.render_search_bar(ui);
-                if self.search.preview_visible && !self.search.preview_items.is_empty() {
+        if self.settings.show_status_bar {
+            egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+                if self.search.visible {
+                    self.render_search_bar(ui);
+                    if self.search.preview_visible && !self.search.preview_items.is_empty() {
+                        ui.separator();
+                        self.render_search_preview(ui);
+                    }
                     ui.separator();
-                    self.render_search_preview(ui);
                 }
-                ui.separator();
-            }
 
-            if self.goto_line.visible {
-                self.render_goto_line_bar(ui);
-                ui.separator();
-            }
+                if self.goto_line.visible {
+                    self.render_goto_line_bar(ui);
+                    ui.separator();
+                }
 
-            // Show recovery events as dismissable toasts
-            let mut dismissed = None;
-            for (idx, event) in self.recovery_events.iter().enumerate() {
-                let color = match event.kind {
-                    RecoveryEventKind::SaveFailed
-                    | RecoveryEventKind::QuarantineFailed
-                    | RecoveryEventKind::BackupFailed => egui::Color32::from_rgb(255, 120, 120),
-                    RecoveryEventKind::SessionCorrupt => egui::Color32::from_rgb(255, 180, 50),
-                    _ => egui::Color32::from_rgb(120, 200, 120),
-                };
+                // Show recovery events as dismissable toasts
+                let mut dismissed = None;
+                for (idx, event) in self.recovery_events.iter().enumerate() {
+                    let color = match event.kind {
+                        RecoveryEventKind::SaveFailed
+                        | RecoveryEventKind::QuarantineFailed
+                        | RecoveryEventKind::BackupFailed => egui::Color32::from_rgb(255, 120, 120),
+                        RecoveryEventKind::SessionCorrupt => egui::Color32::from_rgb(255, 180, 50),
+                        _ => egui::Color32::from_rgb(120, 200, 120),
+                    };
+                    ui.horizontal(|ui| {
+                        ui.colored_label(color, &event.message);
+                        if ui.small_button("×").clicked() {
+                            dismissed = Some(idx);
+                        }
+                    });
+                }
+                if let Some(idx) = dismissed {
+                    self.recovery_events.remove(idx);
+                }
+
                 ui.horizontal(|ui| {
-                    ui.colored_label(color, &event.message);
-                    if ui.small_button("×").clicked() {
-                        dismissed = Some(idx);
+                    let (lang, confidence) =
+                        (self.last_detection.language, self.last_detection.confidence);
+                    let has_parse_errors = self
+                        .state
+                        .active_document()
+                        .map_or(false, |doc| doc.syntax_state.has_parse_errors());
+                    let low_confidence = confidence < 0.5;
+
+                    let lang_text = format!("{lang:?} ({confidence:.0}%)");
+                    let response = ui.label(lang_text);
+                    if low_confidence {
+                        response.highlight();
+                    }
+                    if has_parse_errors {
+                        ui.label(
+                            egui::RichText::new("⚠ parse issues")
+                                .color(egui::Color32::from_rgb(255, 180, 50)),
+                        );
+                    }
+
+                    ui.separator();
+                    let byte_len = self
+                        .state
+                        .active_document()
+                        .map(|document| document.rope.byte_len())
+                        .unwrap_or_default();
+                    ui.label(format!("{byte_len} bytes"));
+
+                    // Telemetry summary
+                    ui.separator();
+                    ui.label(format!(
+                        "saves: {}/{}",
+                        self.telemetry.successful_saves, self.telemetry.total_saves
+                    ));
+                    if let Some(dur) = self.telemetry.last_save_duration_ms {
+                        ui.label(format!("last: {}ms", dur));
                     }
                 });
-            }
-            if let Some(idx) = dismissed {
-                self.recovery_events.remove(idx);
-            }
-
-            ui.horizontal(|ui| {
-                let (lang, confidence) =
-                    (self.last_detection.language, self.last_detection.confidence);
-                let has_parse_errors = self
-                    .state
-                    .active_document()
-                    .map_or(false, |doc| doc.syntax_state.has_parse_errors());
-                let low_confidence = confidence < 0.5;
-
-                let lang_text = format!("{lang:?} ({confidence:.0}%)");
-                let response = ui.label(lang_text);
-                if low_confidence {
-                    response.highlight();
-                }
-                if has_parse_errors {
-                    ui.label(
-                        egui::RichText::new("⚠ parse issues")
-                            .color(egui::Color32::from_rgb(255, 180, 50)),
-                    );
-                }
-
-                ui.separator();
-                let byte_len = self
-                    .state
-                    .active_document()
-                    .map(|document| document.rope.byte_len())
-                    .unwrap_or_default();
-                ui.label(format!("{byte_len} bytes"));
-
-                // Telemetry summary
-                ui.separator();
-                ui.label(format!(
-                    "saves: {}/{}",
-                    self.telemetry.successful_saves, self.telemetry.total_saves
-                ));
-                if let Some(dur) = self.telemetry.last_save_duration_ms {
-                    ui.label(format!("last: {}ms", dur));
-                }
             });
-        });
+        }
 
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(&ctx.style()).inner_margin(0.0))

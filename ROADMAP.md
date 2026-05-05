@@ -118,13 +118,13 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 ## Settings and Customization
 
-- Add persisted settings separate from hot-exit session state.
-- Add font family, font size, line height, tab width, and wrap settings.
-- Add theme selection.
-- Add keybinding configuration.
-- Add ignored grammar/language preferences for content detection.
-- Add status bar visibility and minimap visibility settings.
-- Add command palette entries for toggles.
+- Completed: Add persisted settings separate from hot-exit session state.
+- Completed: Add font family, font size, line height, tab width, and wrap settings.
+- Completed: Add theme selection.
+- Completed: Add keybinding configuration.
+- Completed: Add ignored grammar/language preferences for content detection.
+- Completed: Add status bar visibility and minimap visibility settings.
+- Completed: Add command palette entries for toggles.
 
 ## Performance Work
 

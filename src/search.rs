@@ -754,11 +754,11 @@ mod tests {
 
     #[test]
     fn find_matches_in_documents_finds_across_tabs() {
-        let mut doc1 = crate::model::Document::new_untitled(1);
+        let mut doc1 = crate::model::Document::new_untitled(1, 4, true);
         doc1.rope = Rope::from("hello world");
         doc1.title_hint = "Doc 1".to_owned();
 
-        let mut doc2 = crate::model::Document::new_untitled(2);
+        let mut doc2 = crate::model::Document::new_untitled(2, 4, true);
         doc2.rope = Rope::from("foo hello bar");
         doc2.title_hint = "Doc 2".to_owned();
 

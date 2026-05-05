@@ -939,7 +939,7 @@ mod tests {
         // Add documents with large content to exceed 50 MB
         let large_content = "x".repeat(10_000_000); // 10 MB each
         for i in 0..6 {
-            let mut doc = crate::model::Document::new_untitled(i as u64 + 100);
+            let mut doc = crate::model::Document::new_untitled(i as u64 + 100, 4, true);
             doc.replace_text(&large_content);
             state.documents.push(doc);
             state.tab_order.push(state.documents.last().unwrap().id);

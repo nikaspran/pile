@@ -6,7 +6,7 @@ use regex::Regex;
 use crate::search::SearchMatch;
 
 fn document(text: &str) -> Document {
-    let mut document = Document::new_untitled(1);
+    let mut document = Document::new_untitled(1, 4, true);
     document.replace_text(text);
     document.selections = vec![Selection::caret(0)];
     document.revision = 0;

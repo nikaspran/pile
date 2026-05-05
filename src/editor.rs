@@ -167,6 +167,9 @@ pub fn show_editor(
     show_visible_whitespace: bool,
     show_indentation_guides: bool,
     theme: crate::settings::Theme,
+    font_family: &crate::settings::FontFamily,
+    font_size: f32,
+    line_height_scale: f32,
 ) -> EditorResponse {
     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
     clamp_primary_selection(document);
@@ -199,6 +202,9 @@ pub fn show_editor(
             available_height,
             wrap_mode,
             rulers,
+            font_family,
+            font_size,
+            line_height_scale,
         );
         view_state.cached_layout = Some((
             document.revision,
@@ -221,6 +227,9 @@ pub fn show_editor(
                 available_height,
                 wrap_mode,
                 rulers,
+                font_family,
+                font_size,
+                line_height_scale,
             )
         });
 

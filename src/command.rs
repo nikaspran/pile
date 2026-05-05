@@ -97,6 +97,7 @@ pub enum Command {
     ToggleVisibleWhitespace,
     ToggleIndentGuides,
     ToggleMinimap,
+    ToggleStatusBar,
     ToggleTheme,
 
     // File
@@ -869,6 +870,13 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             command: ToggleMinimap,
             name: "Toggle Minimap",
             description: "Toggle minimap with viewport indicator",
+            category: View,
+            shortcut: None,
+        },
+        CommandMetadata {
+            command: ToggleStatusBar,
+            name: "Toggle Status Bar",
+            description: "Toggle status bar at the bottom of the window",
             category: View,
             shortcut: None,
         },
