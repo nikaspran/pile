@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::model::{AppState, Document, Selection, SessionSnapshot};
+    use crate::model::{AppState, Document, DocumentEdit, Selection, SessionSnapshot};
     use crate::persistence::{SaveWorker, SaveMsg, SaveTelemetry, load_session, SessionEnvelope};
     use crossbeam_channel::bounded;
     use std::fs;
@@ -296,6 +296,217 @@ mod tests {
         worker.shutdown();
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // --- Large Buffer Tests (Megabyte and Multi-Megabyte) ---
+
+    #[test]
+    fn large_buffer_20mb_load() {
+        // Generate ~20MB of text
+        let text = large_text(200000, 100); // ~20MB
+        assert!(text.len() > 20_000_000, "Expected >20MB, got {} bytes", text.len());
+
+        let start = Instant::now();
+        let doc = make_document(&text);
+        let elapsed = start.elapsed();
+
+        assert_eq!(doc.text().len(), text.len());
+        assert!(elapsed < Duration::from_secs(5), "Loading 20MB buffer took {:?}", elapsed);
+    }
+
+    #[test]
+    fn large_buffer_50mb_load() {
+        // Generate ~50MB of text
+        let text = large_text(500000, 100); // ~50MB
+        assert!(text.len() > 50_000_000, "Expected >50MB, got {} bytes", text.len());
+
+        let start = Instant::now();
+        let doc = make_document(&text);
+        let elapsed = start.elapsed();
+
+        assert_eq!(doc.text().len(), text.len());
+        assert!(elapsed < Duration::from_secs(10), "Loading 50MB buffer took {:?}", elapsed);
+    }
+
+    #[test]
+    fn large_buffer_100mb_load() {
+        // Generate ~100MB of text
+        let text = large_text(1000000, 100); // ~100MB
+        assert!(text.len() > 100_000_000, "Expected >100MB, got {} bytes", text.len());
+
+        let start = Instant::now();
+        let doc = make_document(&text);
+        let elapsed = start.elapsed();
+
+        assert_eq!(doc.text().len(), text.len());
+        assert!(elapsed < Duration::from_secs(15), "Loading 100MB buffer took {:?}", elapsed);
+    }
+
+    #[test]
+    fn large_buffer_20mb_edit_scattered() {
+        let text = large_text(200000, 100); // ~20MB
+        let mut doc = make_document(&text);
+        let rope_len = doc.rope.byte_len();
+
+        let start = Instant::now();
+        // Perform 100 edits scattered throughout the 20MB buffer
+        for i in 0..100 {
+            let pos = (i * rope_len / 100).min(rope_len.saturating_sub(1));
+            let edit = DocumentEdit {
+                range: pos..pos + 1.min(rope_len - pos),
+                inserted_text: format!("EDIT{}", i),
+                selections_before: vec![Selection { anchor: pos, head: pos }],
+                selections_after: vec![Selection { anchor: pos + format!("EDIT{}", i).len(), head: pos + format!("EDIT{}", i).len() }],
+            };
+            doc.apply_edit(edit);
+        }
+        let elapsed = start.elapsed();
+
+        assert!(doc.rope.byte_len() > text.len(), "Buffer should be larger after edits");
+        assert!(elapsed < Duration::from_secs(10), "Editing 20MB buffer took {:?}", elapsed);
+    }
+
+    #[test]
+    fn large_buffer_50mb_undo_redo() {
+        let text = large_text(500000, 100); // ~50MB
+        let mut doc = make_document(&text);
+
+        let start = Instant::now();
+        // Perform 50 edits then undo/redo them
+        for i in 0..50 {
+            let pos = (i * 1000) % doc.rope.byte_len().max(1);
+            let edit = DocumentEdit {
+                range: pos..pos + 1.min(doc.rope.byte_len() - pos),
+                inserted_text: "X".to_string(),
+                selections_before: vec![Selection { anchor: pos, head: pos }],
+                selections_after: vec![Selection { anchor: pos + 1, head: pos + 1 }],
+            };
+            doc.apply_edit(edit);
+        }
+
+        // Undo all
+        for _ in 0..50 {
+            doc.undo();
+        }
+
+        // Redo all
+        for _ in 0..50 {
+            doc.redo();
+        }
+
+        let elapsed = start.elapsed();
+        assert!(elapsed < Duration::from_secs(15), "Undo/redo on 50MB buffer took {:?}", elapsed);
+    }
+
+    #[test]
+    fn large_buffer_20mb_line_iteration() {
+        let text = large_text(200000, 100); // ~20MB
+        let doc = make_document(&text);
+
+        let start = Instant::now();
+        let mut line_count = 0;
+        for line in doc.rope.lines() {
+            let _ = line; // Iterate without materializing
+            line_count += 1;
+            if line_count > 1000 {
+                break; // Don't iterate all lines in test
+            }
+        }
+        let elapsed = start.elapsed();
+
+        assert!(line_count > 1000);
+        assert!(elapsed < Duration::from_secs(2), "Line iteration on 20MB took {:?}", elapsed);
+    }
+
+    #[test]
+    fn large_buffer_50mb_search() {
+        let text = large_text(500000, 100); // ~50MB
+        let doc = make_document(&text);
+
+        let start = Instant::now();
+        // Search for a pattern that exists in the text
+        let search_pattern = regex::Regex::new(r"Line\s+\d+").unwrap();
+        let mut match_count = 0;
+        for line in doc.rope.lines().take(10000) {
+            if search_pattern.is_match(&line.to_string()) {
+                match_count += 1;
+            }
+        }
+        let elapsed = start.elapsed();
+
+        assert!(match_count > 0, "Should find matches in generated text");
+        assert!(elapsed < Duration::from_secs(5), "Search on 50MB buffer took {:?}", elapsed);
+    }
+
+    #[test]
+    fn large_buffer_20mb_syntax_detection() {
+        let text = large_text(200000, 100); // ~20MB
+        let doc = make_document(&text);
+
+        let start = Instant::now();
+        let detection = doc.detect_syntax();
+        let elapsed = start.elapsed();
+
+        // Should complete without timeout
+        assert!(elapsed < Duration::from_secs(5), "Syntax detection on 20MB took {:?}", elapsed);
+        // Detection may or may not succeed on generated text, just ensure no panic
+        let _ = detection;
+    }
+
+    #[test]
+    fn large_buffer_50mb_session_roundtrip() {
+        let text = large_text(500000, 100); // ~50MB
+        let mut state = AppState::empty();
+        if let Some(doc) = state.active_document_mut() {
+            doc.replace_text(&text);
+        }
+
+        let start = Instant::now();
+        let snapshot = SessionSnapshot::from(&state);
+        let envelope = SessionEnvelope::wrap(&snapshot).unwrap();
+        let loaded = SessionEnvelope::open(envelope).unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(loaded.state.documents.len(), 1);
+        assert!(loaded.state.documents[0].rope.byte_len() > 50_000_000);
+        assert!(elapsed < Duration::from_secs(30), "Session roundtrip for 50MB took {:?}", elapsed);
+    }
+
+    #[test]
+    fn large_buffer_20mb_multiple_selections() {
+        let text = large_text(200000, 100); // ~20MB
+        let mut doc = make_document(&text);
+        let rope_len = doc.rope.byte_len();
+
+        let start = Instant::now();
+        // Create 100 selections scattered throughout the buffer
+        let mut selections = Vec::new();
+        for i in 0..100 {
+            let pos = (i * rope_len / 100).min(rope_len.saturating_sub(10));
+            selections.push(Selection { anchor: pos, head: (pos + 5).min(rope_len) });
+        }
+        doc.selections = selections.clone();
+        let elapsed = start.elapsed();
+
+        assert_eq!(doc.selections.len(), 100);
+        assert!(elapsed < Duration::from_secs(2), "Multiple selections on 20MB took {:?}", elapsed);
+    }
+
+    #[test]
+    fn large_buffer_100mb_memory_usage() {
+        // Test that we can create and hold a 100MB buffer without OOM
+        let text = large_text(1000000, 100); // ~100MB
+        assert!(text.len() > 100_000_000);
+
+        let start = Instant::now();
+        let doc = make_document(&text);
+        // Force some operations to ensure buffer is real
+        let _slice = doc.rope.byte_slice(0..100.min(doc.rope.byte_len()));
+        let _len = doc.rope.byte_len();
+        let elapsed = start.elapsed();
+
+        assert_eq!(doc.rope.byte_len(), text.len());
+        assert!(elapsed < Duration::from_secs(20), "100MB buffer creation took {:?}", elapsed);
     }
 
     // --- Combined Stress Tests ---
