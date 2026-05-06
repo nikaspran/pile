@@ -128,7 +128,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 ## Performance Work
 
-- Establish benchmarks for editing latency, startup restore time, syntax parse
+- Completed: Establish benchmarks for editing latency, startup restore time, syntax parse
   time, search time, and memory use.
 - Add large-buffer tests for megabyte and multi-megabyte scratch documents.
 - Avoid full-buffer string conversion in render and edit paths.

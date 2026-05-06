@@ -42,6 +42,14 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 regex = "1.11"
 
+[dev-dependencies]
+criterion = "0.5"
+rand = "0.9"
+
+[[bench]]
+name = "benchmarks"
+harness = false
+
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
 
