@@ -126,11 +126,13 @@ pub(super) fn previous_grapheme_boundary(rope: &Rope, offset: usize) -> usize {
         return 0;
     }
     let offset = offset.min(rope.byte_len());
-    let prefix = rope.byte_slice(..offset).to_string();
-    prefix
+    // Only examine a bounded window before the offset (64 bytes is more than enough for any grapheme cluster)
+    let search_start = offset.saturating_sub(64);
+    let window = rope.byte_slice(search_start..offset).to_string();
+    window
         .graphemes(true)
         .last()
-        .map_or(0, |g| offset - g.len())
+        .map_or(search_start, |g| search_start + window.len() - g.len())
 }
 
 pub(super) fn next_grapheme_boundary(rope: &Rope, offset: usize) -> usize {
@@ -138,11 +140,13 @@ pub(super) fn next_grapheme_boundary(rope: &Rope, offset: usize) -> usize {
     if offset >= rope.byte_len() {
         return rope.byte_len();
     }
-    let suffix = rope.byte_slice(offset..).to_string();
-    suffix
+    // Only examine a bounded window after the offset
+    let search_end = (offset + 64).min(rope.byte_len());
+    let window = rope.byte_slice(offset..search_end).to_string();
+    window
         .graphemes(true)
         .next()
-        .map_or(rope.byte_len(), |g| offset + g.len())
+        .map_or(search_end, |g| offset + g.len())
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

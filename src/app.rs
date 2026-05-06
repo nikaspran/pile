@@ -17,6 +17,7 @@ use crate::{
     },
     model::{AppState, Document, DocumentId, PaneSnapshot, Selection, SessionSnapshot},
     native_menu::{NativeMenu, NativeMenuCommand},
+    parse_worker::{ParseEvent, ParseWorker},
     persistence::{
         RecoveryEvent, RecoveryEventKind, SaveMsg, SaveTelemetry, SaveWorker, WorkerEvent,
         default_session_path, default_settings_path, load_session,
@@ -218,6 +219,7 @@ pub struct PileApp {
     recovery_events: Vec<RecoveryEvent>,
     worker_event_rx: Option<Receiver<WorkerEvent>>,
     shutdown_flag: Arc<AtomicBool>,
+    parse_worker: Option<ParseWorker>,
 }
 
 impl PileApp {
@@ -320,6 +322,9 @@ impl PileApp {
             "pile started"
         );
 
+        // Spawn the background parse worker
+        let parse_worker = ParseWorker::spawn();
+
         Self {
             ctx,
             state,
@@ -345,6 +350,7 @@ impl PileApp {
             recovery_events: Vec::new(),
             worker_event_rx: Some(event_rx),
             shutdown_flag: shutdown_flag.clone(),
+            parse_worker: Some(parse_worker),
         }
     }
 
@@ -416,6 +422,85 @@ impl PileApp {
     fn document_edited(&mut self) {
         self.refresh_active_document_metadata();
         self.mark_changed();
+        self.request_background_parse_for_active();
+    }
+
+    /// Request a background parse for the active document if needed.
+    fn request_background_parse_for_active(&mut self) {
+        let Some(worker) = self.parse_worker.as_ref() else {
+            return;
+        };
+
+        let Some(document) = self.state.active_document() else {
+            return;
+        };
+
+        let Some(detection) = document.detect_syntax() else {
+            return;
+        };
+
+        if detection.language == crate::syntax::LanguageId::PlainText {
+            return;
+        }
+
+        // Check if we need to parse
+        if !document.syntax_state.needs_parse(detection.language, document.revision) {
+            return;
+        }
+
+        // Get visible range from the active pane
+        let (visible_start, visible_end) = self
+            .panes
+            .get(self.active_pane)
+            .map(|_pane| {
+                // Use a reasonable default visible range if not available
+                (0, document.rope.byte_len().min(4096))
+            })
+            .unwrap_or((0, 0));
+
+        let request = crate::parse_worker::ParseRequest {
+            document_id: document.id,
+            revision: document.revision,
+            language: detection.language,
+            text: document.rope.byte_slice(visible_start..visible_end).to_string(),
+            visible_start,
+            visible_end,
+        };
+
+        worker.request_parse(request);
+    }
+
+    /// Handle parse events from the background worker.
+    fn handle_parse_events(&mut self) {
+        let Some(worker) = self.parse_worker.as_ref() else {
+            return;
+        };
+
+        while let Some(event) = worker.try_recv() {
+            match event {
+                ParseEvent::Result(result) => {
+                    // Update the document's syntax state
+                    if let Some(document) = self.state.document_mut(result.document_id) {
+                        // Only update if this result is still relevant
+                        if document.revision == result.revision
+                            && document
+                                .syntax_state
+                                .parsed_as()
+                                .map_or(false, |lang| lang == result.language)
+                        {
+                            document.syntax_state.update_from_parse_result(
+                                result.tree,
+                                result.spans,
+                                result.language,
+                                result.revision,
+                                result.visible_start,
+                                result.visible_end,
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn set_active_document(&mut self, document_id: DocumentId) {
@@ -2218,6 +2303,7 @@ impl eframe::App for PileApp {
 
         self.handle_native_menu_commands();
         self.handle_keyboard_shortcuts(ctx);
+        self.handle_parse_events();
 
         // Drain worker events
         if let Some(rx) = &self.worker_event_rx {

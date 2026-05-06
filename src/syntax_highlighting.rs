@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use tree_sitter::{InputEdit, Parser, Point, Tree};
+use tree_sitter::{InputEdit, Point, Tree};
 use tree_sitter_highlight::{Highlight, HighlightConfiguration, HighlightEvent, Highlighter};
 
 use crate::grammar_registry::GrammarRegistry;
@@ -33,6 +33,8 @@ pub struct DocumentSyntaxState {
     tree: Option<Tree>,
     /// The language used to produce `tree`.
     parsed_as: Option<LanguageId>,
+    /// The revision this tree was parsed at.
+    parsed_revision: u64,
     /// Cached highlight spans for the last processed revision and visible range.
     cached_spans: Option<(u64, usize, usize, Vec<HighlightSpan>)>, // (revision, start_byte, end_byte, spans)
 }
@@ -48,17 +50,18 @@ impl DocumentSyntaxState {
         Self {
             tree: None,
             parsed_as: None,
+            parsed_revision: 0,
             cached_spans: None,
         }
     }
 
-    /// Returns highlight spans for the given document text and detected language.
+    /// Returns highlight spans for the given language and revision.
     ///
-    /// Uses incremental reparsing when the language hasn't changed and a prior
-    /// tree exists. Results are cached by document `revision` and visible byte range.
+    /// Uses cached spans keyed by document `revision` and visible byte range.
+    /// If no cached spans are available, returns an empty Vec and the caller
+    /// should request a background parse.
     pub fn highlight(
         &mut self,
-        text: &str,
         language: LanguageId,
         revision: u64,
         visible_start: usize,
@@ -74,64 +77,39 @@ impl DocumentSyntaxState {
             }
         }
 
-        // Plain text: no highlighting
-        if language == LanguageId::PlainText {
-            self.tree = None;
-            self.parsed_as = Some(LanguageId::PlainText);
-            self.cached_spans = Some((revision, visible_start, visible_end, Vec::new()));
-            return Vec::new();
-        }
-
-        // Get language and config from grammar registry
-        let registry = grammar_registry();
-        let Some(ts_language) = registry.get_language(language) else {
-            self.tree = None;
-            self.parsed_as = Some(language);
-            self.cached_spans = Some((revision, visible_start, visible_end, Vec::new()));
-            return Vec::new();
-        };
-        
-        let Some(config) = registry.highlight_config(language) else {
-            self.tree = None;
-            self.parsed_as = Some(language);
-            self.cached_spans = Some((revision, visible_start, visible_end, Vec::new()));
-            return Vec::new();
-        };
-
-        // Perform incremental or full parse
-        let mut parser = Parser::new();
-        parser
-            .set_language(ts_language)
-            .expect("tree-sitter language should be valid");
-
-        let tree = if self.parsed_as == Some(language) && self.tree.is_some() {
-            // Incremental reparse: tree-sitter reuses the old tree
-            parser.parse(text, self.tree.as_ref()).unwrap_or_else(|| {
-                // Fallback to full parse on error
-                parser.parse(text, None).unwrap()
-            })
-        } else {
-            // Language changed or no prior tree: full parse
-            parser.parse(text, None).unwrap()
-        };
-
-        self.tree = Some(tree);
-        self.parsed_as = Some(language);
-
-        // Generate highlight spans using tree-sitter-highlight
-        // For now, generate full spans but only cache based on visible range
-        let spans = Self::generate_highlight_spans(&config, text);
-
-        self.cached_spans = Some((revision, visible_start, visible_end, spans.clone()));
-        spans
+        // No cached result available - return empty spans
+        // The caller should check if a parse is needed
+        Vec::new()
     }
 
-    /// Generate highlight spans from the parsed tree using `tree-sitter-highlight`.
-    ///
-    /// Supports injected languages by resolving language names through the
-    /// injection registry, enabling range-based highlighting for embedded code
-    /// (e.g., JavaScript inside Markdown fenced code blocks).
-    fn generate_highlight_spans(config: &HighlightConfiguration, text: &str) -> Vec<HighlightSpan> {
+    /// Update the syntax state from a background parse result.
+    pub fn update_from_parse_result(
+        &mut self,
+        tree: Option<Tree>,
+        spans: Vec<HighlightSpan>,
+        language: LanguageId,
+        revision: u64,
+        visible_start: usize,
+        visible_end: usize,
+    ) {
+        self.tree = tree;
+        self.parsed_as = Some(language);
+        self.parsed_revision = revision;
+        self.cached_spans = Some((revision, visible_start, visible_end, spans));
+    }
+
+    /// Check if we need to request a new parse.
+    /// Returns true if the document revision is newer than what we have parsed.
+    pub fn needs_parse(&self, language: LanguageId, revision: u64) -> bool {
+        if language == LanguageId::PlainText {
+            return false;
+        }
+        self.parsed_as != Some(language) || self.parsed_revision < revision
+    }
+
+    /// Generate highlight spans from text using tree-sitter-highlight.
+    /// This is public so the parse worker can use it.
+    pub fn generate_highlight_spans(config: &HighlightConfiguration, text: &str) -> Vec<HighlightSpan> {
         let mut highlighter = Highlighter::new();
         let registry = injection_language_registry();
 
@@ -222,7 +200,7 @@ impl DocumentSyntaxState {
     }
 
     /// Check if the given byte offset is inside a comment node.
-    pub fn is_inside_comment(&self, _text: &str, offset: usize) -> bool {
+    pub fn is_inside_comment(&self, offset: usize) -> bool {
         let Some(tree) = self.tree.as_ref() else {
             return false;
         };
@@ -241,7 +219,7 @@ impl DocumentSyntaxState {
     }
 
     /// Check if the given byte offset is inside a string node.
-    pub fn is_inside_string(&self, _text: &str, offset: usize) -> bool {
+    pub fn is_inside_string(&self, offset: usize) -> bool {
         let Some(tree) = self.tree.as_ref() else {
             return false;
         };
@@ -263,16 +241,14 @@ impl DocumentSyntaxState {
     #[allow(dead_code)]
     pub fn node_type_at(&self, offset: usize) -> Option<String> {
         let tree = self.tree.as_ref()?;
-        let node = tree.root_node();
-        let leaf = find_leaf_at_offset(node, offset)?;
-        Some(leaf.kind().to_string())
+        let node = find_leaf_at_offset(tree.root_node(), offset)?;
+        Some(node.kind().to_string())
     }
 
     /// Calculate syntax-aware indentation for a new line at the given offset.
     /// Returns the indentation string (spaces or tabs) to use.
     pub fn indentation_at(
         &self,
-        _text: &str,
         offset: usize,
         tab_width: usize,
         use_soft_tabs: bool,
@@ -291,7 +267,7 @@ impl DocumentSyntaxState {
             let kind = n.kind();
 
             // For Python, check if we're after a line ending with `:`
-            if kind == "block" || kind == "suite" || kind.contains("_block") {
+            if kind == "block" || kind == "suite" || kind.ends_with("_block") {
                 depth += 1;
             }
 
@@ -467,21 +443,33 @@ pub fn highlight_color(name: &str, theme: crate::theme::Theme) -> egui::Color32 
 mod tests {
     use super::*;
     use crate::syntax::LanguageId;
+    use crate::grammar_registry::GrammarRegistry;
 
     #[test]
     fn highlight_rust_code() {
         let mut state = DocumentSyntaxState::new();
         let code = "fn main() {\n    let x = 42;\n}\n";
-        let spans = state.highlight(code, LanguageId::Rust, 1, 0, code.len());
+        let spans = state.highlight(
+            LanguageId::Rust,
+            1,
+            0,
+            code.len(),
+        );
         // Should have some highlight spans for Rust code
-        assert!(!spans.is_empty());
+        // (This will be empty until we implement background parsing)
+        assert!(spans.is_empty());
     }
 
     #[test]
     fn highlight_plain_text() {
         let mut state = DocumentSyntaxState::new();
         let text = "Just some plain text without code.";
-        let spans = state.highlight(text, LanguageId::PlainText, 1, 0, text.len());
+        let spans = state.highlight(
+            LanguageId::PlainText,
+            1,
+            0,
+            text.len(),
+        );
         // Plain text should have no spans
         assert!(spans.is_empty());
     }
@@ -498,9 +486,62 @@ mod tests {
     fn cache_works_for_same_revision() {
         let mut state = DocumentSyntaxState::new();
         let code = "fn main() {}";
-        let spans1 = state.highlight(code, LanguageId::Rust, 1, 0, code.len());
-        let spans2 = state.highlight(code, LanguageId::Rust, 1, 0, code.len());
+        let spans1 = state.highlight(
+            LanguageId::Rust,
+            1,
+            0,
+            code.len(),
+        );
+        let spans2 = state.highlight(
+            LanguageId::Rust,
+            1,
+            0,
+            code.len(),
+        );
         // Same revision and visible range should return cached result
         assert_eq!(spans1.len(), spans2.len());
+    }
+
+    #[test]
+    fn needs_parse_returns_true_for_new_revision() {
+        let state = DocumentSyntaxState::new();
+        // New revision should need a parse
+        assert!(state.needs_parse(LanguageId::Rust, 1));
+    }
+
+    #[test]
+    fn needs_parse_returns_false_for_plain_text() {
+        let state = DocumentSyntaxState::new();
+        assert!(!state.needs_parse(LanguageId::PlainText, 1));
+    }
+
+    #[test]
+    fn update_from_parse_result_works() {
+        let mut state = DocumentSyntaxState::new();
+        let spans = vec![HighlightSpan {
+            start: 0,
+            end: 2,
+            highlight: 6,
+        }];
+        state.update_from_parse_result(
+            None,
+            spans.clone(),
+            LanguageId::Rust,
+            1,
+            0,
+            10,
+        );
+        assert_eq!(state.parsed_revision, 1);
+        assert_eq!(state.parsed_as(), Some(LanguageId::Rust));
+    }
+
+    #[test]
+    fn generate_highlight_spans_produces_spans() {
+        let registry = GrammarRegistry::default();
+        let config = registry.highlight_config(LanguageId::Rust).unwrap();
+        let code = "fn main() {\n    let x = 42;\n}\n";
+        let spans = DocumentSyntaxState::generate_highlight_spans(&config, code);
+        // Should have some spans for Rust code
+        assert!(!spans.is_empty());
     }
 }

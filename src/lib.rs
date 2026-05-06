@@ -5,6 +5,7 @@ pub mod editor;
 pub mod grammar_registry;
 pub mod model;
 pub mod native_menu;
+pub mod parse_worker;
 pub mod persistence;
 pub mod preferences;
 pub mod search;
@@ -17,6 +18,7 @@ pub mod theme;
 
 pub use app::PileApp;
 pub use model::*;
+pub use parse_worker::{ParseEvent, ParseRequest, ParseResult, ParseWorker};
 pub use persistence::SessionEnvelope;
 pub use settings::Settings;
 pub use syntax::LanguageId;

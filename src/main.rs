@@ -5,6 +5,7 @@ mod editor;
 mod grammar_registry;
 mod model;
 mod native_menu;
+mod parse_worker;
 mod persistence;
 mod preferences;
 mod search;

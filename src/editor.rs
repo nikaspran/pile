@@ -545,20 +545,21 @@ pub fn show_editor(
                 let highlight_spans: Vec<(usize, usize, egui::Color32)> = if !is_large_file {
                     if let Some(detection) = document.detect_syntax() {
                         if detection.language != crate::syntax::LanguageId::PlainText {
-                            let text = document.text();
                             let spans = document.syntax_state.highlight(
-                                &text,
                                 detection.language,
                                 document.revision,
                                 visible_start,
                                 visible_end,
                             );
                             let line_end_byte = line_start_byte + line_text.len();
+                            // Spans are relative to visible_text (offset 0), so add visible_start
                             spans
-                                .iter()
+                                .into_iter()
                                 .filter_map(|span| {
-                                    let start = span.start.max(line_start_byte);
-                                    let end = span.end.min(line_end_byte);
+                                    let abs_start = span.start + visible_start;
+                                    let abs_end = span.end + visible_start;
+                                    let start = abs_start.max(line_start_byte);
+                                    let end = abs_end.min(line_end_byte);
                                     if start < end {
                                         let color =
                                             highlight_color(&highlight_name(span.highlight), theme);

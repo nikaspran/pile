@@ -295,13 +295,12 @@ pub fn toggle_comments(document: &mut Document, comment_prefix: &str) -> bool {
 
     // Get syntax state for syntax-aware toggling
     let syntax_state = &document.syntax_state;
-    let text = document.rope.byte_slice(..).to_string();
 
     for (i, line) in lines.iter().enumerate() {
         let line_start = start + body[..body.find(line).unwrap_or(0)].chars().count();
-        
+
         // Skip lines that are inside string literals
-        if syntax_state.is_inside_string(&text, line_start) {
+        if syntax_state.is_inside_string(line_start) {
             result.push_str(line);
             if i < lines.len() - 1 {
                 result.push('\n');
@@ -316,7 +315,7 @@ pub fn toggle_comments(document: &mut Document, comment_prefix: &str) -> bool {
             if trimmed.starts_with(comment_prefix) {
                 // Verify it's actually in a comment node (not a string containing the prefix)
                 let first_char_offset = line_start + line.len() - trimmed.len();
-                syntax_state.is_inside_comment(&text, first_char_offset)
+                syntax_state.is_inside_comment(first_char_offset)
             } else {
                 false
             }
@@ -355,8 +354,8 @@ pub fn toggle_comments(document: &mut Document, comment_prefix: &str) -> bool {
         result.clear();
         for (i, line) in lines.iter().enumerate() {
             let line_start = start + body[..body.find(line).unwrap_or(0)].chars().count();
-            
-            if syntax_state.is_inside_string(&text, line_start) {
+
+            if syntax_state.is_inside_string(line_start) {
                 result.push_str(line);
                 if i < lines.len() - 1 {
                     result.push('\n');
@@ -368,7 +367,7 @@ pub fn toggle_comments(document: &mut Document, comment_prefix: &str) -> bool {
                 let trimmed = line.trim_start();
                 if trimmed.starts_with(comment_prefix) {
                     let first_char_offset = line_start + line.len() - trimmed.len();
-                    syntax_state.is_inside_comment(&text, first_char_offset)
+                    syntax_state.is_inside_comment(first_char_offset)
                 } else {
                     false
                 }
