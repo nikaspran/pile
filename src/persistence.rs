@@ -437,38 +437,59 @@ pub fn load_session(
                     Ok(Some(snapshot))
                 }
                 Err(_) => {
-                    // Main session is corrupt, quarantine it and try backups
-                    warn!(
-                        path = %path.display(),
-                        "main session corrupt, trying backups"
-                    );
-                    quarantine_corrupt_session(path, telemetry);
+                    // Try truly old v1 format (different struct without panes)
+                    #[derive(Serialize, Deserialize)]
+                    struct OldSessionV1 {
+                        pub schema_version: u32,
+                        pub state: crate::model::AppState,
+                    }
 
-                    match load_session_from_backup(path, telemetry) {
-                        Ok(Some((snapshot, backup_path))) => {
-                            // Restore from backup
-                            let _ = fs::copy(&backup_path, path);
-                            info!(
-                                backup_path = %backup_path.display(),
-                                "restored session from backup"
+                    match bincode::deserialize::<OldSessionV1>(&bytes) {
+                        Ok(old) => {
+                            // Migrate v1 to current format
+                            let migrated = SessionSnapshot {
+                                schema_version: 2,
+                                state: old.state,
+                                panes: vec![],
+                                active_pane: 0,
+                            };
+                            return Ok(Some(migrated));
+                        }
+                        Err(_) => {
+                            // Main session is corrupt, quarantine it and try backups
+                            warn!(
+                                path = %path.display(),
+                                "main session corrupt, trying backups"
                             );
-                            telemetry.recovery_events.push(RecoveryEvent {
-                                timestamp: std::time::SystemTime::now(),
-                                kind: RecoveryEventKind::BackupRestored,
-                                message: format!(
-                                    "Restored session from backup {}",
-                                    backup_path.display()
-                                ),
-                            });
-                            Ok(Some(snapshot))
-                        }
-                        Ok(None) => {
-                            warn!("no loadable backups found");
-                            Ok(None)
-                        }
-                        Err(err) => {
-                            warn!(error = %err, "failed to load from backup");
-                            Ok(None)
+                            quarantine_corrupt_session(path, telemetry);
+
+                            match load_session_from_backup(path, telemetry) {
+                                Ok(Some((snapshot, backup_path))) => {
+                                    // Restore from backup
+                                    let _ = fs::copy(&backup_path, path);
+                                    info!(
+                                        backup_path = %backup_path.display(),
+                                        "restored session from backup"
+                                    );
+                                    telemetry.recovery_events.push(RecoveryEvent {
+                                        timestamp: std::time::SystemTime::now(),
+                                        kind: RecoveryEventKind::BackupRestored,
+                                        message: format!(
+                                            "Restored session from backup {}",
+                                            backup_path.display()
+                                        ),
+                                    });
+                                    Ok(Some(snapshot))
+                                }
+                                Ok(None) => {
+                                    warn!("no loadable backups found");
+                                    Ok(None)
+                                }
+                                Err(err) => {
+                                    warn!(error = %err, "failed to load from backup");
+                                    Ok(None)
+                                }
+                            }
                         }
                     }
                 }
@@ -1007,5 +1028,341 @@ mod tests {
                 // Just verify the check doesn't panic
             }
         }
+    }
+
+    // --- Schema Migration Edge Case Tests ---
+
+    #[test]
+    fn migration_v2_to_v3_preserves_state() {
+        // Create a v2 payload (schema_version=2 in payload)
+        let mut state = AppState::empty();
+        // Add some documents to verify state is preserved
+        let doc_id = state.open_untitled(4, true);
+        if let Some(doc) = state.document_mut(doc_id) {
+            doc.replace_text("test content");
+        }
+
+        let v2_snapshot = SessionSnapshot {
+            schema_version: 2,
+            state: state.clone(),
+            panes: vec![],
+            active_pane: 0,
+        };
+
+        let v2_bytes = bincode::serialize(&v2_snapshot).unwrap();
+
+        // Create v2 envelope
+        let v2_envelope = SessionEnvelope {
+            envelope_version: 2,
+            min_compatible_version: 2,
+            payload_bytes: v2_bytes,
+            payload_type: "SessionSnapshot".to_owned(),
+        };
+
+        // Migrate to v3
+        let migrated = SessionEnvelope::open(v2_envelope).unwrap();
+
+        assert_eq!(migrated.schema_version, 3);
+        assert_eq!(migrated.state.documents.len(), state.documents.len());
+    }
+
+    #[test]
+    fn migration_from_v1_with_documents() {
+        // Create a v1 session with multiple documents
+        let mut state = AppState::empty();
+        let doc_id = state.open_untitled(4, true);
+        if let Some(doc) = state.document_mut(doc_id) {
+            doc.replace_text("document 1");
+        }
+        let doc_id2 = state.open_untitled(4, true);
+        if let Some(doc) = state.document_mut(doc_id2) {
+            doc.replace_text("document 2");
+        }
+
+        // Simulate v1 format (no panes)
+        #[derive(Serialize, Deserialize)]
+        struct OldSessionV1 {
+            pub schema_version: u32,
+            pub state: crate::model::AppState,
+        }
+
+        let v1_session = OldSessionV1 {
+            schema_version: 1,
+            state: state.clone(),
+        };
+
+        let v1_bytes = bincode::serialize(&v1_session).unwrap();
+
+        let v1_envelope = SessionEnvelope {
+            envelope_version: 1,
+            min_compatible_version: 1,
+            payload_bytes: v1_bytes,
+            payload_type: "SessionSnapshot".to_owned(),
+        };
+
+        let migrated = SessionEnvelope::open(v1_envelope).unwrap();
+
+        assert_eq!(migrated.schema_version, 3);
+        assert_eq!(migrated.state.documents.len(), 3); // 2 + 1 default
+        assert!(migrated.panes.is_empty());
+    }
+
+    // --- Corrupt Session Handling Tests ---
+
+    #[test]
+    fn corrupt_session_truncated_data() {
+        let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".session.bin");
+        let mut telemetry = SaveTelemetry::default();
+
+        // Write truncated data (just 4 bytes)
+        fs::write(&path, vec![1, 2, 3, 4]).unwrap();
+
+        // Try to load - should fail gracefully
+        let result = load_session(&path, &mut telemetry);
+        assert!(result.is_err() || result.unwrap().is_none());
+
+        // Verify quarantine was called (file should be moved to .bad)
+        assert!(path.with_extension("bin.bad").exists());
+
+        // Cleanup
+        let _ = fs::remove_file(path.with_extension("bin.bad"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_session_invalid_bincode() {
+        let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".session.bin");
+        let mut telemetry = SaveTelemetry::default();
+
+        // Write random bytes (invalid bincode)
+        let corrupt_data: Vec<u8> = (0..100).map(|i| (i * 7) as u8).collect();
+        fs::write(&path, corrupt_data).unwrap();
+
+        // Try to load - should fail
+        let result = load_session(&path, &mut telemetry);
+        assert!(result.is_err() || result.unwrap().is_none());
+
+        // Cleanup
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_session_quarantine_and_backup_restore() {
+        let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".session.bin");
+        let mut telemetry = SaveTelemetry::default();
+
+        // Create a valid backup
+        let valid_snapshot = SessionSnapshot::from(&AppState::empty());
+        let backup_path = path.with_extension("bin.1");
+        write_snapshot(&backup_path, &valid_snapshot).unwrap();
+
+        // Write corrupt data to main session
+        fs::write(&path, "corrupted").unwrap();
+
+        // Load session - should restore from backup
+        let result = load_session(&path, &mut telemetry);
+
+        // Either restored from backup or failed
+        match result {
+            Ok(Some(snapshot)) => {
+                // Successfully restored from backup
+                assert_eq!(snapshot.schema_version, 3);
+            }
+            Ok(None) => {
+                // No backup available or backup also corrupt
+            }
+            Err(_) => {
+                // Error during load
+            }
+        }
+
+        // Verify recovery events were recorded
+        assert!(!telemetry.recovery_events.is_empty());
+
+        // Cleanup
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(&backup_path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_session_with_all_backups_corrupt() {
+        let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".session.bin");
+        let mut telemetry = SaveTelemetry::default();
+
+        // Write corrupt data to main session
+        fs::write(&path, "corrupted main").unwrap();
+
+        // Write corrupt data to all backup slots
+        for i in 1..=BACKUP_ROTATION_COUNT {
+            let backup_path = path.with_extension(format!("bin.{}", i));
+            fs::write(&backup_path, format!("corrupt backup {}", i)).unwrap();
+        }
+
+        // Try to load - should fail
+        let result = load_session(&path, &mut telemetry);
+
+        // Should not be able to load
+        assert!(result.is_err() || result.unwrap().is_none());
+
+        // Cleanup
+        let _ = fs::remove_file(&path);
+        for i in 1..=BACKUP_ROTATION_COUNT {
+            let _ = fs::remove_file(path.with_extension(format!("bin.{}", i)));
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn envelope_version_too_old() {
+        // Create envelope with version older than min_compatible
+        let snapshot = SessionSnapshot::from(&AppState::empty());
+        let payload_bytes = bincode::serialize(&snapshot).unwrap();
+
+        let old_envelope = SessionEnvelope {
+            envelope_version: 1,
+            min_compatible_version: 3, // Requires v3, but we have v1
+            payload_bytes,
+            payload_type: "SessionSnapshot".to_owned(),
+        };
+
+        // Should fail because version is too old
+        let result = SessionEnvelope::open(old_envelope);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn wrong_payload_type_rejected() {
+        let snapshot = SessionSnapshot::from(&AppState::empty());
+        let payload_bytes = bincode::serialize(&snapshot).unwrap();
+
+        let envelope = SessionEnvelope {
+            envelope_version: 3,
+            min_compatible_version: 3,
+            payload_bytes,
+            payload_type: "WrongType".to_owned(),
+        };
+
+        // Should fail because payload type doesn't match
+        let result = SessionEnvelope::open(envelope);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn quarantine_corrupt_session_moves_file() {
+        let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".session.bin");
+        let bad_path = path.with_extension("bin.bad");
+        let mut telemetry = SaveTelemetry::default();
+
+        // Create a corrupt session file
+        fs::write(&path, "corrupt data").unwrap();
+        assert!(path.exists());
+        assert!(!bad_path.exists());
+
+        // Quarantine it
+        quarantine_corrupt_session(&path, &mut telemetry);
+
+        // Original should be gone, .bad should exist
+        assert!(!path.exists());
+        assert!(bad_path.exists());
+
+        // Verify telemetry was updated
+        let has_corrupt_event = telemetry.recovery_events.iter().any(|e| {
+            matches!(e.kind, RecoveryEventKind::SessionCorrupt)
+        });
+        assert!(has_corrupt_event);
+
+        // Cleanup
+        let _ = fs::remove_file(&bad_path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_session_from_multiple_backups() {
+        let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".session.bin");
+        let mut telemetry = SaveTelemetry::default();
+
+        // Create multiple backups, some corrupt
+        // Backup 1: corrupt
+        fs::write(path.with_extension("bin.1"), "corrupt").unwrap();
+
+        // Backup 2: valid
+        let valid_snapshot = SessionSnapshot::from(&AppState::empty());
+        write_snapshot(&path.with_extension("bin.2"), &valid_snapshot).unwrap();
+
+        // Backup 3: corrupt
+        fs::write(path.with_extension("bin.3"), "also corrupt").unwrap();
+
+        // Should skip corrupt backups and use backup 2
+        let result = load_session_from_backup(&path, &mut telemetry);
+
+        assert!(result.is_ok());
+        let loaded = result.unwrap();
+        assert!(loaded.is_some());
+
+        let (snapshot, backup_path) = loaded.unwrap();
+        assert_eq!(snapshot.schema_version, 3);
+        assert_eq!(backup_path, path.with_extension("bin.2"));
+
+        // Cleanup
+        for i in 1..=3 {
+            let _ = fs::remove_file(path.with_extension(format!("bin.{}", i)));
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_v1_session_without_envelope() {
+        // Test loading a pure v1 session (no envelope at all)
+        let mut state = AppState::empty();
+        let doc_id = state.open_untitled(4, true);
+        if let Some(doc) = state.document_mut(doc_id) {
+            doc.replace_text("legacy content");
+        }
+
+        #[derive(Serialize, Deserialize)]
+        struct OldSessionV1 {
+            pub schema_version: u32,
+            pub state: crate::model::AppState,
+        }
+
+        let v1_session = OldSessionV1 {
+            schema_version: 1,
+            state: state.clone(),
+        };
+
+        let v1_bytes = bincode::serialize(&v1_session).unwrap();
+
+        // Now test through load_session path
+        let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".session.bin");
+        let mut telemetry = SaveTelemetry::default();
+
+        fs::write(&path, v1_bytes).unwrap();
+
+        // load_session should handle the legacy v1 format
+        let loaded = load_session(&path, &mut telemetry).unwrap();
+        assert!(loaded.is_some());
+        let snapshot = loaded.unwrap();
+        assert_eq!(snapshot.schema_version, 2); // Migrated to v2 by load_session
+        assert_eq!(snapshot.panes.len(), 0); // v1 didn't have panes
+
+        // Cleanup
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

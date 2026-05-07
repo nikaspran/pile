@@ -140,7 +140,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 ## Testing
 
 - Completed: Add model tests for editing transactions and multi-cursor behavior.
-- Add persistence tests for schema migration and corrupt restore handling.
+- Completed: Add persistence tests for schema migration and corrupt restore handling.
 - Add syntax tests for injected ranges and mixed-language documents.
 - Add golden tests for search/replace edge cases.
 - Add UI smoke tests for tab switching, renaming, shortcuts, and session restore.
