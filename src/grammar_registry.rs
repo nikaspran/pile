@@ -142,6 +142,7 @@ impl GrammarRegistry {
         self.name_to_id.get(name).copied()
     }
 
+    #[allow(dead_code)]
     /// Returns the tree-sitter language for the given language ID.
     pub fn get_language(&self, id: LanguageId) -> Option<&Language> {
         let grammar = self.grammars.get(&id)?;

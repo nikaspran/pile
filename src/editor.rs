@@ -27,7 +27,6 @@ pub use line_ops::{
     move_selected_lines_down, move_selected_lines_up, normalize_whitespace, outdent_selection,
     reverse_selected_lines, sort_selected_lines, toggle_comments, trim_trailing_whitespace,
 };
-use motion::find_matching_bracket_at;
 pub use motion::*;
 pub use multicursor::{
     add_all_matches, add_next_match, clear_secondary_cursors, delete_all, replace_selection_all,
