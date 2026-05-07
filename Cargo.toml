@@ -50,6 +50,10 @@ rand = "0.9"
 name = "benchmarks"
 harness = false
 
+[[test]]
+name = "golden_search_replace"
+path = "tests/golden/search_replace_golden.rs"
+
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
 
