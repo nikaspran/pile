@@ -413,11 +413,11 @@ pub fn show_editor(
                 let y = layout.line_y(line_index, rect.top());
                 if line_index == caret_line {
                     let line_highlight_color = theme.current_line_highlight();
-                    let full_line_rect = egui::Rect::from_min_size(
+                    let gutter_rect = egui::Rect::from_min_size(
                         egui::pos2(rect.left(), y),
-                        egui::vec2(rect.width(), layout.row_height),
+                        egui::vec2(layout.gutter_width, layout.row_height),
                     );
-                    painter.rect_filled(full_line_rect, 0.0, line_highlight_color);
+                    painter.rect_filled(gutter_rect, 0.0, line_highlight_color);
                 }
 
                 // Draw bracket matching highlights (skip for large files)

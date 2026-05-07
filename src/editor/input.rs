@@ -83,6 +83,16 @@ pub(super) fn handle_input(
                     changed |= toggle_comments(document, comment_prefix);
                     view_state.preferred_column = None;
                 }
+                egui::Key::ArrowLeft => {
+                    move_word_left(document, false);
+                    changed = true;
+                    view_state.preferred_column = None;
+                }
+                egui::Key::ArrowRight => {
+                    move_word_right(document, false);
+                    changed = true;
+                    view_state.preferred_column = None;
+                }
                 _ => {}
             },
             egui::Event::Key {
@@ -119,6 +129,16 @@ pub(super) fn handle_input(
                 }
                 egui::Key::T => {
                     changed |= trim_trailing_whitespace(document);
+                    view_state.preferred_column = None;
+                }
+                egui::Key::ArrowLeft => {
+                    move_word_left(document, true);
+                    changed = true;
+                    view_state.preferred_column = None;
+                }
+                egui::Key::ArrowRight => {
+                    move_word_right(document, true);
+                    changed = true;
                     view_state.preferred_column = None;
                 }
                 _ => {}
@@ -223,6 +243,7 @@ pub(super) fn handle_input(
                         } else {
                             move_left(document, extend);
                         }
+                        changed = true;
                         view_state.preferred_column = None;
                     }
                     egui::Key::ArrowRight => {
@@ -231,6 +252,7 @@ pub(super) fn handle_input(
                         } else {
                             move_right(document, extend);
                         }
+                        changed = true;
                         view_state.preferred_column = None;
                     }
                     egui::Key::ArrowUp => {
