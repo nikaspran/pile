@@ -45,6 +45,7 @@ regex = "1.11"
 [dev-dependencies]
 criterion = "0.5"
 rand = "0.9"
+tempfile = "3.10"
 
 [[bench]]
 name = "benchmarks"
@@ -53,6 +54,10 @@ harness = false
 [[test]]
 name = "golden_search_replace"
 path = "tests/golden/search_replace_golden.rs"
+
+[[test]]
+name = "ui_smoke_tests"
+path = "tests/ui_smoke_tests.rs"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"

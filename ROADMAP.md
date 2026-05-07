@@ -143,7 +143,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Add persistence tests for schema migration and corrupt restore handling.
 - Completed: Add syntax tests for injected ranges and mixed-language documents.
 - Completed: Add golden tests for search/replace edge cases.
-- Add UI smoke tests for tab switching, renaming, shortcuts, and session restore.
+- Completed: Add UI smoke tests for tab switching, renaming, shortcuts, and session restore.
 - Add property tests for rope edits and selection transformations.
 - Add platform checks for native menu command delivery.
 
