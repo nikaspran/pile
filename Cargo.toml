@@ -46,6 +46,7 @@ regex = "1.11"
 criterion = "0.5"
 rand = "0.9"
 tempfile = "3.10"
+proptest = "1.11"
 
 [[bench]]
 name = "benchmarks"
@@ -58,6 +59,10 @@ path = "tests/golden/search_replace_golden.rs"
 [[test]]
 name = "ui_smoke_tests"
 path = "tests/ui_smoke_tests.rs"
+
+[[test]]
+name = "property_tests"
+path = "tests/property_tests.rs"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
