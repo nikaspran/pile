@@ -64,6 +64,10 @@ path = "tests/ui_smoke_tests.rs"
 name = "property_tests"
 path = "tests/property_tests.rs"
 
+[[test]]
+name = "platform_menu_tests"
+path = "tests/platform_menu_tests.rs"
+
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
 
