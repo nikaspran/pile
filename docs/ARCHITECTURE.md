@@ -83,6 +83,52 @@ replace-all transactions, or rectangular selection edits, extend the model with 
 multi-edit transaction type that can apply non-overlapping ranges in reverse
 order and record one grouped undo step.
 
+## Persistence Guarantees and Recovery Behavior
+
+### Save Worker Architecture
+
+Persistence runs on a background thread via `SaveWorker`. The UI thread never blocks on routine saves. The worker:
+
+1. Receives `SaveMsg::Changed(snapshot)` messages via `crossbeam-channel`
+2. Debounces rapid edits using a timer (default: 2 seconds)
+3. Serializes `SessionSnapshot` using `bincode` into a temporary buffer
+4. Atomically replaces the session file using `atomic-write-file`
+5. Tracks telemetry: save count, duration, last error, and last success time
+
+### Session Format
+
+Sessions are stored in a versioned envelope (`SessionEnvelope`):
+
+- `schema_version`: Current version is 3
+- `payload_type`: Always "SessionSnapshot"
+- `payload_bytes`: Bincode-serialized `SessionSnapshot`
+
+The envelope allows forward-compatible migrations. Version 1 had no panes support.
+Version 2 added panes. Version 3 added active pane tracking.
+
+### Recovery Behavior
+
+On startup, if the main session file is corrupt:
+
+1. The corrupt file is quarantined to `.session.bin.corrupt.N`
+2. Backup files (`.session.bin.1`, `.session.bin.2`, etc.) are tried in order
+3. The most recent valid backup is restored
+4. A recovery event is logged with the telemetry system
+5. If all backups are corrupt, a fresh session is created
+
+### Data Integrity
+
+- Session files are written atomically (write to temp, then rename)
+- Snapshot budget checks prevent huge sessions from stalling the UI
+- The `validate()` method repairs stale tab_order, invalid active_document, and out-of-bounds selections on restore
+- Crash recovery is tested via `stress_tests::tests::crash_restart_*`
+
+### What is NOT Saved
+
+- Undo/redo history (intentional - preserves privacy and reduces session size)
+- Clipboard contents
+- Transient UI state (command palette visibility, search bar state)
+
 ## Near-Term Direction
 
 The next cleanup should move remaining direct editor mutations toward explicit
