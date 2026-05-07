@@ -220,6 +220,7 @@ pub struct PileApp {
     worker_event_rx: Option<Receiver<WorkerEvent>>,
     shutdown_flag: Arc<AtomicBool>,
     parse_worker: Option<ParseWorker>,
+    frame_time_ms: f64,
 }
 
 impl PileApp {
@@ -351,6 +352,7 @@ impl PileApp {
             worker_event_rx: Some(event_rx),
             shutdown_flag: shutdown_flag.clone(),
             parse_worker: Some(parse_worker),
+            frame_time_ms: 0.0,
         }
     }
 
@@ -2292,6 +2294,8 @@ impl PileApp {
 
 impl eframe::App for PileApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let frame_start = std::time::Instant::now();
+
         // Check for system shutdown signal
         if self.shutdown_flag.load(Ordering::Relaxed) {
             self.flush_session();
@@ -2429,6 +2433,11 @@ impl eframe::App for PileApp {
                     if let Some(dur) = self.telemetry.last_save_duration_ms {
                         ui.label(format!("last: {}ms", dur));
                     }
+                    if let Some(median) = self.telemetry.median_save_duration_ms() {
+                        ui.label(format!("median: {}ms", median));
+                    }
+                    ui.separator();
+                    ui.label(format!("frame: {:.1}ms", self.frame_time_ms));
                 });
             });
         }
@@ -2498,6 +2507,10 @@ impl eframe::App for PileApp {
         if let Some(text) = self.clipboard_text.take() {
             ctx.copy_text(text);
         }
+
+        // Record frame time
+        self.frame_time_ms = frame_start.elapsed().as_secs_f64() * 1000.0;
+        tracing::debug!(target: "pile::frame_time", ms = self.frame_time_ms);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

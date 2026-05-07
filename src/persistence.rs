@@ -75,6 +75,43 @@ pub struct SaveTelemetry {
     pub failed_saves: u64,
     pub last_save_duration_ms: Option<u64>,
     pub recovery_events: Vec<RecoveryEvent>,
+    /// Rolling buffer of recent save durations in milliseconds (capped at 1000 entries).
+    #[serde(skip)]
+    pub save_durations_ms: Vec<u64>,
+}
+
+impl SaveTelemetry {
+    /// Record a save duration and update statistics.
+    pub fn record_save_duration(&mut self, duration_ms: u64) {
+        self.last_save_duration_ms = Some(duration_ms);
+        self.save_durations_ms.push(duration_ms);
+        // Keep only the last 1000 entries to bound memory
+        if self.save_durations_ms.len() > 1000 {
+            self.save_durations_ms.remove(0);
+        }
+    }
+
+    /// Calculate the median save duration in milliseconds.
+    pub fn median_save_duration_ms(&self) -> Option<u64> {
+        if self.save_durations_ms.is_empty() {
+            None
+        } else {
+            let mut sorted = self.save_durations_ms.clone();
+            sorted.sort_unstable();
+            Some(sorted[sorted.len() / 2])
+        }
+    }
+
+    /// Calculate the 95th percentile save duration in milliseconds.
+    pub fn p95_save_duration_ms(&self) -> Option<u64> {
+        if self.save_durations_ms.len() < 20 {
+            return None; // Not enough data
+        }
+        let mut sorted = self.save_durations_ms.clone();
+        sorted.sort_unstable();
+        let idx = (sorted.len() as f64 * 0.95) as usize;
+        Some(sorted[idx.min(sorted.len() - 1)])
+    }
 }
 
 /// Versioned envelope that wraps the session payload.
@@ -296,6 +333,13 @@ impl SaveWorker {
             .spawn(move || {
                 let mut telemetry = SaveTelemetry::default();
                 run_save_loop(rx, &session_path, &mut telemetry);
+                // Log latency statistics before sending telemetry
+                if let Some(median) = telemetry.median_save_duration_ms() {
+                    info!(target: "pile::save_worker", median_ms = median, "save worker median latency");
+                }
+                if let Some(p95) = telemetry.p95_save_duration_ms() {
+                    info!(target: "pile::save_worker", p95_ms = p95, "save worker p95 latency");
+                }
                 let _ = event_tx.send(WorkerEvent::Telemetry(telemetry));
             })
             .expect("failed to spawn session save worker");
@@ -435,6 +479,12 @@ pub fn load_session(
 
 fn run_save_loop(rx: Receiver<SaveMsg>, session_path: &PathBuf, telemetry: &mut SaveTelemetry) {
     while let Ok(message) = rx.recv() {
+        // Log channel depth for monitoring queue health
+        let queue_depth = rx.len();
+        if queue_depth > 100 {
+            warn!(target: "pile::save_worker", depth = queue_depth, "save worker queue depth high");
+        }
+
         match message {
             SaveMsg::Changed(snapshot) => {
                 let mut latest = snapshot;
@@ -480,7 +530,7 @@ fn save_and_ack(
                 "snapshot exceeds memory budget, skipping save"
             );
             telemetry.failed_saves += 1;
-            telemetry.last_save_duration_ms = Some(0);
+            telemetry.record_save_duration(0);
             let msg = format!(
                 "Snapshot too large: {} bytes (max {} bytes)",
                 size, max
@@ -506,7 +556,8 @@ fn save_and_ack(
     });
 
     let elapsed = start.elapsed();
-    telemetry.last_save_duration_ms = Some(elapsed.as_millis() as u64);
+    let elapsed_ms = elapsed.as_millis() as u64;
+    telemetry.record_save_duration(elapsed_ms);
 
     match &result {
         Ok(()) => {
@@ -565,12 +616,12 @@ fn save_snapshot(path: &PathBuf, snapshot: &SessionSnapshot, telemetry: &mut Sav
     match write_snapshot(path, snapshot) {
         Ok(()) => {
             telemetry.successful_saves += 1;
-            telemetry.last_save_duration_ms = Some(start.elapsed().as_millis() as u64);
+            telemetry.record_save_duration(start.elapsed().as_millis() as u64);
             debug!(path = %path.display(), "session saved");
         }
         Err(err) => {
             telemetry.failed_saves += 1;
-            telemetry.last_save_duration_ms = Some(start.elapsed().as_millis() as u64);
+            telemetry.record_save_duration(start.elapsed().as_millis() as u64);
             error!(error = %err, path = %path.display(), "session save failed");
             telemetry.recovery_events.push(RecoveryEvent {
                 timestamp: std::time::SystemTime::now(),
