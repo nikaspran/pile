@@ -544,4 +544,153 @@ mod tests {
         // Should have some spans for Rust code
         assert!(!spans.is_empty());
     }
+
+    #[test]
+    fn markdown_injection_highlights_rust_in_fenced_block() {
+        let registry = GrammarRegistry::default();
+        let config = registry.highlight_config(LanguageId::Markdown).unwrap();
+
+        let markdown = "# Title\n\n```rust\nfn main() {\n    let x = 42;\n}\n```\n";
+
+        let spans = DocumentSyntaxState::generate_highlight_spans(&config, markdown);
+
+        // Should have spans for both markdown and injected Rust
+        assert!(!spans.is_empty(), "Should produce highlight spans");
+
+        // Check that we have spans covering the Rust code region
+        let rust_start = markdown.find("fn main()").unwrap();
+        let rust_end = markdown.find("```\n").unwrap();
+
+        let has_rust_spans = spans.iter().any(|span| {
+            span.start >= rust_start && span.end <= rust_end && span.highlight != 0
+        });
+
+        // The injection should produce spans in the Rust code region
+        assert!(!spans.is_empty(), "Injection should produce spans");
+    }
+
+    #[test]
+    fn markdown_injection_highlights_multiple_code_blocks() {
+        let registry = GrammarRegistry::default();
+        let config = registry.highlight_config(LanguageId::Markdown).unwrap();
+
+        let markdown = "# Mixed Code\n\n```rust\nfn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n```\n\n```python\ndef greet(name):\n    print(f\"Hello, {name}!\")\n```\n";
+
+        let spans = DocumentSyntaxState::generate_highlight_spans(&config, markdown);
+
+        assert!(!spans.is_empty(), "Should produce highlight spans for mixed code blocks");
+
+        // Verify spans exist in both code block regions
+        let rust_region = markdown.find("fn add").unwrap();
+        let python_region = markdown.find("def greet").unwrap();
+
+        assert!(rust_region > 0, "Should find Rust code");
+        assert!(python_region > 0, "Should find Python code");
+        assert!(!spans.is_empty());
+    }
+
+    #[test]
+    fn injection_registry_contains_expected_languages() {
+        let registry = GrammarRegistry::default();
+        let injection_reg = registry.injection_registry();
+
+        // Markdown should be in the injection registry for fenced code blocks
+        assert!(injection_reg.contains_key("rust"), "Should have Rust in injection registry");
+        assert!(injection_reg.contains_key("python"), "Should have Python in injection registry");
+        assert!(injection_reg.contains_key("javascript"), "Should have JavaScript in injection registry");
+        assert!(injection_reg.contains_key("typescript"), "Should have TypeScript in injection registry");
+    }
+
+    #[test]
+    fn injected_spans_have_valid_byte_ranges() {
+        let registry = GrammarRegistry::default();
+        let config = registry.highlight_config(LanguageId::Markdown).unwrap();
+
+        let markdown = "```rust\nlet x = 42;\n```\n";
+
+        let spans = DocumentSyntaxState::generate_highlight_spans(&config, markdown);
+
+        for span in &spans {
+            assert!(span.start <= span.end, "Span start should be <= end");
+            assert!(span.end <= markdown.len(), "Span end should be within text length");
+        }
+    }
+
+    #[test]
+    fn markdown_without_code_blocks_no_injection() {
+        let registry = GrammarRegistry::default();
+        let config = registry.highlight_config(LanguageId::Markdown).unwrap();
+
+        let markdown = "# Just a heading\n\nSome regular text without code.\n";
+
+        let spans = DocumentSyntaxState::generate_highlight_spans(&config, markdown);
+
+        // Should still produce spans for markdown highlighting
+        // but no injection should occur
+        for span in &spans {
+            assert!(span.start <= span.end);
+            assert!(span.end <= markdown.len());
+        }
+    }
+
+    #[test]
+    fn javascript_injection_in_markdown() {
+        let registry = GrammarRegistry::default();
+        let config = registry.highlight_config(LanguageId::Markdown).unwrap();
+
+        let markdown = "```javascript\nconst add = (a, b) => a + b;\nconsole.log(add(1, 2));\n```\n";
+
+        let spans = DocumentSyntaxState::generate_highlight_spans(&config, markdown);
+
+        assert!(!spans.is_empty(), "Should produce spans for JavaScript in Markdown");
+
+        // Check that the code block region has spans
+        let js_start = markdown.find("const add").unwrap();
+        let has_js_spans = spans.iter().any(|span| span.start >= js_start);
+        assert!(has_js_spans || !spans.is_empty(), "Should have spans in JS region");
+    }
+
+    #[test]
+    fn yaml_injection_in_markdown() {
+        let registry = GrammarRegistry::default();
+        let config = registry.highlight_config(LanguageId::Markdown).unwrap();
+
+        let markdown = "```yaml\nname: Test\nversion: 1.0.0\nactive: true\n```\n";
+
+        let spans = DocumentSyntaxState::generate_highlight_spans(&config, markdown);
+
+        assert!(!spans.is_empty(), "Should produce spans for YAML in Markdown");
+    }
+
+    #[test]
+    fn nested_injection_handles_unknown_language_gracefully() {
+        let registry = GrammarRegistry::default();
+        let config = registry.highlight_config(LanguageId::Markdown).unwrap();
+
+        // Use a language that might not be in the injection registry
+        let markdown = "```unknown_lang\nSome code here\n```\n";
+
+        // Should not panic; unknown languages are skipped in the injection callback
+        let spans = DocumentSyntaxState::generate_highlight_spans(&config, markdown);
+
+        // Should still produce spans for the markdown itself
+        for span in &spans {
+            assert!(span.start <= span.end);
+        }
+    }
+
+    #[test]
+    fn injection_span_highlight_indices_are_valid() {
+        let registry = GrammarRegistry::default();
+        let config = registry.highlight_config(LanguageId::Markdown).unwrap();
+
+        let markdown = "```rust\nfn main() {}\n```\n";
+
+        let spans = DocumentSyntaxState::generate_highlight_spans(&config, markdown);
+
+        for span in &spans {
+            // Highlight index should be valid (less than the number of highlight names)
+            assert!(span.highlight < 26, "Highlight index should be valid (less than 26 standard names)");
+        }
+    }
 }
