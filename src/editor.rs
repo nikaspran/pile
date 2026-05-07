@@ -540,7 +540,6 @@ pub fn show_editor(
 
                 let line_text = layout.wrapped_line_text(&document.rope, line_index);
                 let line_start_byte = layout.wrapped_line_byte_start(&document.rope, line_index);
-                let line_text_str: String = line_text.chars().collect();
 
                 // Get syntax highlight spans for this line
                 let highlight_spans: Vec<(usize, usize, egui::Color32)> = if !is_large_file {
@@ -590,7 +589,7 @@ pub fn show_editor(
                     let mut span_idx = 0;
                     let mut byte_pos = 0;
 
-                    for (_i, ch) in line_text_str.chars().enumerate() {
+                    for ch in line_text.chars() {
                         let (display_ch, mut color) = match ch {
                             ' ' => ('·', whitespace_color),
                             '\t' => ('→', whitespace_color),
@@ -612,10 +611,24 @@ pub fn show_editor(
                             }
                         }
 
+                        // Render the character - use a small buffer for whitespace display chars
+                        let mut ch_buf = [0u8; 4];
+                        let display_str = if ch == ' ' || ch == '\t' {
+                            display_ch.encode_utf8(&mut ch_buf);
+                            // SAFETY: ch_buf lives until end of this iteration
+                            // We need to use a reference that lasts for this iteration only
+                            // The painter.text call below uses display_str, so this is fine
+                            // as long as ch_buf is not dropped before painter.text
+                            unsafe { std::str::from_utf8_unchecked(&ch_buf[..display_ch.len_utf8()]) }
+                        } else {
+                            ch.encode_utf8(&mut ch_buf);
+                            unsafe { std::str::from_utf8_unchecked(&ch_buf[..ch.len_utf8()]) }
+                        };
+
                         painter.text(
                             text_pos + egui::vec2(x_offset, 0.0),
                             egui::Align2::LEFT_TOP,
-                            display_ch.to_string(),
+                            display_str,
                             layout.font_id.clone(),
                             color,
                         );
@@ -623,18 +636,25 @@ pub fn show_editor(
                         byte_pos += ch.len_utf8();
                     }
                 } else {
-                    // Render with syntax highlighting
+                    // Render with syntax highlighting using RopeSlice chunks to avoid allocation
                     if highlight_spans.is_empty() {
-                        // No highlights: render entire line with default color
-                        painter.text(
-                            text_pos,
-                            egui::Align2::LEFT_TOP,
-                            &line_text_str,
-                            layout.font_id.clone(),
-                            ui.visuals().text_color(),
-                        );
+                        // No highlights: render using chunks directly from RopeSlice
+                        let mut x_offset = 0.0;
+                        for chunk in line_text.chunks() {
+                            painter.text(
+                                text_pos + egui::vec2(x_offset, 0.0),
+                                egui::Align2::LEFT_TOP,
+                                chunk,
+                                layout.font_id.clone(),
+                                ui.visuals().text_color(),
+                            );
+                            x_offset += layout.char_width * chunk.chars().count() as f32;
+                        }
                     } else {
                         // Render line piece-by-piece with different colors
+                        // Convert line_text to a string once for slicing with highlight spans
+                        // This is still needed because highlight spans use byte positions
+                        let line_text_str: String = line_text.chars().collect();
                         let mut x_offset = 0.0;
                         let mut last_byte = 0;
                         let default_color = ui.visuals().text_color();
@@ -656,8 +676,8 @@ pub fn show_editor(
                                         layout.font_id.clone(),
                                         default_color,
                                     );
-                                    x_offset +=
-                                        layout.char_width * text_segment.chars().count() as f32;
+                                        x_offset +=
+                                            layout.char_width * text_segment.chars().count() as f32;
                                 }
                             }
 
@@ -674,8 +694,8 @@ pub fn show_editor(
                                         layout.font_id.clone(),
                                         color,
                                     );
-                                    x_offset +=
-                                        layout.char_width * text_segment.chars().count() as f32;
+                                        x_offset +=
+                                            layout.char_width * text_segment.chars().count() as f32;
                                 }
                             }
 
