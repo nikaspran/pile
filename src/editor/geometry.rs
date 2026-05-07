@@ -1,4 +1,4 @@
-use crop::Rope;
+use crop::{Rope, RopeSlice};
 use eframe::egui;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -237,30 +237,46 @@ pub fn visual_line_bounds(rope: &Rope, line_index: usize) -> (usize, usize) {
     (start, end)
 }
 
-pub(super) fn visual_line_text(rope: &Rope, line_index: usize) -> String {
+pub(super) fn visual_line_text<'a>(rope: &'a Rope, line_index: usize) -> RopeSlice<'a> {
     if rope.line_len() == 0 || line_index >= rope.line_len() {
-        String::new()
+        rope.byte_slice(..0)
     } else {
-        rope.line(line_index).to_string()
+        rope.line(line_index)
     }
 }
 
 /// Get the text for a wrapped line given the visual line map.
 #[allow(dead_code)]
-pub fn wrapped_line_text(
-    rope: &Rope,
+pub fn wrapped_line_text<'a>(
+    rope: &'a Rope,
     visual_line_map: &[(usize, usize, usize)],
     wrapped_line_index: usize,
-) -> String {
+) -> RopeSlice<'a> {
     let Some(&(doc_line, start_col, end_col)) = visual_line_map.get(wrapped_line_index) else {
-        return String::new();
+        return rope.byte_slice(..0);
     };
-    let line_text = visual_line_text(rope, doc_line);
-    line_text
-        .chars()
-        .skip(start_col)
-        .take(end_col - start_col)
-        .collect()
+    let line_slice = visual_line_text(rope, doc_line);
+    // Convert char indices to byte indices within the line slice
+    let start_byte = char_index_to_byte_offset(line_slice, start_col);
+    let end_byte = char_index_to_byte_offset(line_slice, end_col);
+    line_slice.byte_slice(start_byte..end_byte)
+}
+
+/// Convert a character index to a byte offset within a RopeSlice.
+pub fn char_index_to_byte_offset(slice: RopeSlice<'_>, char_index: usize) -> usize {
+    if char_index == 0 {
+        return 0;
+    }
+    let mut byte_offset = 0;
+    let mut char_count = 0;
+    for c in slice.chars() {
+        if char_count >= char_index {
+            break;
+        }
+        byte_offset += c.len_utf8();
+        char_count += 1;
+    }
+    byte_offset
 }
 
 pub(super) fn line_index_of_byte(rope: &Rope, offset: usize) -> usize {
@@ -451,27 +467,16 @@ pub fn create_column_selection(
     for line in min_line..=max_line {
         let line_start = byte_of_visual_line(rope, line);
         let (_, line_end) = visual_line_bounds(rope, line);
-        let line_text = rope.byte_slice(line_start..line_end).to_string();
+        let line_slice = rope.byte_slice(line_start..line_end);
 
-        // Count characters to find byte positions for the column range
-        let mut char_count = 0usize;
-        let mut sel_start = line_start;
-        let mut sel_end = line_start;
-
-        for _char in line_text.chars() {
-            if char_count == min_col {
-                sel_start = line_start + line_text.chars().take(min_col).map(|c| c.len_utf8()).sum::<usize>();
-            }
-            if char_count == max_col {
-                sel_end = line_start + line_text.chars().take(max_col).map(|c| c.len_utf8()).sum::<usize>();
-                break;
-            }
-            char_count += 1;
-        }
-        if char_count < max_col {
+        // Convert character column positions to byte offsets
+        let sel_start = line_start + char_index_to_byte_offset(line_slice, min_col);
+        let sel_end = if max_col <= line_slice.chars().count() {
+            line_start + char_index_to_byte_offset(line_slice, max_col)
+        } else {
             // If we didn't reach max_col, use end of line
-            sel_end = line_end;
-        }
+            line_end
+        };
 
         new_selections.push(Selection {
             anchor: sel_start,

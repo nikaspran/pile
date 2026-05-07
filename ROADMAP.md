@@ -132,7 +132,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
   time, search time, and memory use.
 - Completed: Add large-buffer tests for megabyte and multi-megabyte scratch documents.
 - Completed: Avoid full-buffer string conversion in render and edit paths.
-- Use rope slices for viewport layout, search windows, and parser input.
+- Completed: Use rope slices for viewport layout, search windows, and parser input.
 - Add background parse scheduling with cancellation by document revision.
 - Add profiling hooks for UI frame time and save-worker latency.
 - Audit allocations in typing, scrolling, search, and tab switching.

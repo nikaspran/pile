@@ -540,6 +540,7 @@ pub fn show_editor(
 
                 let line_text = layout.wrapped_line_text(&document.rope, line_index);
                 let line_start_byte = layout.wrapped_line_byte_start(&document.rope, line_index);
+                let line_text_str: String = line_text.chars().collect();
 
                 // Get syntax highlight spans for this line
                 let highlight_spans: Vec<(usize, usize, egui::Color32)> = if !is_large_file {
@@ -551,7 +552,7 @@ pub fn show_editor(
                                 visible_start,
                                 visible_end,
                             );
-                            let line_end_byte = line_start_byte + line_text.len();
+                            let line_end_byte = line_start_byte + line_text.byte_len();
                             // Spans are relative to visible_text (offset 0), so add visible_start
                             spans
                                 .into_iter()
@@ -587,9 +588,9 @@ pub fn show_editor(
                     let whitespace_color = ui.visuals().weak_text_color();
                     let mut x_offset = 0.0;
                     let mut span_idx = 0;
+                    let mut byte_pos = 0;
 
-                    for (i, ch) in line_text.chars().enumerate() {
-                        let byte_pos = line_text.char_indices().nth(i).map(|(b, _)| b).unwrap_or(0);
+                    for (_i, ch) in line_text_str.chars().enumerate() {
                         let (display_ch, mut color) = match ch {
                             ' ' => ('·', whitespace_color),
                             '\t' => ('→', whitespace_color),
@@ -619,6 +620,7 @@ pub fn show_editor(
                             color,
                         );
                         x_offset += layout.char_width;
+                        byte_pos += ch.len_utf8();
                     }
                 } else {
                     // Render with syntax highlighting
@@ -627,7 +629,7 @@ pub fn show_editor(
                         painter.text(
                             text_pos,
                             egui::Align2::LEFT_TOP,
-                            line_text,
+                            &line_text_str,
                             layout.font_id.clone(),
                             ui.visuals().text_color(),
                         );
@@ -645,7 +647,7 @@ pub fn show_editor(
                             // Render unhighlighted text before this span
                             if span_start > last_byte {
                                 let text_segment =
-                                    &line_text[last_byte..span_start.min(line_text.len())];
+                                    &line_text_str[last_byte..span_start.min(line_text_str.len())];
                                 if !text_segment.is_empty() {
                                     painter.text(
                                         text_pos + egui::vec2(x_offset, 0.0),
@@ -660,10 +662,10 @@ pub fn show_editor(
                             }
 
                             // Render highlighted text
-                            let segment_start = span_start.min(line_text.len());
-                            let segment_end = span_end.min(line_text.len());
+                            let segment_start = span_start.min(line_text_str.len());
+                            let segment_end = span_end.min(line_text_str.len());
                             if segment_start < segment_end {
-                                let text_segment = &line_text[segment_start..segment_end];
+                                let text_segment = &line_text_str[segment_start..segment_end];
                                 if !text_segment.is_empty() {
                                     painter.text(
                                         text_pos + egui::vec2(x_offset, 0.0),
@@ -681,8 +683,8 @@ pub fn show_editor(
                         }
 
                         // Render remaining unhighlighted text
-                        if last_byte < line_text.len() {
-                            let text_segment = &line_text[last_byte..];
+                        if last_byte < line_text_str.len() {
+                            let text_segment = &line_text_str[last_byte..];
                             if !text_segment.is_empty() {
                                 painter.text(
                                     text_pos + egui::vec2(x_offset, 0.0),

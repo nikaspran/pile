@@ -375,14 +375,12 @@ impl PileApp {
         let (ack_tx, ack_rx) = bounded(1);
         let snapshot = create_snapshot(&self.state, &self.panes, self.active_pane);
         let _ = self.save_tx.send(SaveMsg::Flush(snapshot, ack_tx));
-        if let Ok(result) = ack_rx.recv_timeout(Duration::from_secs(2)) {
-            if let Err(err) = result {
-                self.recovery_events.push(RecoveryEvent {
-                    timestamp: std::time::SystemTime::now(),
-                    kind: RecoveryEventKind::SaveFailed,
-                    message: format!("Flush save failed: {}", err),
-                });
-            }
+        if let Ok(Err(err)) = ack_rx.recv_timeout(Duration::from_secs(2)) {
+            self.recovery_events.push(RecoveryEvent {
+                timestamp: std::time::SystemTime::now(),
+                kind: RecoveryEventKind::SaveFailed,
+                message: format!("Flush save failed: {}", err),
+            });
         }
     }
 

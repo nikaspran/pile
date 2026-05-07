@@ -20,7 +20,9 @@ pub struct ParseRequest {
     pub revision: u64,
     /// Language to parse as.
     pub language: LanguageId,
-    /// Document text (cheaply cloned rope converted to string for parsing).
+    /// Document text for the visible range.
+    /// Note: tree-sitter requires &[u8] input, so materialization is necessary.
+    /// We only materialize the visible byte range to minimize allocation.
     pub text: String,
     /// Visible byte range for span generation.
     pub visible_start: usize,
@@ -186,20 +188,19 @@ fn process_parse_request(request: ParseRequest, event_tx: &Sender<ParseEvent>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::DocumentId;
     use crate::syntax::LanguageId;
 
     #[test]
     fn parse_worker_creation() {
         let worker = ParseWorker::spawn();
         // Just test that it creates without panicking
-        let _ = worker.request_tx();
+        let _ = worker;
     }
 
     #[test]
     fn parse_request_creation() {
         let request = ParseRequest {
-            document_id: DocumentId::new(),
+            document_id: uuid::Uuid::new_v4(),
             revision: 1,
             language: LanguageId::Rust,
             text: "fn main() {}".to_string(),

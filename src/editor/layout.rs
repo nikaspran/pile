@@ -1,4 +1,4 @@
-use crop::Rope;
+use crop::{Rope, RopeSlice};
 use eframe::egui;
 
 /// Cached text layout metrics for the editor.
@@ -197,19 +197,17 @@ impl TextLayoutPipeline {
     }
 
     /// Get the text for a wrapped line.
-    pub fn wrapped_line_text(&self, rope: &Rope, wrapped_line_index: usize) -> String {
+    pub fn wrapped_line_text<'a>(&self, rope: &'a Rope, wrapped_line_index: usize) -> RopeSlice<'a> {
         if self.wrap_mode == WrapMode::NoWrap {
             visual_line_text(rope, wrapped_line_index)
         } else {
             let Some(&(doc_line, start_col, end_col)) = self.visual_line_map.get(wrapped_line_index) else {
-                return String::new();
+                return rope.byte_slice(..0);
             };
-            let line_text = visual_line_text(rope, doc_line);
-            line_text
-                .chars()
-                .skip(start_col)
-                .take(end_col - start_col)
-                .collect()
+            let line_slice = visual_line_text(rope, doc_line);
+            let start_byte = char_index_to_byte_offset(line_slice, start_col);
+            let end_byte = char_index_to_byte_offset(line_slice, end_col);
+            line_slice.byte_slice(start_byte..end_byte)
         }
     }
 
@@ -222,15 +220,9 @@ impl TextLayoutPipeline {
                 return 0;
             };
             let line_start = byte_of_visual_line(rope, doc_line);
-            let line_text = visual_line_text(rope, doc_line);
-            let mut byte_offset = line_start;
-            for (i, c) in line_text.chars().enumerate() {
-                if i >= start_col {
-                    break;
-                }
-                byte_offset += c.len_utf8();
-            }
-            byte_offset
+            let line_slice = visual_line_text(rope, doc_line);
+            let byte_offset_within_line = char_index_to_byte_offset(line_slice, start_col);
+            line_start + byte_offset_within_line
         }
     }
 }
@@ -257,8 +249,8 @@ fn build_wrap_map(
 
     let mut map = Vec::new();
     for doc_line in 0..visual_line_count(rope) {
-        let line_text = visual_line_text(rope, doc_line);
-        let line_len_chars = line_text.chars().count();
+        let line_slice = visual_line_text(rope, doc_line);
+        let line_len_chars = line_slice.chars().count();
 
         if line_len_chars == 0 {
             map.push((doc_line, 0, 0));
@@ -306,11 +298,11 @@ fn byte_for_wrapped_line_column(
 
     let target_col = start_col + column;
     let line_start_byte = byte_of_visual_line(rope, doc_line);
-    let line_text = visual_line_text(rope, doc_line);
+    let line_slice = visual_line_text(rope, doc_line);
     let mut byte_offset = line_start_byte;
     let mut char_count = 0usize;
 
-    for c in line_text.chars() {
+    for c in line_slice.chars() {
         if char_count >= target_col {
             break;
         }
@@ -323,6 +315,7 @@ fn byte_for_wrapped_line_column(
 
 // Re-export helpers from geometry so the pipeline is self-contained for callers
 use super::{
-    byte_for_line_column, byte_of_visual_line, column_of_byte, decimal_digits,
-    line_index_of_byte, monospace_char_width, visual_line_count, visual_line_text,
+    byte_for_line_column, byte_of_visual_line, char_index_to_byte_offset, column_of_byte,
+    decimal_digits, line_index_of_byte, monospace_char_width, visual_line_count,
+    visual_line_text,
 };

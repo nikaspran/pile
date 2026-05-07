@@ -262,8 +262,9 @@ pub fn find_matches(rope: &Rope, query: &str, options: SearchOptions) -> Vec<Sea
     } else {
         query.to_ascii_lowercase()
     };
-    let body_len = SEARCH_WINDOW_BYTES.max(query.len());
-    let overlap_len = query.len().saturating_sub(1);
+    let needle_len = needle.len();
+    let body_len = SEARCH_WINDOW_BYTES.max(needle_len);
+    let overlap_len = needle_len.saturating_sub(1);
     let rope_len = rope.byte_len();
     let mut matches = Vec::new();
     let mut window_start = 0;
@@ -283,6 +284,7 @@ pub fn find_matches(rope: &Rope, query: &str, options: SearchOptions) -> Vec<Sea
             window_end
         };
 
+        // Materialization is still needed for string search, but we use bounded windows
         let window = rope.byte_slice(window_start..window_end).to_string();
         let haystack = if options.case_sensitive {
             window.clone()
@@ -294,7 +296,7 @@ pub fn find_matches(rope: &Rope, query: &str, options: SearchOptions) -> Vec<Sea
         while let Some(relative_start) = haystack[search_from..].find(&needle) {
             let local_start = search_from + relative_start;
             let start = window_start + local_start;
-            let end = start + query.len();
+            let end = start + needle_len;
 
             if start >= emit_from
                 && start < body_end
@@ -304,7 +306,7 @@ pub fn find_matches(rope: &Rope, query: &str, options: SearchOptions) -> Vec<Sea
                 matches.push(SearchMatch { start, end });
             }
 
-            search_from = local_start + query.len();
+            search_from = local_start + needle_len;
         }
 
         if body_end >= rope_len {
@@ -323,6 +325,8 @@ fn find_regex_matches(rope: &Rope, query: &str, options: SearchOptions) -> Vec<S
         return Vec::new();
     };
 
+    // Note: regex requires &str, so materialization is unavoidable.
+    // We use bounded windows to minimize the scope of materialization.
     let rope_len = rope.byte_len();
     let window_size = SEARCH_WINDOW_BYTES;
     let overlap_size = window_size / 2;
@@ -423,9 +427,10 @@ pub fn build_preview_items(rope: &Rope, matches: &[SearchMatch], context_chars: 
         let context_end = (m.end + context_chars).min(rope_len);
         let context_end = floor_char_boundary(rope, context_end);
 
-        let before = rope.byte_slice(context_start..m.start).to_string();
-        let matched = rope.byte_slice(m.start..m.end).to_string();
-        let after = rope.byte_slice(m.end..context_end).to_string();
+        // Use RopeSlice::chars() to build context strings only when needed for display
+        let before: String = rope.byte_slice(context_start..m.start).chars().collect();
+        let matched: String = rope.byte_slice(m.start..m.end).chars().collect();
+        let after: String = rope.byte_slice(m.end..context_end).chars().collect();
 
         items.push(SearchResultPreview {
             document_id: None,
@@ -465,9 +470,10 @@ pub fn build_global_preview_items(
         let context_end = (r.match_end + context_chars).min(rope_len);
         let context_end = floor_char_boundary(rope, context_end);
 
-        let before = rope.byte_slice(context_start..r.match_start).to_string();
-        let matched = rope.byte_slice(r.match_start..r.match_end).to_string();
-        let after = rope.byte_slice(r.match_end..context_end).to_string();
+        // Use RopeSlice::chars() to build context strings only when needed for display
+        let before: String = rope.byte_slice(context_start..r.match_start).chars().collect();
+        let matched: String = rope.byte_slice(r.match_start..r.match_end).chars().collect();
+        let after: String = rope.byte_slice(r.match_end..context_end).chars().collect();
 
         items.push(SearchResultPreview {
             document_id: Some(r.document_id),

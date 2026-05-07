@@ -87,7 +87,8 @@ pub fn show_minimap(
         }
 
         let line_text = visual_line_text(rope, line_idx);
-        let trimmed = line_text.trim();
+        let line_text_str: String = line_text.chars().collect();
+        let trimmed = line_text_str.trim();
 
         // Skip empty lines
         if trimmed.is_empty() {
