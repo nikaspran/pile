@@ -154,4 +154,4 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: Document persistence guarantees and recovery behavior.
 - Completed: Document language detection and injection architecture.
 - Completed: Document performance invariants for future contributors and agents.
-- Document non-goals so feature additions do not pull the app toward IDE scope.
+- Completed: Document non-goals so feature additions do not pull the app toward IDE scope.
