@@ -1500,6 +1500,29 @@ fn word_at_selection_handles_non_alphanumeric_word() {
 }
 
 #[test]
+fn add_all_matches_does_not_duplicate_primary_occurrence() {
+    let mut document = document("foo foo");
+    set_primary_selection(&mut document, Selection::caret(0));
+
+    add_all_matches(&mut document);
+
+    assert_eq!(
+        document.selections,
+        vec![
+            Selection::caret(0),
+            Selection { anchor: 4, head: 7 },
+        ]
+    );
+    assert_eq!(
+        document.occurrence_selections,
+        vec![
+            Selection { anchor: 0, head: 3 },
+            Selection { anchor: 4, head: 7 },
+        ]
+    );
+}
+
+#[test]
 fn grapheme_movement_respects_clusters() {
     // "café" where 'é' is e + combining acute (1+2=3 bytes, 1 grapheme)
     let rope = Rope::from("café");

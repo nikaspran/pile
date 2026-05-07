@@ -116,8 +116,13 @@ pub fn add_all_matches(document: &mut Document) {
     };
     let matches = search::find_matches(rope, &query, options);
 
-    // Add all matches as selections
+    let primary_range = query_range.unwrap();
+
+    // Add all matches as selections, excluding the primary occurrence already present.
     for m in &matches {
+        if (m.start, m.end) == primary_range {
+            continue;
+        }
         let sel = Selection {
             anchor: m.start,
             head: m.end,
@@ -213,14 +218,10 @@ pub fn replace_selection_all(document: &mut Document, text: &str) -> bool {
         return false;
     }
 
-    // Collect all edits (in reverse order to preserve offsets)
     let mut sorted_selections = document.selections.clone();
     sorted_selections.sort_by_key(|s| s.anchor.min(s.head));
-    sorted_selections.reverse();
 
     let mut edits = Vec::new();
-    let mut offset_shift: isize = 0;
-    let mut new_selections = Vec::new();
 
     for selection in &sorted_selections {
         let (start, end) = if selection.anchor <= selection.head {
@@ -229,22 +230,16 @@ pub fn replace_selection_all(document: &mut Document, text: &str) -> bool {
             (selection.head, selection.anchor)
         };
 
-        let adjusted_start = (start as isize + offset_shift) as usize;
-        let adjusted_end = (end as isize + offset_shift) as usize;
-
-        if adjusted_start == adjusted_end && text.is_empty() {
+        if start == end && text.is_empty() {
             continue;
         }
 
         edits.push(DocumentEdit {
-            range: adjusted_start..adjusted_end,
+            range: start..end,
             inserted_text: text.to_owned(),
             selections_before: vec![*selection],
-            selections_after: vec![Selection::caret(adjusted_start + text.len())],
+            selections_after: vec![Selection::caret(start + text.len())],
         });
-
-        offset_shift += text.len() as isize - (adjusted_end as isize - adjusted_start as isize);
-        new_selections.push(Selection::caret(adjusted_start + text.len()));
     }
 
     if !edits.is_empty() {
@@ -261,14 +256,10 @@ pub fn backspace_all(document: &mut Document) -> bool {
         return false;
     }
 
-    // Process selections in reverse order
     let mut sorted_selections = document.selections.clone();
     sorted_selections.sort_by_key(|s| s.anchor.min(s.head));
-    sorted_selections.reverse();
 
     let mut edits = Vec::new();
-    let mut offset_shift: isize = 0;
-    let mut new_selections = Vec::new();
 
     for selection in &sorted_selections {
         let (start, end) = if selection.anchor <= selection.head {
@@ -277,30 +268,23 @@ pub fn backspace_all(document: &mut Document) -> bool {
             (selection.head, selection.anchor)
         };
 
-        let adjusted_start = (start as isize + offset_shift) as usize;
-        let adjusted_end = (end as isize + offset_shift) as usize;
-
-        if adjusted_start != adjusted_end {
+        if start != end {
             // Delete selection
             edits.push(DocumentEdit {
-                range: adjusted_start..adjusted_end,
+                range: start..end,
                 inserted_text: String::new(),
                 selections_before: vec![*selection],
-                selections_after: vec![Selection::caret(adjusted_start)],
+                selections_after: vec![Selection::caret(start)],
             });
-            offset_shift -= (adjusted_end - adjusted_start) as isize;
-            new_selections.push(Selection::caret(adjusted_start));
-        } else if adjusted_start > 0 {
+        } else if start > 0 {
             // Delete previous grapheme
-            let delete_start = previous_grapheme_boundary(&document.rope, adjusted_start);
+            let delete_start = previous_grapheme_boundary(&document.rope, start);
             edits.push(DocumentEdit {
-                range: delete_start..adjusted_start,
+                range: delete_start..start,
                 inserted_text: String::new(),
                 selections_before: vec![*selection],
                 selections_after: vec![Selection::caret(delete_start)],
             });
-            offset_shift -= (adjusted_start - delete_start) as isize;
-            new_selections.push(Selection::caret(delete_start));
         }
     }
 
@@ -323,8 +307,6 @@ pub fn delete_all(document: &mut Document) -> bool {
     sorted_selections.sort_by_key(|s| s.anchor.min(s.head));
 
     let mut edits = Vec::new();
-    let mut offset_shift: isize = 0;
-    let mut new_selections = Vec::new();
 
     for selection in &sorted_selections {
         let (start, end) = if selection.anchor <= selection.head {
@@ -333,30 +315,23 @@ pub fn delete_all(document: &mut Document) -> bool {
             (selection.head, selection.anchor)
         };
 
-        let adjusted_start = (start as isize + offset_shift) as usize;
-        let adjusted_end = (end as isize + offset_shift) as usize;
-
-        if adjusted_start != adjusted_end {
+        if start != end {
             // Delete selection
             edits.push(DocumentEdit {
-                range: adjusted_start..adjusted_end,
+                range: start..end,
                 inserted_text: String::new(),
                 selections_before: vec![*selection],
-                selections_after: vec![Selection::caret(adjusted_start)],
+                selections_after: vec![Selection::caret(start)],
             });
-            offset_shift -= (adjusted_end - adjusted_start) as isize;
-            new_selections.push(Selection::caret(adjusted_start));
-        } else if adjusted_start < document.rope.byte_len() {
+        } else if start < document.rope.byte_len() {
             // Delete next grapheme
-            let delete_end = next_grapheme_boundary(&document.rope, adjusted_start);
+            let delete_end = next_grapheme_boundary(&document.rope, start);
             edits.push(DocumentEdit {
-                range: adjusted_start..delete_end,
+                range: start..delete_end,
                 inserted_text: String::new(),
                 selections_before: vec![*selection],
-                selections_after: vec![Selection::caret(adjusted_start)],
+                selections_after: vec![Selection::caret(start)],
             });
-            offset_shift -= (delete_end - adjusted_start) as isize;
-            new_selections.push(Selection::caret(adjusted_start));
         }
     }
 

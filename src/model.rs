@@ -336,48 +336,52 @@ impl Document {
             return;
         }
 
+        let mut edits = edits;
+        edits.sort_by_key(|edit| edit.range.start);
+
+        let mut final_selections = Vec::new();
+        let mut final_offset: isize = 0;
+        for edit in &edits {
+            for selection in &edit.selections_after {
+                final_selections.push(Selection {
+                    anchor: shift_offset(selection.anchor, final_offset),
+                    head: shift_offset(selection.head, final_offset),
+                });
+            }
+            final_offset += edit.inserted_text.len() as isize
+                - (edit.range.end as isize - edit.range.start as isize);
+        }
+
         let mut transactions = Vec::new();
-        let mut offset: isize = 0;
 
         // Apply edits from last to first to preserve positions.
-        // Each edit's range was computed in the original document coordinates.
-        // As we apply edits from the end of the document backwards, we accumulate
-        // an offset that tells us how much the document has shifted for earlier edits.
         for edit in edits.iter().rev() {
-            let adjusted_start = (edit.range.start as isize + offset) as usize;
-            let adjusted_end = (edit.range.end as isize + offset) as usize;
+            let start = edit.range.start;
+            let end = edit.range.end;
 
             let deleted_text = self
                 .rope
-                .byte_slice(adjusted_start..adjusted_end)
+                .byte_slice(start..end)
                 .to_string();
 
-            // Store the ADJUSTED position (where edit was actually applied).
-            // This is the correct position to use during undo.
             transactions.push(EditTransaction {
-                start: adjusted_start,
-                end: adjusted_end,
+                start,
+                end,
                 deleted_text,
                 inserted_text: edit.inserted_text.clone(),
                 selections_before: edit.selections_before.clone(),
             });
 
-            // Apply the edit
-            if adjusted_start != adjusted_end {
-                self.rope.delete(adjusted_start..adjusted_end);
+            if start != end {
+                self.rope.delete(start..end);
             }
             if !edit.inserted_text.is_empty() {
-                self.rope.insert(adjusted_start, &edit.inserted_text);
+                self.rope.insert(start, &edit.inserted_text);
             }
-
-            // Update offset: the document has changed by (inserted - deleted) bytes
-            offset += edit.inserted_text.len() as isize
-                - (edit.range.end as isize - edit.range.start as isize);
         }
 
-        // Transactions are already in application order (last edit first in the vec).
         self.undo.record_multi(transactions);
-        self.selections = edits.last().unwrap().selections_after.clone();
+        self.selections = final_selections;
         self.revision += 1;
     }
 
@@ -476,6 +480,14 @@ impl Document {
         if self.tab_width == 0 || self.tab_width > 16 {
             self.tab_width = 4;
         }
+    }
+}
+
+fn shift_offset(offset: usize, shift: isize) -> usize {
+    if shift >= 0 {
+        offset.saturating_add(shift as usize)
+    } else {
+        offset.saturating_sub((-shift) as usize)
     }
 }
 
@@ -1167,6 +1179,38 @@ mod tests {
 
         document.apply_multi_edit(edits);
         assert_eq!(document.text(), "ABCDef");
+    }
+
+    #[test]
+    fn multi_edit_uses_original_offsets_for_different_length_replacements() {
+        let mut document = Document::new_untitled(1, 4, true);
+        document.replace_text("abc def ghi");
+        document.revision = 0;
+
+        let edits = vec![
+            DocumentEdit {
+                range: 0..3,
+                inserted_text: "alpha".to_owned(),
+                selections_before: vec![Selection::caret(0)],
+                selections_after: vec![Selection::caret(5)],
+            },
+            DocumentEdit {
+                range: 8..11,
+                inserted_text: "x".to_owned(),
+                selections_before: vec![Selection::caret(8)],
+                selections_after: vec![Selection::caret(9)],
+            },
+        ];
+
+        document.apply_multi_edit(edits);
+
+        assert_eq!(document.text(), "alpha def x");
+        assert_eq!(
+            document.selections,
+            vec![Selection::caret(5), Selection::caret(11)]
+        );
+        assert!(document.undo());
+        assert_eq!(document.text(), "abc def ghi");
     }
 
     #[test]

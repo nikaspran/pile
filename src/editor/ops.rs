@@ -128,18 +128,15 @@ pub fn convert_case_all_selections(document: &mut Document, case_type: CaseType)
 
     let selections: Vec<Selection> = document.selections.clone();
     let mut edits = Vec::new();
-    let mut offset: isize = 0;
 
     for selection in selections.iter() {
         let (start, end) = selection_range(*selection);
-        let adjusted_start = (start as isize + offset) as usize;
-        let adjusted_end = (end as isize + offset) as usize;
 
-        if adjusted_start == adjusted_end {
+        if start == end {
             continue;
         }
 
-        let text = document.rope.byte_slice(adjusted_start..adjusted_end).to_string();
+        let text = document.rope.byte_slice(start..end).to_string();
         let converted = match case_type {
             CaseType::Upper => text.to_uppercase(),
             CaseType::Lower => text.to_lowercase(),
@@ -151,13 +148,11 @@ pub fn convert_case_all_selections(document: &mut Document, case_type: CaseType)
         }
 
         edits.push(DocumentEdit {
-            range: adjusted_start..adjusted_end,
+            range: start..end,
             inserted_text: converted.clone(),
             selections_before: vec![*selection],
-            selections_after: vec![Selection::caret(adjusted_start + converted.len())],
+            selections_after: vec![Selection::caret(start + converted.len())],
         });
-
-        offset += converted.len() as isize - (adjusted_end as isize - adjusted_start as isize);
     }
 
     if edits.is_empty() {

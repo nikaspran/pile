@@ -482,12 +482,7 @@ impl PileApp {
                     // Update the document's syntax state
                     if let Some(document) = self.state.document_mut(result.document_id) {
                         // Only update if this result is still relevant
-                        if document.revision == result.revision
-                            && document
-                                .syntax_state
-                                .parsed_as()
-                                .map_or(false, |lang| lang == result.language)
-                        {
+                        if should_accept_parse_result(document, &result) {
                             document.syntax_state.update_from_parse_result(
                                 result.tree,
                                 result.spans,
@@ -2550,5 +2545,55 @@ fn create_snapshot(state: &AppState, panes: &[EditorPane], active_pane: usize) -
             })
             .collect(),
         active_pane,
+    }
+}
+
+fn should_accept_parse_result(
+    document: &Document,
+    result: &crate::parse_worker::ParseResult,
+) -> bool {
+    document.revision == result.revision
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::syntax::LanguageId;
+
+    #[test]
+    fn fresh_document_accepts_first_parse_result_for_current_revision() {
+        let mut document = Document::new_untitled(1, 4, true);
+        document.replace_text("fn main() {}");
+
+        let result = crate::parse_worker::ParseResult {
+            document_id: document.id,
+            revision: document.revision,
+            tree: None,
+            spans: Vec::new(),
+            language: LanguageId::Rust,
+            visible_start: 0,
+            visible_end: document.rope.byte_len(),
+        };
+
+        assert_eq!(document.syntax_state.parsed_as(), None);
+        assert!(should_accept_parse_result(&document, &result));
+    }
+
+    #[test]
+    fn stale_parse_result_is_rejected() {
+        let mut document = Document::new_untitled(1, 4, true);
+        document.replace_text("fn main() {}");
+
+        let result = crate::parse_worker::ParseResult {
+            document_id: document.id,
+            revision: document.revision.saturating_sub(1),
+            tree: None,
+            spans: Vec::new(),
+            language: LanguageId::Rust,
+            visible_start: 0,
+            visible_end: document.rope.byte_len(),
+        };
+
+        assert!(!should_accept_parse_result(&document, &result));
     }
 }

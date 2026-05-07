@@ -1,5 +1,5 @@
 use crop::Rope;
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 
 use crate::{
     editor::word_at_selection,
@@ -320,7 +320,10 @@ pub fn find_matches(rope: &Rope, query: &str, options: SearchOptions) -> Vec<Sea
 }
 
 fn find_regex_matches(rope: &Rope, query: &str, options: SearchOptions) -> Vec<SearchMatch> {
-    let regex = Regex::new(query).ok();
+    let regex = RegexBuilder::new(query)
+        .case_insensitive(!options.case_sensitive)
+        .build()
+        .ok();
     let Some(regex) = regex.as_ref() else {
         return Vec::new();
     };
@@ -555,6 +558,43 @@ mod tests {
                 SearchMatch { start: 17, end: 20 },
             ]
         );
+    }
+
+    #[test]
+    fn regex_search_honors_case_insensitive_option() {
+        let matches = find_matches(
+            &Rope::from("Foo foo FOO"),
+            "foo",
+            SearchOptions {
+                case_sensitive: false,
+                whole_word: false,
+                use_regex: true,
+            },
+        );
+
+        assert_eq!(
+            matches,
+            vec![
+                SearchMatch { start: 0, end: 3 },
+                SearchMatch { start: 4, end: 7 },
+                SearchMatch { start: 8, end: 11 },
+            ]
+        );
+    }
+
+    #[test]
+    fn regex_search_honors_case_sensitive_option() {
+        let matches = find_matches(
+            &Rope::from("Foo foo FOO"),
+            "foo",
+            SearchOptions {
+                case_sensitive: true,
+                whole_word: false,
+                use_regex: true,
+            },
+        );
+
+        assert_eq!(matches, vec![SearchMatch { start: 4, end: 7 }]);
     }
 
     #[test]

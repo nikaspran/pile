@@ -158,10 +158,10 @@ fn process_parse_request(request: ParseRequest, event_tx: &Sender<ParseEvent>) {
     // Generate highlight spans
     let spans = DocumentSyntaxState::generate_highlight_spans(&config, &request.text);
 
-    // Filter spans to visible range
+    // Spans are relative to request.text, which is already the visible range.
     let visible_spans: Vec<HighlightSpan> = spans
         .into_iter()
-        .filter(|span| span.start >= request.visible_start && span.end <= request.visible_end)
+        .filter(|span| span.end <= request.text.len())
         .collect();
 
     let result = ParseResult {
@@ -212,5 +212,29 @@ mod tests {
         };
         assert_eq!(request.revision, 1);
         assert_eq!(request.language, LanguageId::Rust);
+    }
+
+    #[test]
+    fn parse_result_keeps_relative_spans_for_nonzero_visible_range() {
+        let (event_tx, event_rx) = bounded(1);
+        let request = ParseRequest {
+            document_id: uuid::Uuid::new_v4(),
+            revision: 1,
+            language: LanguageId::Rust,
+            text: "fn main() {\n    let value = 1;\n}".to_owned(),
+            visible_start: 1024,
+            visible_end: 1056,
+        };
+
+        process_parse_request(request, &event_tx);
+
+        let ParseEvent::Result(result) = event_rx.try_recv().unwrap();
+        assert!(!result.spans.is_empty());
+        assert!(
+            result
+                .spans
+                .iter()
+                .all(|span| span.end <= result.visible_end - result.visible_start)
+        );
     }
 }
