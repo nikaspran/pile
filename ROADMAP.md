@@ -152,6 +152,6 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: document the command model and keybinding conventions.
 - Completed: document the current editor split and transaction direction.
 - Completed: Document persistence guarantees and recovery behavior.
-- Document language detection and injection architecture.
+- Completed: Document language detection and injection architecture.
 - Document performance invariants for future contributors and agents.
 - Document non-goals so feature additions do not pull the app toward IDE scope.
