@@ -139,7 +139,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 
 ## Testing
 
-- Add model tests for editing transactions and multi-cursor behavior.
+- Completed: Add model tests for editing transactions and multi-cursor behavior.
 - Add persistence tests for schema migration and corrupt restore handling.
 - Add syntax tests for injected ranges and mixed-language documents.
 - Add golden tests for search/replace edge cases.
