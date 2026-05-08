@@ -418,7 +418,11 @@ pub fn find_matches_in_documents(
     results
 }
 
-pub fn build_preview_items(rope: &Rope, matches: &[SearchMatch], context_chars: usize) -> Vec<SearchResultPreview> {
+pub fn build_preview_items(
+    rope: &Rope,
+    matches: &[SearchMatch],
+    context_chars: usize,
+) -> Vec<SearchResultPreview> {
     let mut items = Vec::new();
     let rope_len = rope.byte_len();
 
@@ -454,10 +458,7 @@ pub fn build_global_preview_items(
     context_chars: usize,
 ) -> Vec<SearchResultPreview> {
     use std::collections::HashMap;
-    let doc_map: HashMap<DocumentId, &Document> = documents
-        .iter()
-        .map(|d| (d.id, d))
-        .collect();
+    let doc_map: HashMap<DocumentId, &Document> = documents.iter().map(|d| (d.id, d)).collect();
     let mut items = Vec::new();
 
     for r in results {
@@ -474,8 +475,14 @@ pub fn build_global_preview_items(
         let context_end = floor_char_boundary(rope, context_end);
 
         // Use RopeSlice::chars() to build context strings only when needed for display
-        let before: String = rope.byte_slice(context_start..r.match_start).chars().collect();
-        let matched: String = rope.byte_slice(r.match_start..r.match_end).chars().collect();
+        let before: String = rope
+            .byte_slice(context_start..r.match_start)
+            .chars()
+            .collect();
+        let matched: String = rope
+            .byte_slice(r.match_start..r.match_end)
+            .chars()
+            .collect();
         let after: String = rope.byte_slice(r.match_end..context_end).chars().collect();
 
         items.push(SearchResultPreview {

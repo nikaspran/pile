@@ -40,7 +40,10 @@ pub fn check_snapshot_budget(snapshot: &SessionSnapshot) -> BudgetCheck {
         Ok(bytes) => {
             let size = bytes.len();
             if size > MAX_SNAPSHOT_SIZE {
-                BudgetCheck::TooLarge { size, max: MAX_SNAPSHOT_SIZE }
+                BudgetCheck::TooLarge {
+                    size,
+                    max: MAX_SNAPSHOT_SIZE,
+                }
             } else {
                 BudgetCheck::Ok
             }
@@ -224,10 +227,7 @@ fn migrate_session(mut envelope: SessionEnvelope) -> Result<SessionSnapshot> {
 
     // Now at current version, deserialize
     if envelope.payload_type != "SessionSnapshot" {
-        anyhow::bail!(
-            "unexpected payload type: {}",
-            envelope.payload_type
-        );
+        anyhow::bail!("unexpected payload type: {}", envelope.payload_type);
     }
 
     let snapshot: SessionSnapshot = bincode::deserialize(&envelope.payload_bytes)
@@ -529,7 +529,9 @@ fn run_save_loop(rx: Receiver<SaveMsg>, session_path: &PathBuf, telemetry: &mut 
                     }
                 }
             }
-            SaveMsg::Flush(snapshot, ack) => save_and_ack(&session_path, &snapshot, Some(ack), telemetry),
+            SaveMsg::Flush(snapshot, ack) => {
+                save_and_ack(&session_path, &snapshot, Some(ack), telemetry)
+            }
             SaveMsg::Shutdown => return,
         }
     }
@@ -552,10 +554,7 @@ fn save_and_ack(
             );
             telemetry.failed_saves += 1;
             telemetry.record_save_duration(0);
-            let msg = format!(
-                "Snapshot too large: {} bytes (max {} bytes)",
-                size, max
-            );
+            let msg = format!("Snapshot too large: {} bytes (max {} bytes)", size, max);
             telemetry.recovery_events.push(RecoveryEvent {
                 timestamp: std::time::SystemTime::now(),
                 kind: RecoveryEventKind::SaveFailed,
@@ -618,10 +617,7 @@ fn save_snapshot(path: &PathBuf, snapshot: &SessionSnapshot, telemetry: &mut Sav
             telemetry.recovery_events.push(RecoveryEvent {
                 timestamp: std::time::SystemTime::now(),
                 kind: RecoveryEventKind::SaveFailed,
-                message: format!(
-                    "Snapshot too large: {} bytes (max {} bytes)",
-                    size, max
-                ),
+                message: format!("Snapshot too large: {} bytes (max {} bytes)", size, max),
             });
             return;
         }
@@ -894,15 +890,25 @@ mod tests {
         }
 
         // Verify we have too many backups
-        assert!(path.with_extension(format!("bin.{}", BACKUP_ROTATION_COUNT + 2)).exists());
+        assert!(
+            path.with_extension(format!("bin.{}", BACKUP_ROTATION_COUNT + 2))
+                .exists()
+        );
 
         // Trigger rotation
         rotate_backups(&path);
 
         // Verify oldest backup (BACKUP_ROTATION_COUNT + 2) was removed
-        assert!(!path.with_extension(format!("bin.{}", BACKUP_ROTATION_COUNT + 2)).exists());
+        assert!(
+            !path
+                .with_extension(format!("bin.{}", BACKUP_ROTATION_COUNT + 2))
+                .exists()
+        );
         // Verify BACKUP_ROTATION_COUNT + 1 exists (shifted from BACKUP_ROTATION_COUNT)
-        assert!(path.with_extension(format!("bin.{}", BACKUP_ROTATION_COUNT + 1)).exists());
+        assert!(
+            path.with_extension(format!("bin.{}", BACKUP_ROTATION_COUNT + 1))
+                .exists()
+        );
         // Verify backup.1 no longer exists (it was shifted to backup.2)
         assert!(!path.with_extension("bin.1").exists());
 
@@ -955,7 +961,10 @@ mod tests {
             .sender()
             .send(SaveMsg::Flush(snapshot.clone(), ack_tx))
             .unwrap();
-        ack_rx.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
+        ack_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
 
         // Verify main session exists and is valid
         let loaded = load_session(&path, &mut telemetry).unwrap().unwrap();
@@ -1278,9 +1287,10 @@ mod tests {
         assert!(bad_path.exists());
 
         // Verify telemetry was updated
-        let has_corrupt_event = telemetry.recovery_events.iter().any(|e| {
-            matches!(e.kind, RecoveryEventKind::SessionCorrupt)
-        });
+        let has_corrupt_event = telemetry
+            .recovery_events
+            .iter()
+            .any(|e| matches!(e.kind, RecoveryEventKind::SessionCorrupt));
         assert!(has_corrupt_event);
 
         // Cleanup

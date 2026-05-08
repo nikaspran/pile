@@ -96,7 +96,10 @@ impl Drop for ParseWorker {
     fn drop(&mut self) {
         if let Some(handle) = self.handle.take() {
             // Drop the sender to close the channel and unblock the worker thread
-            drop(std::mem::replace(&mut self.request_tx, crossbeam_channel::bounded(1).0));
+            drop(std::mem::replace(
+                &mut self.request_tx,
+                crossbeam_channel::bounded(1).0,
+            ));
             let _ = handle.join();
         }
     }

@@ -52,8 +52,8 @@ impl TextLayoutPipeline {
         let font_id = egui::FontId::new(font_size, font_family.to_egui());
         let char_width = monospace_char_width(ui, font_id.clone());
         let row_height = base_row_height * line_height_scale;
-        let gutter_width =
-            (line_digits as f32 * 8.0 + super::LINE_GUTTER_PADDING * 2.0).max(super::LINE_GUTTER_MIN_WIDTH);
+        let gutter_width = (line_digits as f32 * 8.0 + super::LINE_GUTTER_PADDING * 2.0)
+            .max(super::LINE_GUTTER_MIN_WIDTH);
         let text_origin_x = gutter_width + super::LINE_GUTTER_PADDING;
 
         let wrap_mode_enum = match wrap_mode {
@@ -127,7 +127,8 @@ impl TextLayoutPipeline {
     /// Return the vertical range of visible line indices for a given viewport.
     pub fn visible_line_range(&self, viewport: &egui::Rect) -> (usize, usize) {
         let first_line = (viewport.min.y / self.row_height).floor().max(0.0) as usize;
-        let last_line = ((viewport.max.y / self.row_height).ceil() as usize + 1).min(self.line_count);
+        let last_line =
+            ((viewport.max.y / self.row_height).ceil() as usize + 1).min(self.line_count);
         (first_line, last_line)
     }
 
@@ -151,12 +152,7 @@ impl TextLayoutPipeline {
     }
 
     /// Convert a byte offset to a caret position on screen.
-    pub fn caret_position(
-        &self,
-        rope: &Rope,
-        offset: usize,
-        content_top: f32,
-    ) -> egui::Pos2 {
+    pub fn caret_position(&self, rope: &Rope, offset: usize, content_top: f32) -> egui::Pos2 {
         let (wrapped_line, column) = if self.wrap_mode != WrapMode::NoWrap {
             wrapped_line_and_column(rope, offset, &self.visual_line_map)
         } else {
@@ -164,16 +160,14 @@ impl TextLayoutPipeline {
             let col = column_of_byte(rope, offset);
             (line, col)
         };
-        egui::pos2(self.column_x(column), self.line_y(wrapped_line, content_top))
+        egui::pos2(
+            self.column_x(column),
+            self.line_y(wrapped_line, content_top),
+        )
     }
 
     /// Convert a pointer position to a byte offset in the rope.
-    pub fn offset_at_pointer(
-        &self,
-        rope: &Rope,
-        pos: egui::Pos2,
-        rect: egui::Rect,
-    ) -> usize {
+    pub fn offset_at_pointer(&self, rope: &Rope, pos: egui::Pos2, rect: egui::Rect) -> usize {
         if self.wrap_mode == WrapMode::NoWrap {
             let line = ((pos.y - rect.top()).max(0.0) / self.row_height) as usize;
             let line = line.min(self.line_count.saturating_sub(1));
@@ -197,11 +191,17 @@ impl TextLayoutPipeline {
     }
 
     /// Get the text for a wrapped line.
-    pub fn wrapped_line_text<'a>(&self, rope: &'a Rope, wrapped_line_index: usize) -> RopeSlice<'a> {
+    pub fn wrapped_line_text<'a>(
+        &self,
+        rope: &'a Rope,
+        wrapped_line_index: usize,
+    ) -> RopeSlice<'a> {
         if self.wrap_mode == WrapMode::NoWrap {
             visual_line_text(rope, wrapped_line_index)
         } else {
-            let Some(&(doc_line, start_col, end_col)) = self.visual_line_map.get(wrapped_line_index) else {
+            let Some(&(doc_line, start_col, end_col)) =
+                self.visual_line_map.get(wrapped_line_index)
+            else {
                 return rope.byte_slice(..0);
             };
             let line_slice = visual_line_text(rope, doc_line);
@@ -216,7 +216,8 @@ impl TextLayoutPipeline {
         if self.wrap_mode == WrapMode::NoWrap {
             byte_of_visual_line(rope, wrapped_line_index)
         } else {
-            let Some(&(doc_line, start_col, _)) = self.visual_line_map.get(wrapped_line_index) else {
+            let Some(&(doc_line, start_col, _)) = self.visual_line_map.get(wrapped_line_index)
+            else {
                 return 0;
             };
             let line_start = byte_of_visual_line(rope, doc_line);
@@ -316,6 +317,5 @@ fn byte_for_wrapped_line_column(
 // Re-export helpers from geometry so the pipeline is self-contained for callers
 use super::{
     byte_for_line_column, byte_of_visual_line, char_index_to_byte_offset, column_of_byte,
-    decimal_digits, line_index_of_byte, monospace_char_width, visual_line_count,
-    visual_line_text,
+    decimal_digits, line_index_of_byte, monospace_char_width, visual_line_count, visual_line_text,
 };

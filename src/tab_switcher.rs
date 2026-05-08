@@ -84,7 +84,8 @@ impl TabSwitcher {
 
                 ui.separator();
 
-                let filtered: Vec<(usize, &TabItem)> = self.tabs
+                let filtered: Vec<(usize, &TabItem)> = self
+                    .tabs
                     .iter()
                     .enumerate()
                     .filter(|(_, item)| fuzzy_match(&self.query, &item.title))
@@ -123,14 +124,19 @@ impl TabSwitcher {
                     self.visible = false;
                 }
                 if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-                    let count = self.tabs.iter().filter(|item| fuzzy_match(&self.query, &item.title)).count();
+                    let count = self
+                        .tabs
+                        .iter()
+                        .filter(|item| fuzzy_match(&self.query, &item.title))
+                        .count();
                     self.selected_index = (self.selected_index + 1).min(count.saturating_sub(1));
                 }
                 if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
                     self.selected_index = self.selected_index.saturating_sub(1);
                 }
                 if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
-                    let filtered: Vec<Uuid> = self.tabs
+                    let filtered: Vec<Uuid> = self
+                        .tabs
                         .iter()
                         .filter(|item| fuzzy_match(&self.query, &item.title))
                         .map(|item| item.id)

@@ -1,7 +1,7 @@
-use eframe::egui;
+use crate::persistence::{default_settings_path, save_settings};
 use crate::settings::{FontFamily, Settings, Theme, WrapMode};
 use crate::theme::apply_theme;
-use crate::persistence::{default_settings_path, save_settings};
+use eframe::egui;
 
 pub struct PreferencesState {
     pub visible: bool,
@@ -48,12 +48,18 @@ impl PreferencesState {
                 ui.horizontal(|ui| {
                     ui.label("Theme:");
                     let old_theme = settings.theme;
-                    if ui.radio_value(&mut settings.theme, Theme::Dark, "Dark").clicked() {
+                    if ui
+                        .radio_value(&mut settings.theme, Theme::Dark, "Dark")
+                        .clicked()
+                    {
                         if settings.theme == Theme::Dark && old_theme != Theme::Dark {
                             self.theme_changed = true;
                         }
                     }
-                    if ui.radio_value(&mut settings.theme, Theme::Light, "Light").clicked() {
+                    if ui
+                        .radio_value(&mut settings.theme, Theme::Light, "Light")
+                        .clicked()
+                    {
                         if settings.theme == Theme::Light && old_theme != Theme::Light {
                             self.theme_changed = true;
                         }
@@ -69,20 +75,34 @@ impl PreferencesState {
                         ui.label("Family:");
                         let mut use_custom = matches!(settings.font_family, FontFamily::Named(_));
                         let old_use_custom = use_custom;
-                        if ui.radio_value(&mut use_custom, false, "Default Monospace").clicked() {
+                        if ui
+                            .radio_value(&mut use_custom, false, "Default Monospace")
+                            .clicked()
+                        {
                             if use_custom != old_use_custom {
                                 settings.font_family = FontFamily::Default;
                                 self.save(settings);
-                                crate::settings::apply_font_settings(ctx, &settings.font_family, settings.font_size, settings.line_height_scale);
+                                crate::settings::apply_font_settings(
+                                    ctx,
+                                    &settings.font_family,
+                                    settings.font_size,
+                                    settings.line_height_scale,
+                                );
                             }
                         }
                         if ui.radio_value(&mut use_custom, true, "Custom:").clicked() {
                             if use_custom != old_use_custom {
                                 if !matches!(settings.font_family, FontFamily::Named(_)) {
-                                    settings.font_family = FontFamily::Named("Courier New".to_owned());
+                                    settings.font_family =
+                                        FontFamily::Named("Courier New".to_owned());
                                 }
                                 self.save(settings);
-                                crate::settings::apply_font_settings(ctx, &settings.font_family, settings.font_size, settings.line_height_scale);
+                                crate::settings::apply_font_settings(
+                                    ctx,
+                                    &settings.font_family,
+                                    settings.font_size,
+                                    settings.line_height_scale,
+                                );
                             }
                         }
                         if use_custom {
@@ -93,7 +113,12 @@ impl PreferencesState {
                             if ui.text_edit_singleline(&mut font_name).changed() {
                                 settings.font_family = FontFamily::Named(font_name);
                                 self.save(settings);
-                                crate::settings::apply_font_settings(ctx, &settings.font_family, settings.font_size, settings.line_height_scale);
+                                crate::settings::apply_font_settings(
+                                    ctx,
+                                    &settings.font_family,
+                                    settings.font_size,
+                                    settings.line_height_scale,
+                                );
                             }
                         }
                     });
@@ -102,10 +127,22 @@ impl PreferencesState {
                     ui.horizontal(|ui| {
                         ui.label("Size:");
                         let mut font_size = settings.font_size;
-                        if ui.add(egui::DragValue::new(&mut font_size).speed(0.5).range(8.0..=32.0)).changed() {
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut font_size)
+                                    .speed(0.5)
+                                    .range(8.0..=32.0),
+                            )
+                            .changed()
+                        {
                             settings.font_size = font_size;
                             self.save(settings);
-                            crate::settings::apply_font_settings(ctx, &settings.font_family, settings.font_size, settings.line_height_scale);
+                            crate::settings::apply_font_settings(
+                                ctx,
+                                &settings.font_family,
+                                settings.font_size,
+                                settings.line_height_scale,
+                            );
                         }
                         ui.label("pt");
                     });
@@ -114,10 +151,23 @@ impl PreferencesState {
                     ui.horizontal(|ui| {
                         ui.label("Line height:");
                         let mut line_height = settings.line_height_scale;
-                        if ui.add(egui::DragValue::new(&mut line_height).speed(0.05).range(0.5..=3.0).fixed_decimals(2)).changed() {
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut line_height)
+                                    .speed(0.05)
+                                    .range(0.5..=3.0)
+                                    .fixed_decimals(2),
+                            )
+                            .changed()
+                        {
                             settings.line_height_scale = line_height;
                             self.save(settings);
-                            crate::settings::apply_font_settings(ctx, &settings.font_family, settings.font_size, settings.line_height_scale);
+                            crate::settings::apply_font_settings(
+                                ctx,
+                                &settings.font_family,
+                                settings.font_size,
+                                settings.line_height_scale,
+                            );
                         }
                     });
                 });
@@ -141,7 +191,10 @@ impl PreferencesState {
                     ui.horizontal(|ui| {
                         ui.label("Default tab width:");
                         let mut tab_width = settings.default_tab_width;
-                        if ui.add(egui::DragValue::new(&mut tab_width).range(1..=16)).changed() {
+                        if ui
+                            .add(egui::DragValue::new(&mut tab_width).range(1..=16))
+                            .changed()
+                        {
                             settings.default_tab_width = tab_width;
                             self.save(settings);
                         }
@@ -149,7 +202,10 @@ impl PreferencesState {
                     });
 
                     let mut soft_tabs = settings.default_soft_tabs;
-                    if ui.checkbox(&mut soft_tabs, "Use soft tabs (spaces)").clicked() {
+                    if ui
+                        .checkbox(&mut soft_tabs, "Use soft tabs (spaces)")
+                        .clicked()
+                    {
                         settings.default_soft_tabs = soft_tabs;
                         self.save(settings);
                     }
@@ -159,13 +215,19 @@ impl PreferencesState {
 
                 // Toggle options
                 let mut show_whitespace = settings.show_visible_whitespace;
-                if ui.checkbox(&mut show_whitespace, "Show visible whitespace").clicked() {
+                if ui
+                    .checkbox(&mut show_whitespace, "Show visible whitespace")
+                    .clicked()
+                {
                     settings.show_visible_whitespace = show_whitespace;
                     self.save(settings);
                 }
 
                 let mut show_indent = settings.show_indentation_guides;
-                if ui.checkbox(&mut show_indent, "Show indentation guides").clicked() {
+                if ui
+                    .checkbox(&mut show_indent, "Show indentation guides")
+                    .clicked()
+                {
                     settings.show_indentation_guides = show_indent;
                     self.save(settings);
                 }
@@ -197,21 +259,29 @@ impl PreferencesState {
                         self.save(settings);
                     }
                     if !settings.ignored_languages.is_empty() {
-                        ui.label(format!("Currently ignoring: {}", settings.ignored_languages.join(", ")));
+                        ui.label(format!(
+                            "Currently ignoring: {}",
+                            settings.ignored_languages.join(", ")
+                        ));
                     }
                 });
 
-        // Apply theme and font settings immediately if changed
-        if self.theme_changed {
-            apply_theme(ctx, settings.theme);
-            crate::settings::apply_font_settings(ctx, &settings.font_family, settings.font_size, settings.line_height_scale);
-            self.theme_changed = false;
-            self.save(settings);
-        }
+                // Apply theme and font settings immediately if changed
+                if self.theme_changed {
+                    apply_theme(ctx, settings.theme);
+                    crate::settings::apply_font_settings(
+                        ctx,
+                        &settings.font_family,
+                        settings.font_size,
+                        settings.line_height_scale,
+                    );
+                    self.theme_changed = false;
+                    self.save(settings);
+                }
 
-        // Apply font settings if font family or size changed
-        // We track this with a simple approach - apply on every change
-        ctx.request_repaint();
+                // Apply font settings if font family or size changed
+                // We track this with a simple approach - apply on every change
+                ctx.request_repaint();
 
                 ui.separator();
                 if ui.button("Close").clicked() {

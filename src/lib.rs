@@ -17,11 +17,11 @@ pub mod tab_switcher;
 pub mod theme;
 
 pub use app::PileApp;
+pub use editor::EditorViewState;
 pub use model::*;
 pub use parse_worker::{ParseEvent, ParseRequest, ParseResult, ParseWorker};
 pub use persistence::SessionEnvelope;
+pub use search::SearchState;
 pub use settings::Settings;
 pub use syntax::LanguageId;
 pub use syntax_highlighting::DocumentSyntaxState;
-pub use search::SearchState;
-pub use editor::EditorViewState;

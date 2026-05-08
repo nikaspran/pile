@@ -48,7 +48,8 @@ impl AppState {
 
         // Remove stale and duplicate tab_order entries
         let mut seen = std::collections::BTreeSet::new();
-        self.tab_order.retain(|id| valid_ids.contains(id) && seen.insert(*id));
+        self.tab_order
+            .retain(|id| valid_ids.contains(id) && seen.insert(*id));
 
         // Ensure tab_order has at least one entry
         if self.tab_order.is_empty() {
@@ -101,7 +102,11 @@ impl AppState {
             .find(|document| document.id == document_id)
     }
 
-    pub fn open_untitled(&mut self, default_tab_width: usize, default_soft_tabs: bool) -> DocumentId {
+    pub fn open_untitled(
+        &mut self,
+        default_tab_width: usize,
+        default_soft_tabs: bool,
+    ) -> DocumentId {
         let index = self.next_untitled_index;
         self.next_untitled_index += 1;
 
@@ -128,7 +133,11 @@ impl AppState {
         self.tab_order.retain(|id| *id != old_active);
         self.recent_order.retain(|id| *id != old_active);
         self.active_document = self.tab_order.first().copied().unwrap_or_else(|| {
-            let document = Document::new_untitled(self.next_untitled_index, default_tab_width, default_soft_tabs);
+            let document = Document::new_untitled(
+                self.next_untitled_index,
+                default_tab_width,
+                default_soft_tabs,
+            );
             let id = document.id;
             self.next_untitled_index += 1;
             self.documents.push(document);
@@ -359,10 +368,7 @@ impl Document {
             let start = edit.range.start;
             let end = edit.range.end;
 
-            let deleted_text = self
-                .rope
-                .byte_slice(start..end)
-                .to_string();
+            let deleted_text = self.rope.byte_slice(start..end).to_string();
 
             transactions.push(EditTransaction {
                 start,
@@ -1084,8 +1090,14 @@ mod tests {
         let len = doc.rope.byte_len();
 
         doc.selections = vec![
-            Selection { anchor: 0, head: len + 100 }, // out of bounds
-            Selection { anchor: len + 50, head: len + 50 }, // out of bounds
+            Selection {
+                anchor: 0,
+                head: len + 100,
+            }, // out of bounds
+            Selection {
+                anchor: len + 50,
+                head: len + 50,
+            }, // out of bounds
         ];
 
         doc.validate();
@@ -1262,14 +1274,12 @@ mod tests {
         document.revision = 0;
 
         // Insert at multiple positions (all at same point for simplicity)
-        let edits = vec![
-            DocumentEdit {
-                range: 5..5,
-                inserted_text: " world".to_owned(),
-                selections_before: vec![Selection::caret(5)],
-                selections_after: vec![Selection::caret(11)],
-            },
-        ];
+        let edits = vec![DocumentEdit {
+            range: 5..5,
+            inserted_text: " world".to_owned(),
+            selections_before: vec![Selection::caret(5)],
+            selections_after: vec![Selection::caret(11)],
+        }];
 
         document.apply_multi_edit(edits);
         assert_eq!(document.text(), "hello world");
@@ -1285,14 +1295,12 @@ mod tests {
         document.replace_text("hello world");
         document.revision = 0;
 
-        let edits = vec![
-            DocumentEdit {
-                range: 5..11,
-                inserted_text: String::new(),
-                selections_before: vec![Selection::caret(5)],
-                selections_after: vec![Selection::caret(5)],
-            },
-        ];
+        let edits = vec![DocumentEdit {
+            range: 5..11,
+            inserted_text: String::new(),
+            selections_before: vec![Selection::caret(5)],
+            selections_after: vec![Selection::caret(5)],
+        }];
 
         document.apply_multi_edit(edits);
         assert_eq!(document.text(), "hello");
@@ -1401,7 +1409,10 @@ mod tests {
         document.selections = vec![
             Selection { anchor: 0, head: 0 }, // primary
             Selection { anchor: 5, head: 5 }, // secondary
-            Selection { anchor: 10, head: 10 }, // secondary
+            Selection {
+                anchor: 10,
+                head: 10,
+            }, // secondary
         ];
 
         // Primary selection is conventionally the first one
@@ -1417,8 +1428,14 @@ mod tests {
 
         // Add selections with out-of-bounds positions
         document.selections = vec![
-            Selection { anchor: 0, head: len + 100 },
-            Selection { anchor: len + 50, head: len + 50 },
+            Selection {
+                anchor: 0,
+                head: len + 100,
+            },
+            Selection {
+                anchor: len + 50,
+                head: len + 50,
+            },
             Selection { anchor: 2, head: 3 }, // valid
         ];
 
@@ -1599,7 +1616,10 @@ mod tests {
         document.replace_text("hello world");
         document.revision = 0;
 
-        let sel_before = Selection { anchor: 6, head: 11 };
+        let sel_before = Selection {
+            anchor: 6,
+            head: 11,
+        };
         document.apply_grouped_edit(DocumentEdit {
             range: 6..11,
             inserted_text: "earth".to_owned(),

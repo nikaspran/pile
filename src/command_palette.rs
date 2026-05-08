@@ -50,9 +50,7 @@ impl CommandPalette {
                     if response.changed() {
                         self.update_filter();
                     }
-                    if response.lost_focus()
-                        && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                    {
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         self.execute_selected(on_command);
                     }
                 });
@@ -73,7 +71,8 @@ impl CommandPalette {
                     self.visible = false;
                 }
                 if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
-                    self.selected_index = (self.selected_index + 1).min(self.filtered_indices.len().saturating_sub(1));
+                    self.selected_index = (self.selected_index + 1)
+                        .min(self.filtered_indices.len().saturating_sub(1));
                 }
                 if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
                     self.selected_index = self.selected_index.saturating_sub(1);
@@ -92,7 +91,9 @@ impl CommandPalette {
                 self.filtered_indices.push(idx);
             }
         }
-        self.selected_index = self.selected_index.min(self.filtered_indices.len().saturating_sub(1));
+        self.selected_index = self
+            .selected_index
+            .min(self.filtered_indices.len().saturating_sub(1));
     }
 
     fn render_list(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -123,7 +124,8 @@ impl CommandPalette {
         egui::ScrollArea::vertical()
             .max_height(300.0)
             .show(ui, |ui| {
-                for (list_idx, (_cmd_idx, command, name, shortcut_text)) in items.iter().enumerate() {
+                for (list_idx, (_cmd_idx, command, name, shortcut_text)) in items.iter().enumerate()
+                {
                     let is_selected = list_idx == selected_index;
 
                     ui.horizontal(|ui| {

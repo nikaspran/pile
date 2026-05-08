@@ -55,8 +55,8 @@ fn command_metadata_exists_for_all_commands() {
 
 #[test]
 fn shortcut_formatting_per_platform() {
-    use pile::command::format_shortcut;
     use egui::KeyboardShortcut;
+    use pile::command::format_shortcut;
 
     // Create a simple shortcut
     let shortcut = KeyboardShortcut::new(egui::Modifiers::CTRL, egui::Key::N);

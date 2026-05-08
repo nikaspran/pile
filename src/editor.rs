@@ -618,7 +618,9 @@ pub fn show_editor(
                             // We need to use a reference that lasts for this iteration only
                             // The painter.text call below uses display_str, so this is fine
                             // as long as ch_buf is not dropped before painter.text
-                            unsafe { std::str::from_utf8_unchecked(&ch_buf[..display_ch.len_utf8()]) }
+                            unsafe {
+                                std::str::from_utf8_unchecked(&ch_buf[..display_ch.len_utf8()])
+                            }
                         } else {
                             ch.encode_utf8(&mut ch_buf);
                             unsafe { std::str::from_utf8_unchecked(&ch_buf[..ch.len_utf8()]) }
@@ -675,8 +677,8 @@ pub fn show_editor(
                                         layout.font_id.clone(),
                                         default_color,
                                     );
-                                        x_offset +=
-                                            layout.char_width * text_segment.chars().count() as f32;
+                                    x_offset +=
+                                        layout.char_width * text_segment.chars().count() as f32;
                                 }
                             }
 
@@ -693,8 +695,8 @@ pub fn show_editor(
                                         layout.font_id.clone(),
                                         color,
                                     );
-                                        x_offset +=
-                                            layout.char_width * text_segment.chars().count() as f32;
+                                    x_offset +=
+                                        layout.char_width * text_segment.chars().count() as f32;
                                 }
                             }
 

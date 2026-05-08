@@ -69,10 +69,11 @@ impl DocumentSyntaxState {
     ) -> Vec<HighlightSpan> {
         // Return cached result if revision and visible range haven't changed
         if let Some((cached_rev, cached_start, cached_end, spans)) = &self.cached_spans {
-            if *cached_rev == revision 
-                && *cached_start == visible_start 
-                && *cached_end == visible_end 
-                && self.parsed_as == Some(language) {
+            if *cached_rev == revision
+                && *cached_start == visible_start
+                && *cached_end == visible_end
+                && self.parsed_as == Some(language)
+            {
                 return spans.clone();
             }
         }
@@ -109,7 +110,10 @@ impl DocumentSyntaxState {
 
     /// Generate highlight spans from text using tree-sitter-highlight.
     /// This is public so the parse worker can use it.
-    pub fn generate_highlight_spans(config: &HighlightConfiguration, text: &str) -> Vec<HighlightSpan> {
+    pub fn generate_highlight_spans(
+        config: &HighlightConfiguration,
+        text: &str,
+    ) -> Vec<HighlightSpan> {
         let mut highlighter = Highlighter::new();
         let registry = injection_language_registry();
 
@@ -442,19 +446,14 @@ pub fn highlight_color(name: &str, theme: crate::theme::Theme) -> egui::Color32 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::LanguageId;
     use crate::grammar_registry::GrammarRegistry;
+    use crate::syntax::LanguageId;
 
     #[test]
     fn highlight_rust_code() {
         let mut state = DocumentSyntaxState::new();
         let code = "fn main() {\n    let x = 42;\n}\n";
-        let spans = state.highlight(
-            LanguageId::Rust,
-            1,
-            0,
-            code.len(),
-        );
+        let spans = state.highlight(LanguageId::Rust, 1, 0, code.len());
         // Should have some highlight spans for Rust code
         // (This will be empty until we implement background parsing)
         assert!(spans.is_empty());
@@ -464,12 +463,7 @@ mod tests {
     fn highlight_plain_text() {
         let mut state = DocumentSyntaxState::new();
         let text = "Just some plain text without code.";
-        let spans = state.highlight(
-            LanguageId::PlainText,
-            1,
-            0,
-            text.len(),
-        );
+        let spans = state.highlight(LanguageId::PlainText, 1, 0, text.len());
         // Plain text should have no spans
         assert!(spans.is_empty());
     }
@@ -486,18 +480,8 @@ mod tests {
     fn cache_works_for_same_revision() {
         let mut state = DocumentSyntaxState::new();
         let code = "fn main() {}";
-        let spans1 = state.highlight(
-            LanguageId::Rust,
-            1,
-            0,
-            code.len(),
-        );
-        let spans2 = state.highlight(
-            LanguageId::Rust,
-            1,
-            0,
-            code.len(),
-        );
+        let spans1 = state.highlight(LanguageId::Rust, 1, 0, code.len());
+        let spans2 = state.highlight(LanguageId::Rust, 1, 0, code.len());
         // Same revision and visible range should return cached result
         assert_eq!(spans1.len(), spans2.len());
     }
@@ -523,14 +507,7 @@ mod tests {
             end: 2,
             highlight: 6,
         }];
-        state.update_from_parse_result(
-            None,
-            spans.clone(),
-            LanguageId::Rust,
-            1,
-            0,
-            10,
-        );
+        state.update_from_parse_result(None, spans.clone(), LanguageId::Rust, 1, 0, 10);
         assert_eq!(state.parsed_revision, 1);
         assert_eq!(state.parsed_as(), Some(LanguageId::Rust));
     }
@@ -561,9 +538,9 @@ mod tests {
         let rust_start = markdown.find("fn main()").unwrap();
         let rust_end = markdown.find("```\n").unwrap();
 
-        let has_rust_spans = spans.iter().any(|span| {
-            span.start >= rust_start && span.end <= rust_end && span.highlight != 0
-        });
+        let has_rust_spans = spans
+            .iter()
+            .any(|span| span.start >= rust_start && span.end <= rust_end && span.highlight != 0);
 
         // The injection should produce spans in the Rust code region
         assert!(!spans.is_empty(), "Injection should produce spans");
@@ -578,7 +555,10 @@ mod tests {
 
         let spans = DocumentSyntaxState::generate_highlight_spans(&config, markdown);
 
-        assert!(!spans.is_empty(), "Should produce highlight spans for mixed code blocks");
+        assert!(
+            !spans.is_empty(),
+            "Should produce highlight spans for mixed code blocks"
+        );
 
         // Verify spans exist in both code block regions
         let rust_region = markdown.find("fn add").unwrap();
@@ -595,10 +575,22 @@ mod tests {
         let injection_reg = registry.injection_registry();
 
         // Markdown should be in the injection registry for fenced code blocks
-        assert!(injection_reg.contains_key("rust"), "Should have Rust in injection registry");
-        assert!(injection_reg.contains_key("python"), "Should have Python in injection registry");
-        assert!(injection_reg.contains_key("javascript"), "Should have JavaScript in injection registry");
-        assert!(injection_reg.contains_key("typescript"), "Should have TypeScript in injection registry");
+        assert!(
+            injection_reg.contains_key("rust"),
+            "Should have Rust in injection registry"
+        );
+        assert!(
+            injection_reg.contains_key("python"),
+            "Should have Python in injection registry"
+        );
+        assert!(
+            injection_reg.contains_key("javascript"),
+            "Should have JavaScript in injection registry"
+        );
+        assert!(
+            injection_reg.contains_key("typescript"),
+            "Should have TypeScript in injection registry"
+        );
     }
 
     #[test]
@@ -612,7 +604,10 @@ mod tests {
 
         for span in &spans {
             assert!(span.start <= span.end, "Span start should be <= end");
-            assert!(span.end <= markdown.len(), "Span end should be within text length");
+            assert!(
+                span.end <= markdown.len(),
+                "Span end should be within text length"
+            );
         }
     }
 
@@ -638,16 +633,23 @@ mod tests {
         let registry = GrammarRegistry::default();
         let config = registry.highlight_config(LanguageId::Markdown).unwrap();
 
-        let markdown = "```javascript\nconst add = (a, b) => a + b;\nconsole.log(add(1, 2));\n```\n";
+        let markdown =
+            "```javascript\nconst add = (a, b) => a + b;\nconsole.log(add(1, 2));\n```\n";
 
         let spans = DocumentSyntaxState::generate_highlight_spans(&config, markdown);
 
-        assert!(!spans.is_empty(), "Should produce spans for JavaScript in Markdown");
+        assert!(
+            !spans.is_empty(),
+            "Should produce spans for JavaScript in Markdown"
+        );
 
         // Check that the code block region has spans
         let js_start = markdown.find("const add").unwrap();
         let has_js_spans = spans.iter().any(|span| span.start >= js_start);
-        assert!(has_js_spans || !spans.is_empty(), "Should have spans in JS region");
+        assert!(
+            has_js_spans || !spans.is_empty(),
+            "Should have spans in JS region"
+        );
     }
 
     #[test]
@@ -659,7 +661,10 @@ mod tests {
 
         let spans = DocumentSyntaxState::generate_highlight_spans(&config, markdown);
 
-        assert!(!spans.is_empty(), "Should produce spans for YAML in Markdown");
+        assert!(
+            !spans.is_empty(),
+            "Should produce spans for YAML in Markdown"
+        );
     }
 
     #[test]
@@ -690,7 +695,10 @@ mod tests {
 
         for span in &spans {
             // Highlight index should be valid (less than the number of highlight names)
-            assert!(span.highlight < 26, "Highlight index should be valid (less than 26 standard names)");
+            assert!(
+                span.highlight < 26,
+                "Highlight index should be valid (less than 26 standard names)"
+            );
         }
     }
 }

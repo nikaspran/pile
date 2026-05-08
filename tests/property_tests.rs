@@ -3,14 +3,14 @@
 //! These tests use property-based testing to verify invariants of
 //! rope operations and selection transformations.
 
-use proptest::prelude::*;
 use crop::Rope;
-use pile::model::{Document, Selection};
 use pile::DocumentEdit;
+use pile::model::{Document, Selection};
+use proptest::prelude::*;
 
 /// Generate arbitrary valid UTF-8 strings.
 fn arb_string() -> impl Strategy<Value = String> {
-    "\\PC*"  // Proptest string strategy
+    "\\PC*" // Proptest string strategy
 }
 
 /// Find the nearest character boundary at or before the given byte position.

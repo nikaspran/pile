@@ -2,26 +2,21 @@ use eframe::egui;
 
 use crate::model::Document;
 
-use super::{
-    EditorViewState, add_all_matches, add_next_match,
-    backspace_with_pair_deletion, clear_secondary_cursors,
-    contract_selection_by_bracket_pair, contract_selection_by_indent_block,
-    contract_selection_by_line, contract_selection_by_word, delete,
-    delete_all, delete_selected_lines,
-    expand_selection_by_bracket_pair, expand_selection_by_indent_block,
-    expand_selection_by_line, expand_selection_by_word, indent_selection,
-    insert_char_with_pairing, insert_newline_with_auto_indent,
-    join_selected_lines, move_document_end, move_document_start, move_end,
-    move_home, move_left, move_page, move_paragraph_down,
-    move_paragraph_up, move_right, move_selected_lines_down,
-    move_selected_lines_up, move_vertical, move_word_left,
-    move_word_right, outdent_selection, replace_selection_all,
-    replace_selection_with, reverse_selected_lines, sort_selected_lines,
-    split_selection_into_lines, trim_trailing_whitespace,
-    convert_case_all_selections, convert_case_selection, CaseType,
-    toggle_comments,
-};
 use super::multicursor::backspace_all;
+use super::{
+    CaseType, EditorViewState, add_all_matches, add_next_match, backspace_with_pair_deletion,
+    clear_secondary_cursors, contract_selection_by_bracket_pair,
+    contract_selection_by_indent_block, contract_selection_by_line, contract_selection_by_word,
+    convert_case_all_selections, convert_case_selection, delete, delete_all, delete_selected_lines,
+    expand_selection_by_bracket_pair, expand_selection_by_indent_block, expand_selection_by_line,
+    expand_selection_by_word, indent_selection, insert_char_with_pairing,
+    insert_newline_with_auto_indent, join_selected_lines, move_document_end, move_document_start,
+    move_end, move_home, move_left, move_page, move_paragraph_down, move_paragraph_up, move_right,
+    move_selected_lines_down, move_selected_lines_up, move_vertical, move_word_left,
+    move_word_right, outdent_selection, replace_selection_all, replace_selection_with,
+    reverse_selected_lines, sort_selected_lines, split_selection_into_lines, toggle_comments,
+    trim_trailing_whitespace,
+};
 
 pub(super) fn handle_input(
     ui: &egui::Ui,

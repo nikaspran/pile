@@ -320,7 +320,12 @@ fn build_menu() -> muda::Result<muda::Menu> {
         &rename_tab,
         &pin_tab,
         &PredefinedMenuItem::separator(),
-        &MenuItem::with_id("pile.preferences", "Preferences...", true, Some(parse_accel("cmdorctrl+,")?)),
+        &MenuItem::with_id(
+            "pile.preferences",
+            "Preferences...",
+            true,
+            Some(parse_accel("cmdorctrl+,")?),
+        ),
         &PredefinedMenuItem::separator(),
         &PredefinedMenuItem::quit(None),
     ];
@@ -329,22 +334,27 @@ fn build_menu() -> muda::Result<muda::Menu> {
     menu.append(&file_menu)?;
 
     // Edit menu
-    let undo_item = MenuItem::with_id(
-        "pile.undo",
-        "Undo",
-        true,
-        Some(parse_accel("cmdorctrl+z")?),
-    );
+    let undo_item = MenuItem::with_id("pile.undo", "Undo", true, Some(parse_accel("cmdorctrl+z")?));
     let redo_item = MenuItem::with_id(
         "pile.redo",
         "Redo",
         true,
         Some(parse_accel("cmdorctrl+shift+z")?),
     );
-    let cut_item = PredefinedMenuItem::cut(None);
-    let copy_item = PredefinedMenuItem::copy(None);
-    let paste_item = PredefinedMenuItem::paste(None);
-    let select_all_item = PredefinedMenuItem::select_all(None);
+    let cut_item = MenuItem::with_id("pile.cut", "Cut", true, Some(parse_accel("cmdorctrl+x")?));
+    let copy_item = MenuItem::with_id("pile.copy", "Copy", true, Some(parse_accel("cmdorctrl+c")?));
+    let paste_item = MenuItem::with_id(
+        "pile.paste",
+        "Paste",
+        true,
+        Some(parse_accel("cmdorctrl+v")?),
+    );
+    let select_all_item = MenuItem::with_id(
+        "pile.select_all",
+        "Select All",
+        true,
+        Some(parse_accel("cmdorctrl+a")?),
+    );
 
     let toggle_comments = MenuItem::with_id(
         "pile.toggle_comments",
@@ -473,7 +483,12 @@ fn build_menu() -> muda::Result<muda::Menu> {
         true,
         Some(parse_accel("shift+tab")?),
     );
-    let duplicate_lines = MenuItem::with_id("pile.duplicate_lines", "Duplicate Lines", true, None);
+    let duplicate_lines = MenuItem::with_id(
+        "pile.duplicate_lines",
+        "Duplicate Lines",
+        true,
+        Some(parse_accel("cmdorctrl+shift+d")?),
+    );
     let delete_lines = MenuItem::with_id(
         "pile.delete_lines",
         "Delete Lines",
@@ -484,13 +499,13 @@ fn build_menu() -> muda::Result<muda::Menu> {
         "pile.move_lines_up",
         "Move Lines Up",
         true,
-        Some(parse_accel("cmdorctrl+alt+up")?),
+        Some(parse_accel("alt+up")?),
     );
     let move_lines_down = MenuItem::with_id(
         "pile.move_lines_down",
         "Move Lines Down",
         true,
-        Some(parse_accel("cmdorctrl+alt+down")?),
+        Some(parse_accel("alt+down")?),
     );
     let join_lines = MenuItem::with_id(
         "pile.join_lines",
@@ -549,7 +564,7 @@ fn build_menu() -> muda::Result<muda::Menu> {
         "pile.add_all_matches",
         "Add All Matches",
         true,
-        Some(parse_accel("cmdorctrl+shift+d")?),
+        Some(parse_accel("cmdorctrl+shift+l")?),
     );
     let split_selection = MenuItem::with_id(
         "pile.split_selection",
@@ -578,12 +593,7 @@ fn build_menu() -> muda::Result<muda::Menu> {
     menu.append(&multicursor_menu)?;
 
     // Search menu
-    let find = MenuItem::with_id(
-        "pile.find",
-        "Find",
-        true,
-        Some(parse_accel("cmdorctrl+f")?),
-    );
+    let find = MenuItem::with_id("pile.find", "Find", true, Some(parse_accel("cmdorctrl+f")?));
     let find_replace = MenuItem::with_id(
         "pile.find_replace",
         "Find and Replace",
@@ -638,7 +648,8 @@ fn build_menu() -> muda::Result<muda::Menu> {
         None,
     );
     let toggle_minimap = MenuItem::with_id("pile.toggle_minimap", "Toggle Minimap", true, None);
-    let toggle_status_bar = MenuItem::with_id("pile.toggle_status_bar", "Toggle Status Bar", true, None);
+    let toggle_status_bar =
+        MenuItem::with_id("pile.toggle_status_bar", "Toggle Status Bar", true, None);
     let toggle_theme = MenuItem::with_id("pile.toggle_theme", "Toggle Theme", true, None);
 
     let view_menu = Submenu::with_items(
@@ -682,11 +693,7 @@ fn build_menu() -> muda::Result<muda::Menu> {
     let bookmarks_menu = Submenu::with_items(
         "Bookmarks",
         true,
-        &[
-            &toggle_bookmark,
-            &next_bookmark,
-            &clear_bookmarks,
-        ],
+        &[&toggle_bookmark, &next_bookmark, &clear_bookmarks],
     )?;
     menu.append(&bookmarks_menu)?;
 
@@ -713,13 +720,13 @@ fn build_menu() -> muda::Result<muda::Menu> {
         "pile.move_tab_left",
         "Move Tab Left",
         true,
-        Some(parse_accel("alt+shift+left")?),
+        Some(parse_accel("cmdorctrl+alt+left")?),
     );
     let move_right = MenuItem::with_id(
         "pile.move_tab_right",
         "Move Tab Right",
         true,
-        Some(parse_accel("alt+shift+right")?),
+        Some(parse_accel("cmdorctrl+alt+right")?),
     );
 
     #[cfg(target_os = "macos")]

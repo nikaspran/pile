@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use std::time::Duration;
 
 mod common;
@@ -73,15 +73,9 @@ fn bench_syntax_parse(c: &mut Criterion) {
 
     for (name, lines) in test_cases.iter() {
         let code = generate_rust_code(*lines);
-        group.bench_with_input(
-            BenchmarkId::new("parse_rust", name),
-            &code,
-            |b, code| {
-                b.iter(|| {
-                    black_box(parse_syntax(black_box(code)))
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("parse_rust", name), &code, |b, code| {
+            b.iter(|| black_box(parse_syntax(black_box(code))))
+        });
     }
 
     group.finish();
@@ -96,11 +90,7 @@ fn bench_search_time(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("in_buffer_search", format_size(size)),
             &text,
-            |b, text| {
-                b.iter(|| {
-                    black_box(search_text(black_box(text), black_box("the")))
-                })
-            },
+            |b, text| b.iter(|| black_box(search_text(black_box(text), black_box("the")))),
         );
     }
 

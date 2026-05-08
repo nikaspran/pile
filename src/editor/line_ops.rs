@@ -1,10 +1,10 @@
 use crop::Rope;
 
-use crate::model::{Document, DocumentEdit, EditTransaction, Selection};
 use super::{
     byte_of_visual_line, clamp_primary_selection, line_index_of_byte, primary_selection,
     record_full_document_undo, selection_range, set_primary_selection, visual_line_bounds,
 };
+use crate::model::{Document, DocumentEdit, EditTransaction, Selection};
 
 pub fn indent_selection(document: &mut Document) -> bool {
     change_line_indentation(document, IndentChange::Indent)
@@ -309,7 +309,10 @@ pub fn toggle_comments(document: &mut Document, comment_prefix: &str) -> bool {
         }
 
         // Check if this line is actually a comment (using tree-sitter if available)
-        let is_commented = if syntax_state.parsed_as().map_or(false, |l| l.has_tree_sitter()) {
+        let is_commented = if syntax_state
+            .parsed_as()
+            .map_or(false, |l| l.has_tree_sitter())
+        {
             // Use tree-sitter to check if the content after whitespace is a comment
             let trimmed = line.trim_start();
             if trimmed.starts_with(comment_prefix) {
@@ -363,7 +366,10 @@ pub fn toggle_comments(document: &mut Document, comment_prefix: &str) -> bool {
                 continue;
             }
 
-            let is_commented = if syntax_state.parsed_as().map_or(false, |l| l.has_tree_sitter()) {
+            let is_commented = if syntax_state
+                .parsed_as()
+                .map_or(false, |l| l.has_tree_sitter())
+            {
                 let trimmed = line.trim_start();
                 if trimmed.starts_with(comment_prefix) {
                     let first_char_offset = line_start + line.len() - trimmed.len();
@@ -396,7 +402,7 @@ pub fn toggle_comments(document: &mut Document, comment_prefix: &str) -> bool {
     }
 
     let toggled = any_commented || any_uncommented;
-    
+
     if !toggled {
         return false;
     }

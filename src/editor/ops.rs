@@ -1,11 +1,10 @@
 use crop::Rope;
 
-use crate::model::{Document, DocumentEdit, Selection};
 use super::{
     byte_of_visual_line, clamp_primary_selection, line_index_of_byte, next_grapheme_boundary,
-    previous_grapheme_boundary, primary_selection, selection_range,
-    set_primary_selection,
+    previous_grapheme_boundary, primary_selection, selection_range, set_primary_selection,
 };
+use crate::model::{Document, DocumentEdit, Selection};
 
 pub fn replace_selection_with(document: &mut Document, text: &str) -> bool {
     clamp_primary_selection(document);
@@ -47,16 +46,21 @@ pub fn insert_newline_with_auto_indent(document: &mut Document) -> bool {
     let (start, _) = selection_range(selection);
     let line = line_index_of_byte(&document.rope, start);
     let line_start = byte_of_visual_line(&document.rope, line);
-    
+
     // Try syntax-aware indentation first
-    let indent = if document.syntax_state.parsed_as().map_or(false, |l| l.has_tree_sitter()) {
-        document.syntax_state
+    let indent = if document
+        .syntax_state
+        .parsed_as()
+        .map_or(false, |l| l.has_tree_sitter())
+    {
+        document
+            .syntax_state
             .indentation_at(start, document.tab_width, document.use_soft_tabs)
             .unwrap_or_else(|| leading_whitespace(&document.rope, line_start, start))
     } else {
         leading_whitespace(&document.rope, line_start, start)
     };
-    
+
     let text = format!("\n{indent}");
 
     replace_selection_with(document, &text)
@@ -205,7 +209,10 @@ pub fn insert_char_with_pairing(document: &mut Document, ch: char) -> bool {
         let selection = primary_selection(document);
         let (start, _) = selection_range(selection);
 
-        if syntax_state.parsed_as().map_or(false, |l| l.has_tree_sitter()) {
+        if syntax_state
+            .parsed_as()
+            .map_or(false, |l| l.has_tree_sitter())
+        {
             if syntax_state.is_inside_string(start) || syntax_state.is_inside_comment(start) {
                 // Inside string or comment - just insert the character normally
                 return replace_selection_with(document, &ch.to_string());
@@ -258,7 +265,10 @@ pub fn backspace_with_pair_deletion(document: &mut Document) -> bool {
 
     // Check if we're inside a string or comment - if so, don't do pair deletion
     let syntax_state = &document.syntax_state;
-    if syntax_state.parsed_as().map_or(false, |l| l.has_tree_sitter()) {
+    if syntax_state
+        .parsed_as()
+        .map_or(false, |l| l.has_tree_sitter())
+    {
         if syntax_state.is_inside_string(start) || syntax_state.is_inside_comment(start) {
             return backspace(document);
         }
@@ -286,11 +296,7 @@ pub fn backspace_with_pair_deletion(document: &mut Document) -> bool {
                 if next_char == Some(close) {
                     // Delete both the opening and closing brackets
                     let delete_end = start + ch_len + close_len;
-                    let edit = DocumentEdit::replace_selection(
-                        selection,
-                        start..delete_end,
-                        "",
-                    );
+                    let edit = DocumentEdit::replace_selection(selection, start..delete_end, "");
                     document.apply_continuing_edit(edit);
                     return true;
                 }

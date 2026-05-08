@@ -902,13 +902,7 @@ fn offset_at_pointer_maps_clicks_to_byte_offsets() {
 
     let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 200.0));
 
-    let pointer_at = |x: f32, y: f32| {
-        layout.offset_at_pointer(
-            rope,
-            egui::pos2(x, y),
-            rect,
-        )
-    };
+    let pointer_at = |x: f32, y: f32| layout.offset_at_pointer(rope, egui::pos2(x, y), rect);
 
     assert_eq!(pointer_at(text_origin_x - 50.0, 0.0), 0);
     assert_eq!(pointer_at(text_origin_x + char_width * 2.0, 0.0), 2);
@@ -1508,10 +1502,7 @@ fn add_all_matches_does_not_duplicate_primary_occurrence() {
 
     assert_eq!(
         document.selections,
-        vec![
-            Selection::caret(0),
-            Selection { anchor: 4, head: 7 },
-        ]
+        vec![Selection::caret(0), Selection { anchor: 4, head: 7 },]
     );
     assert_eq!(
         document.occurrence_selections,
@@ -1584,13 +1575,7 @@ fn test_expand_selection_by_word_from_caret() {
 #[test]
 fn test_expand_selection_by_word_expands_existing_selection() {
     let mut document = document("hello world foo");
-    set_primary_selection(
-        &mut document,
-        Selection {
-            anchor: 3,
-            head: 8,
-        },
-    ); // overlaps "lo wo"
+    set_primary_selection(&mut document, Selection { anchor: 3, head: 8 }); // overlaps "lo wo"
 
     expand_selection_by_word(&mut document);
 
@@ -1728,7 +1713,8 @@ fn test_expand_selection_by_indent_block_basic() {
     let sel = primary_selection(&document);
     let expected_start = "no indent\n".len(); // 10
     // The indent block ends at position 63 (the '\n' after "indented line 3")
-    let expected_end = "no indent\n  indented line 1\n  indented line 2\n  indented line 3\n".len() - 1; // 63
+    let expected_end =
+        "no indent\n  indented line 1\n  indented line 2\n  indented line 3\n".len() - 1; // 63
     assert_eq!(sel.anchor, expected_start);
     assert_eq!(sel.head, expected_end);
 }
@@ -1787,7 +1773,8 @@ fn layout_for_dpi(
     let font_id = egui::FontId::monospace(14.0 * dpi_scale);
     let gutter_width = 44.0 * dpi_scale;
     let text_origin_x = gutter_width + 10.0 * dpi_scale;
-    let content_width = (text_origin_x + 400.0 * dpi_scale).max(text_origin_x + EDITOR_MIN_WIDTH * dpi_scale);
+    let content_width =
+        (text_origin_x + 400.0 * dpi_scale).max(text_origin_x + EDITOR_MIN_WIDTH * dpi_scale);
     let content_height = (line_count as f32 * row_height).max(200.0 * dpi_scale);
 
     let pipeline = TextLayoutPipeline::for_test(
@@ -1844,16 +1831,14 @@ fn high_dpi_caret_position_scales_correctly() {
     let font_id = egui::FontId::monospace(14.0);
 
     // 1x DPI
-    let layout_1x = TextLayoutPipeline::for_test(
-        16.0, 8.0, font_id.clone(), 44.0, 54.0, 800.0, 600.0, 1,
-    );
+    let layout_1x =
+        TextLayoutPipeline::for_test(16.0, 8.0, font_id.clone(), 44.0, 54.0, 800.0, 600.0, 1);
     let pos_1x = layout_1x.caret_position(&rope, 3, 0.0);
     assert_eq!(pos_1x.x, 54.0 + 3.0 * 8.0); // text_origin_x + column * char_width
 
     // 2x DPI - all dimensions doubled
-    let layout_2x = TextLayoutPipeline::for_test(
-        32.0, 16.0, font_id, 88.0, 108.0, 1600.0, 1200.0, 1,
-    );
+    let layout_2x =
+        TextLayoutPipeline::for_test(32.0, 16.0, font_id, 88.0, 108.0, 1600.0, 1200.0, 1);
     let pos_2x = layout_2x.caret_position(&rope, 3, 0.0);
     assert_eq!(pos_2x.x, 108.0 + 3.0 * 16.0);
 }
@@ -1866,7 +1851,14 @@ fn high_dpi_multiline_layout_scales() {
 
     // 1x DPI
     let layout_1x = TextLayoutPipeline::for_test(
-        16.0, 8.0, egui::FontId::monospace(14.0), 44.0, 54.0, 800.0, 600.0, line_count,
+        16.0,
+        8.0,
+        egui::FontId::monospace(14.0),
+        44.0,
+        54.0,
+        800.0,
+        600.0,
+        line_count,
     );
 
     // Line 1 should be at y = 0, Line 2 at y = 16, Line 3 at y = 32
@@ -1876,7 +1868,14 @@ fn high_dpi_multiline_layout_scales() {
 
     // 2x DPI
     let layout_2x = TextLayoutPipeline::for_test(
-        32.0, 16.0, egui::FontId::monospace(28.0), 88.0, 108.0, 1600.0, 1200.0, line_count,
+        32.0,
+        16.0,
+        egui::FontId::monospace(28.0),
+        88.0,
+        108.0,
+        1600.0,
+        1200.0,
+        line_count,
     );
 
     // Line 1 should be at y = 0, Line 2 at y = 32, Line 3 at y = 64
@@ -1894,7 +1893,14 @@ fn high_dpi_visible_line_range_scales() {
     // first_line = (16/16).floor() = 1
     // last_line = (64/16).ceil() + 1 = 4 + 1 = 5, but min(5, 5) = 5
     let layout_1x = TextLayoutPipeline::for_test(
-        16.0, 8.0, egui::FontId::monospace(14.0), 44.0, 54.0, 800.0, 600.0, line_count,
+        16.0,
+        8.0,
+        egui::FontId::monospace(14.0),
+        44.0,
+        54.0,
+        800.0,
+        600.0,
+        line_count,
     );
     let viewport_1x = egui::Rect::from_min_max(egui::pos2(0.0, 16.0), egui::pos2(800.0, 64.0));
     let (first, last) = layout_1x.visible_line_range(&viewport_1x);
@@ -1905,7 +1911,14 @@ fn high_dpi_visible_line_range_scales() {
     // first_line = (32/32).floor() = 1
     // last_line = (128/32).ceil() + 1 = 4 + 1 = 5, but min(5, 5) = 5
     let layout_2x = TextLayoutPipeline::for_test(
-        32.0, 16.0, egui::FontId::monospace(28.0), 88.0, 108.0, 1600.0, 1200.0, line_count,
+        32.0,
+        16.0,
+        egui::FontId::monospace(28.0),
+        88.0,
+        108.0,
+        1600.0,
+        1200.0,
+        line_count,
     );
     let viewport_2x = egui::Rect::from_min_max(egui::pos2(0.0, 32.0), egui::pos2(1600.0, 128.0));
     let (first_2x, last_2x) = layout_2x.visible_line_range(&viewport_2x);
@@ -1920,7 +1933,14 @@ fn font_fallback_renders_cjk_characters() {
     let rope = Rope::from(text);
 
     let layout = TextLayoutPipeline::for_test(
-        16.0, 8.0, egui::FontId::monospace(14.0), 44.0, 54.0, 800.0, 600.0, 1,
+        16.0,
+        8.0,
+        egui::FontId::monospace(14.0),
+        44.0,
+        54.0,
+        800.0,
+        600.0,
+        1,
     );
 
     // The layout should handle CJK characters without panicking
@@ -1949,7 +1969,14 @@ fn font_fallback_renders_emoji() {
     let rope = Rope::from(text);
 
     let layout = TextLayoutPipeline::for_test(
-        16.0, 8.0, egui::FontId::monospace(14.0), 44.0, 54.0, 800.0, 600.0, 1,
+        16.0,
+        8.0,
+        egui::FontId::monospace(14.0),
+        44.0,
+        54.0,
+        800.0,
+        600.0,
+        1,
     );
 
     // The layout should handle emoji without panicking
@@ -1969,7 +1996,14 @@ fn font_fallback_renders_mixed_scripts() {
     let rope = Rope::from(text);
 
     let layout = TextLayoutPipeline::for_test(
-        16.0, 8.0, egui::FontId::monospace(14.0), 44.0, 54.0, 800.0, 600.0, 1,
+        16.0,
+        8.0,
+        egui::FontId::monospace(14.0),
+        44.0,
+        54.0,
+        800.0,
+        600.0,
+        1,
     );
 
     // Should handle all character types without panicking
@@ -1998,7 +2032,14 @@ fn font_fallback_test_char_width_consistency() {
     // Characters from different scripts should use the same char_width in our layout
     // This test ensures our fixed-width assumption is documented
     let layout = TextLayoutPipeline::for_test(
-        16.0, 8.0, egui::FontId::monospace(14.0), 44.0, 54.0, 800.0, 600.0, 1,
+        16.0,
+        8.0,
+        egui::FontId::monospace(14.0),
+        44.0,
+        54.0,
+        800.0,
+        600.0,
+        1,
     );
 
     // All characters should use the same width for column calculation
@@ -2019,14 +2060,28 @@ fn high_dpi_gutter_width_scales() {
 
     // 1x DPI
     let layout_1x = TextLayoutPipeline::for_test(
-        16.0, 8.0, egui::FontId::monospace(14.0), 44.0, 54.0, 800.0, 600.0, line_count,
+        16.0,
+        8.0,
+        egui::FontId::monospace(14.0),
+        44.0,
+        54.0,
+        800.0,
+        600.0,
+        line_count,
     );
     assert_eq!(layout_1x.gutter_width, 44.0);
     assert_eq!(layout_1x.text_origin_x, 54.0); // gutter + padding
 
     // 2x DPI
     let layout_2x = TextLayoutPipeline::for_test(
-        32.0, 16.0, egui::FontId::monospace(28.0), 88.0, 108.0, 1600.0, 1200.0, line_count,
+        32.0,
+        16.0,
+        egui::FontId::monospace(28.0),
+        88.0,
+        108.0,
+        1600.0,
+        1200.0,
+        line_count,
     );
     assert_eq!(layout_2x.gutter_width, 88.0);
     assert_eq!(layout_2x.text_origin_x, 108.0);
@@ -2039,7 +2094,14 @@ fn high_dpi_content_size_scales() {
 
     // 1x DPI - content_height is max(available_height, line_count * row_height)
     let layout_1x = TextLayoutPipeline::for_test(
-        16.0, 8.0, egui::FontId::monospace(14.0), 44.0, 54.0, 800.0, 600.0, line_count,
+        16.0,
+        8.0,
+        egui::FontId::monospace(14.0),
+        44.0,
+        54.0,
+        800.0,
+        600.0,
+        line_count,
     );
     let size_1x = layout_1x.content_size();
     // content_height should be max(600.0, 3 * 16.0) = 600.0
@@ -2047,7 +2109,14 @@ fn high_dpi_content_size_scales() {
 
     // 2x DPI
     let layout_2x = TextLayoutPipeline::for_test(
-        32.0, 16.0, egui::FontId::monospace(28.0), 88.0, 108.0, 1600.0, 1200.0, line_count,
+        32.0,
+        16.0,
+        egui::FontId::monospace(28.0),
+        88.0,
+        108.0,
+        1600.0,
+        1200.0,
+        line_count,
     );
     let size_2x = layout_2x.content_size();
     assert_eq!(size_2x.y, 1200.0);

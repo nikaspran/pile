@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::model::{AppState, Document, DocumentEdit, Selection, SessionSnapshot};
-    use crate::persistence::{SaveWorker, SaveMsg, SaveTelemetry, load_session, SessionEnvelope};
+    use crate::persistence::{SaveMsg, SaveTelemetry, SaveWorker, SessionEnvelope, load_session};
     use crossbeam_channel::bounded;
     use std::fs;
     use std::time::{Duration, Instant};
@@ -50,7 +50,11 @@ mod tests {
         }
 
         let elapsed = start.elapsed();
-        assert!(elapsed < Duration::from_secs(2), "Rapid edits took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "Rapid edits took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -67,7 +71,11 @@ mod tests {
         }
 
         let elapsed = start.elapsed();
-        assert!(elapsed < Duration::from_secs(5), "Rapid edits on large buffer took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "Rapid edits on large buffer took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -82,7 +90,11 @@ mod tests {
         }
 
         let elapsed = start.elapsed();
-        assert!(elapsed < Duration::from_secs(3), "Rapid undo/redo took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "Rapid undo/redo took {:?}",
+            elapsed
+        );
     }
 
     // --- Many Tabs Tests ---
@@ -96,7 +108,11 @@ mod tests {
 
         let elapsed = start.elapsed();
         assert!(state.documents.len() >= 500);
-        assert!(elapsed < Duration::from_secs(2), "Creating 500 tabs took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "Creating 500 tabs took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -128,7 +144,11 @@ mod tests {
         }
         let elapsed = start.elapsed();
 
-        assert!(elapsed < Duration::from_secs(1), "Switching 300 tabs took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "Switching 300 tabs took {:?}",
+            elapsed
+        );
     }
 
     // --- Large Buffer Tests ---
@@ -143,7 +163,11 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert_eq!(doc.text().len(), text.len());
-        assert!(elapsed < Duration::from_secs(2), "Loading 5MB buffer took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "Loading 5MB buffer took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -156,7 +180,11 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert_eq!(doc.text().len(), text.len());
-        assert!(elapsed < Duration::from_secs(3), "Loading 10MB buffer took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "Loading 10MB buffer took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -175,7 +203,11 @@ mod tests {
         }
 
         let elapsed = start.elapsed();
-        assert!(elapsed < Duration::from_secs(3), "Editing 5MB buffer took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "Editing 5MB buffer took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -189,13 +221,20 @@ mod tests {
             let line_start = i * 100;
             let line_end = line_start + 80;
             if line_end <= doc.text().len() {
-                doc.selections = vec![Selection { anchor: line_start, head: line_end }];
+                doc.selections = vec![Selection {
+                    anchor: line_start,
+                    head: line_end,
+                }];
                 let _slice = &doc.text()[line_start..line_end];
             }
         }
 
         let elapsed = start.elapsed();
-        assert!(elapsed < Duration::from_secs(2), "Line operations on large buffer took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "Line operations on large buffer took {:?}",
+            elapsed
+        );
     }
 
     // --- Crash/Restart Cycle Tests ---
@@ -217,8 +256,14 @@ mod tests {
         let (ack_tx, ack_rx) = bounded(1);
         let snapshot = SessionSnapshot::from(&state);
 
-        worker.sender().send(SaveMsg::Flush(snapshot, ack_tx)).unwrap();
-        ack_rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+        worker
+            .sender()
+            .send(SaveMsg::Flush(snapshot, ack_tx))
+            .unwrap();
+        ack_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
 
         // Simulate restart - load session
         let mut telemetry = SaveTelemetry::default();
@@ -249,8 +294,14 @@ mod tests {
             // Save
             let (ack_tx, ack_rx) = bounded(1);
             let snapshot = SessionSnapshot::from(&state);
-            worker.sender().send(SaveMsg::Flush(snapshot, ack_tx)).unwrap();
-            ack_rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+            worker
+                .sender()
+                .send(SaveMsg::Flush(snapshot, ack_tx))
+                .unwrap();
+            ack_rx
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap()
+                .unwrap();
 
             // Simulate small delay then "restart"
             std::thread::sleep(Duration::from_millis(50));
@@ -284,8 +335,14 @@ mod tests {
         let (ack_tx, ack_rx) = bounded(1);
         let snapshot = SessionSnapshot::from(&state);
 
-        worker.sender().send(SaveMsg::Flush(snapshot, ack_tx)).unwrap();
-        ack_rx.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
+        worker
+            .sender()
+            .send(SaveMsg::Flush(snapshot, ack_tx))
+            .unwrap();
+        ack_rx
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap()
+            .unwrap();
 
         // "Restart" and load
         let mut telemetry = SaveTelemetry::default();
@@ -304,42 +361,66 @@ mod tests {
     fn large_buffer_20mb_load() {
         // Generate ~20MB of text
         let text = large_text(200000, 100); // ~20MB
-        assert!(text.len() > 20_000_000, "Expected >20MB, got {} bytes", text.len());
+        assert!(
+            text.len() > 20_000_000,
+            "Expected >20MB, got {} bytes",
+            text.len()
+        );
 
         let start = Instant::now();
         let doc = make_document(&text);
         let elapsed = start.elapsed();
 
         assert_eq!(doc.text().len(), text.len());
-        assert!(elapsed < Duration::from_secs(5), "Loading 20MB buffer took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "Loading 20MB buffer took {:?}",
+            elapsed
+        );
     }
 
     #[test]
     fn large_buffer_50mb_load() {
         // Generate ~50MB of text
         let text = large_text(500000, 100); // ~50MB
-        assert!(text.len() > 50_000_000, "Expected >50MB, got {} bytes", text.len());
+        assert!(
+            text.len() > 50_000_000,
+            "Expected >50MB, got {} bytes",
+            text.len()
+        );
 
         let start = Instant::now();
         let doc = make_document(&text);
         let elapsed = start.elapsed();
 
         assert_eq!(doc.text().len(), text.len());
-        assert!(elapsed < Duration::from_secs(10), "Loading 50MB buffer took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "Loading 50MB buffer took {:?}",
+            elapsed
+        );
     }
 
     #[test]
     fn large_buffer_100mb_load() {
         // Generate ~100MB of text
         let text = large_text(1000000, 100); // ~100MB
-        assert!(text.len() > 100_000_000, "Expected >100MB, got {} bytes", text.len());
+        assert!(
+            text.len() > 100_000_000,
+            "Expected >100MB, got {} bytes",
+            text.len()
+        );
 
         let start = Instant::now();
         let doc = make_document(&text);
         let elapsed = start.elapsed();
 
         assert_eq!(doc.text().len(), text.len());
-        assert!(elapsed < Duration::from_secs(15), "Loading 100MB buffer took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(15),
+            "Loading 100MB buffer took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -355,15 +436,28 @@ mod tests {
             let edit = DocumentEdit {
                 range: pos..pos + 1.min(rope_len - pos),
                 inserted_text: format!("EDIT{}", i),
-                selections_before: vec![Selection { anchor: pos, head: pos }],
-                selections_after: vec![Selection { anchor: pos + format!("EDIT{}", i).len(), head: pos + format!("EDIT{}", i).len() }],
+                selections_before: vec![Selection {
+                    anchor: pos,
+                    head: pos,
+                }],
+                selections_after: vec![Selection {
+                    anchor: pos + format!("EDIT{}", i).len(),
+                    head: pos + format!("EDIT{}", i).len(),
+                }],
             };
             doc.apply_edit(edit);
         }
         let elapsed = start.elapsed();
 
-        assert!(doc.rope.byte_len() > text.len(), "Buffer should be larger after edits");
-        assert!(elapsed < Duration::from_secs(10), "Editing 20MB buffer took {:?}", elapsed);
+        assert!(
+            doc.rope.byte_len() > text.len(),
+            "Buffer should be larger after edits"
+        );
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "Editing 20MB buffer took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -378,8 +472,14 @@ mod tests {
             let edit = DocumentEdit {
                 range: pos..pos + 1.min(doc.rope.byte_len() - pos),
                 inserted_text: "X".to_string(),
-                selections_before: vec![Selection { anchor: pos, head: pos }],
-                selections_after: vec![Selection { anchor: pos + 1, head: pos + 1 }],
+                selections_before: vec![Selection {
+                    anchor: pos,
+                    head: pos,
+                }],
+                selections_after: vec![Selection {
+                    anchor: pos + 1,
+                    head: pos + 1,
+                }],
             };
             doc.apply_edit(edit);
         }
@@ -395,7 +495,11 @@ mod tests {
         }
 
         let elapsed = start.elapsed();
-        assert!(elapsed < Duration::from_secs(15), "Undo/redo on 50MB buffer took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(15),
+            "Undo/redo on 50MB buffer took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -415,7 +519,11 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert!(line_count > 1000);
-        assert!(elapsed < Duration::from_secs(2), "Line iteration on 20MB took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "Line iteration on 20MB took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -435,7 +543,11 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert!(match_count > 0, "Should find matches in generated text");
-        assert!(elapsed < Duration::from_secs(5), "Search on 50MB buffer took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "Search on 50MB buffer took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -448,7 +560,11 @@ mod tests {
         let elapsed = start.elapsed();
 
         // Should complete without timeout
-        assert!(elapsed < Duration::from_secs(5), "Syntax detection on 20MB took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "Syntax detection on 20MB took {:?}",
+            elapsed
+        );
         // Detection may or may not succeed on generated text, just ensure no panic
         let _ = detection;
     }
@@ -469,7 +585,11 @@ mod tests {
 
         assert_eq!(loaded.state.documents.len(), 1);
         assert!(loaded.state.documents[0].rope.byte_len() > 50_000_000);
-        assert!(elapsed < Duration::from_secs(30), "Session roundtrip for 50MB took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(30),
+            "Session roundtrip for 50MB took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -483,13 +603,20 @@ mod tests {
         let mut selections = Vec::new();
         for i in 0..100 {
             let pos = (i * rope_len / 100).min(rope_len.saturating_sub(10));
-            selections.push(Selection { anchor: pos, head: (pos + 5).min(rope_len) });
+            selections.push(Selection {
+                anchor: pos,
+                head: (pos + 5).min(rope_len),
+            });
         }
         doc.selections = selections.clone();
         let elapsed = start.elapsed();
 
         assert_eq!(doc.selections.len(), 100);
-        assert!(elapsed < Duration::from_secs(2), "Multiple selections on 20MB took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "Multiple selections on 20MB took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -506,7 +633,11 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert_eq!(doc.rope.byte_len(), text.len());
-        assert!(elapsed < Duration::from_secs(20), "100MB buffer creation took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(20),
+            "100MB buffer creation took {:?}",
+            elapsed
+        );
     }
 
     // --- Combined Stress Tests ---
@@ -526,7 +657,11 @@ mod tests {
         }
         let elapsed = start.elapsed();
 
-        assert!(elapsed < Duration::from_secs(5), "Rapid edits across 50 tabs took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "Rapid edits across 50 tabs took {:?}",
+            elapsed
+        );
     }
 
     #[test]
@@ -548,6 +683,10 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert!(loaded.state.documents.len() >= 100);
-        assert!(elapsed < Duration::from_secs(5), "Large session serialization took {:?}", elapsed);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "Large session serialization took {:?}",
+            elapsed
+        );
     }
 }

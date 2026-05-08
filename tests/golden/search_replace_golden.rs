@@ -6,7 +6,7 @@
 use crop::Rope;
 use pile::editor::{replace_all_matches, replace_match};
 use pile::model::Document;
-use pile::search::{find_matches, SearchOptions};
+use pile::search::{SearchOptions, find_matches};
 
 /// Helper to perform a replace-all operation and return the result.
 fn do_replace_all(text: &str, query: &str, replacement: &str, options: SearchOptions) -> String {
@@ -54,7 +54,8 @@ fn golden_replace_preserves_case_sensitivity() {
     };
 
     let result_sensitive = do_replace_all("Hello hello HELLO", "hello", "hi", options_sensitive);
-    let result_insensitive = do_replace_all("Hello hello HELLO", "hello", "hi", options_insensitive);
+    let result_insensitive =
+        do_replace_all("Hello hello HELLO", "hello", "hi", options_insensitive);
 
     assert_eq!(result_sensitive, "Hello hi HELLO");
     assert_eq!(result_insensitive, "hi hi hi");

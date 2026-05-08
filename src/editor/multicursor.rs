@@ -4,8 +4,8 @@ use crate::model::{Document, DocumentEdit, Selection};
 use crate::search;
 
 use super::{
-    byte_of_visual_line, line_index_of_byte, next_grapheme_boundary,
-    previous_grapheme_boundary, primary_selection,
+    byte_of_visual_line, line_index_of_byte, next_grapheme_boundary, previous_grapheme_boundary,
+    primary_selection,
 };
 
 /// Adds the next occurrence of the word under the primary cursor as a new selection.
@@ -191,14 +191,18 @@ pub fn select_all_occurrences(document: &mut Document) {
 
     // Keep primary selection and add all matches
     document.selections = vec![primary];
-    document.selections.extend(matches.iter().map(|m| Selection {
-        anchor: m.start,
-        head: m.end,
-    }));
-    document.occurrence_selections.extend(matches.iter().map(|m| Selection {
-        anchor: m.start,
-        head: m.end,
-    }));
+    document
+        .selections
+        .extend(matches.iter().map(|m| Selection {
+            anchor: m.start,
+            head: m.end,
+        }));
+    document
+        .occurrence_selections
+        .extend(matches.iter().map(|m| Selection {
+            anchor: m.start,
+            head: m.end,
+        }));
 }
 
 /// Clears all secondary cursors, keeping only the primary cursor.

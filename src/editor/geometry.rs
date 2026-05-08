@@ -348,7 +348,12 @@ pub(super) fn paint_selection_for_line(
     let rect = egui::Rect::from_min_max(min, max);
     let rounding = egui::CornerRadius::same(2);
     painter.rect_filled(rect, rounding, color);
-    painter.rect_stroke(rect, rounding, egui::Stroke::new(1.0, color.gamma_multiply(1.3)), egui::StrokeKind::Inside);
+    painter.rect_stroke(
+        rect,
+        rounding,
+        egui::Stroke::new(1.0, color.gamma_multiply(1.3)),
+        egui::StrokeKind::Inside,
+    );
 }
 
 pub fn select_word_at_offset(rope: &Rope, offset: usize) -> Selection {

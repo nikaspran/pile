@@ -79,7 +79,12 @@ impl FontFamily {
 }
 
 /// Apply font settings to the egui context.
-pub fn apply_font_settings(ctx: &egui::Context, font_family: &FontFamily, font_size: f32, line_height_scale: f32) {
+pub fn apply_font_settings(
+    ctx: &egui::Context,
+    font_family: &FontFamily,
+    font_size: f32,
+    line_height_scale: f32,
+) {
     ctx.style_mut(|style| {
         // Update the monospace text style with the configured font family and size
         style.text_styles.insert(

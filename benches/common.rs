@@ -1,14 +1,32 @@
 use crop::Rope;
-use pile::model::{AppState, Document, SessionSnapshot, Selection};
+use pile::model::{AppState, Document, Selection, SessionSnapshot};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
 /// Generate random text of approximately the given byte length
 pub fn generate_text(bytes: usize) -> String {
     let words = [
-        "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog",
-        "hello", "world", "rust", "code", "editor", "buffer", "text",
-        "line", "cursor", "selection", "search", "replace", "syntax",
+        "the",
+        "quick",
+        "brown",
+        "fox",
+        "jumps",
+        "over",
+        "lazy",
+        "dog",
+        "hello",
+        "world",
+        "rust",
+        "code",
+        "editor",
+        "buffer",
+        "text",
+        "line",
+        "cursor",
+        "selection",
+        "search",
+        "replace",
+        "syntax",
     ];
     let mut text = String::with_capacity(bytes);
     let mut current = 0;

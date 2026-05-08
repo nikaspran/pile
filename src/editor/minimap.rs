@@ -96,15 +96,22 @@ pub fn show_minimap(
         }
 
         // Choose color based on content
-        let color = if trimmed.starts_with("//") || trimmed.starts_with("#") || trimmed.starts_with("/*") {
-            comment_color
-        } else if trimmed.starts_with("fn") || trimmed.starts_with("func") || trimmed.starts_with("def")
-            || trimmed.starts_with("struct") || trimmed.starts_with("class") || trimmed.starts_with("enum")
-            || trimmed.starts_with("impl") || trimmed.starts_with("trait") {
-            keyword_color
-        } else {
-            text_color
-        };
+        let color =
+            if trimmed.starts_with("//") || trimmed.starts_with("#") || trimmed.starts_with("/*") {
+                comment_color
+            } else if trimmed.starts_with("fn")
+                || trimmed.starts_with("func")
+                || trimmed.starts_with("def")
+                || trimmed.starts_with("struct")
+                || trimmed.starts_with("class")
+                || trimmed.starts_with("enum")
+                || trimmed.starts_with("impl")
+                || trimmed.starts_with("trait")
+            {
+                keyword_color
+            } else {
+                text_color
+            };
 
         let line_rect = egui::Rect::from_min_size(
             egui::pos2(rect.left() + 2.0, y),

@@ -4,30 +4,31 @@ use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender, bounded};
 use eframe::egui;
-use tracing::{info, warn};
-use signal_hook::consts::signal::{SIGTERM, SIGINT};
+use signal_hook::consts::signal::{SIGINT, SIGTERM};
 use signal_hook::flag;
+use tracing::{info, warn};
 
 use crate::{
     command::Command,
     command_palette::CommandPalette,
     editor::{
-        EditorViewState, SearchHighlight, minimap::{self, MinimapConfig},
+        EditorViewState, SearchHighlight,
+        minimap::{self, MinimapConfig},
         replace_all_matches, replace_match, show_editor,
     },
+    grammar_registry::GrammarRegistry,
     model::{AppState, Document, DocumentId, PaneSnapshot, Selection, SessionSnapshot},
     native_menu::{NativeMenu, NativeMenuCommand},
     parse_worker::{ParseEvent, ParseWorker},
     persistence::{
         RecoveryEvent, RecoveryEventKind, SaveMsg, SaveTelemetry, SaveWorker, WorkerEvent,
-        default_session_path, default_settings_path, load_session,
-        load_settings, quarantine_corrupt_session, save_settings,
+        default_session_path, default_settings_path, load_session, load_settings,
+        quarantine_corrupt_session, save_settings,
     },
     preferences::PreferencesState,
     search::{SearchMatch, SearchState},
     settings::Settings,
     syntax::LanguageDetection,
-    grammar_registry::GrammarRegistry,
     tab_switcher::TabSwitcher,
     theme::apply_theme,
 };
@@ -315,7 +316,12 @@ impl PileApp {
 
         // Apply the loaded theme and font settings
         apply_theme(&ctx, settings.theme);
-        crate::settings::apply_font_settings(&ctx, &settings.font_family, settings.font_size, settings.line_height_scale);
+        crate::settings::apply_font_settings(
+            &ctx,
+            &settings.font_family,
+            settings.font_size,
+            settings.line_height_scale,
+        );
 
         info!(
             documents = state.documents.len(),
@@ -368,6 +374,26 @@ impl PileApp {
         parts.join("\n")
     }
 
+    fn handle_clipboard_events(&mut self, ctx: &egui::Context) {
+        let (cut, copy) = ctx.input(|input| {
+            let cut = input
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::Cut));
+            let copy = input
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::Copy));
+            (cut, copy)
+        });
+
+        if cut {
+            self.execute_command(AppCommand::Cut);
+        } else if copy {
+            self.execute_command(AppCommand::Copy);
+        }
+    }
+
     fn mark_changed(&self) {
         let snapshot = create_snapshot(&self.state, &self.panes, self.active_pane);
         let _ = self.save_tx.send(SaveMsg::Changed(snapshot));
@@ -392,7 +418,7 @@ impl PileApp {
             .active_document()
             .map(|document| self.syntax.detect_rope(&document.rope))
             .unwrap_or_else(|| self.syntax.detect(""));
-        
+
         // Override detection if language is in ignored list
         let lang_name = match detection.language {
             crate::syntax::LanguageId::PlainText => "PlainText",
@@ -406,11 +432,15 @@ impl PileApp {
             crate::syntax::LanguageId::Yaml => "Yaml",
             crate::syntax::LanguageId::Bash => "Bash",
         };
-        if self.settings.ignored_languages.contains(&lang_name.to_string()) {
+        if self
+            .settings
+            .ignored_languages
+            .contains(&lang_name.to_string())
+        {
             detection.language = crate::syntax::LanguageId::PlainText;
             detection.confidence = 0.0;
         }
-        
+
         self.last_detection = detection;
     }
 
@@ -444,7 +474,10 @@ impl PileApp {
         }
 
         // Check if we need to parse
-        if !document.syntax_state.needs_parse(detection.language, document.revision) {
+        if !document
+            .syntax_state
+            .needs_parse(detection.language, document.revision)
+        {
             return;
         }
 
@@ -462,7 +495,10 @@ impl PileApp {
             document_id: document.id,
             revision: document.revision,
             language: detection.language,
-            text: document.rope.byte_slice(visible_start..visible_end).to_string(),
+            text: document
+                .rope
+                .byte_slice(visible_start..visible_end)
+                .to_string(),
             visible_start,
             visible_end,
         };
@@ -619,7 +655,10 @@ impl PileApp {
 
     fn new_scratch(&mut self) {
         self.commit_rename();
-        self.state.open_untitled(self.settings.default_tab_width, self.settings.default_soft_tabs);
+        self.state.open_untitled(
+            self.settings.default_tab_width,
+            self.settings.default_soft_tabs,
+        );
         // Update the active pane to point to the new document
         if let Some(pane) = self.panes.get_mut(self.active_pane) {
             pane.document_id = self.state.active_document;
@@ -757,7 +796,8 @@ impl PileApp {
                 self.editor_focus_pending = true;
             }
             AppCommand::Paste => {
-                // Pasting is handled by the text editor component
+                self.ctx
+                    .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
                 self.editor_focus_pending = true;
             }
             AppCommand::SelectAll => {
@@ -963,14 +1003,28 @@ impl PileApp {
             }
             AppCommand::Find => self.handle_command(crate::command::Command::Find),
             AppCommand::FindReplace => self.handle_command(crate::command::Command::FindReplace),
-            AppCommand::FindUnderCursor => self.handle_command(crate::command::Command::FindUnderCursor),
+            AppCommand::FindUnderCursor => {
+                self.handle_command(crate::command::Command::FindUnderCursor)
+            }
             AppCommand::SearchInTabs => self.handle_command(crate::command::Command::SearchInTabs),
-            AppCommand::CommandPalette => self.handle_command(crate::command::Command::CommandPalette),
-            AppCommand::ToggleWrapMode => self.handle_command(crate::command::Command::ToggleWrapMode),
-            AppCommand::ToggleVisibleWhitespace => self.handle_command(crate::command::Command::ToggleVisibleWhitespace),
-            AppCommand::ToggleIndentGuides => self.handle_command(crate::command::Command::ToggleIndentGuides),
-            AppCommand::ToggleMinimap => self.handle_command(crate::command::Command::ToggleMinimap),
-            AppCommand::ToggleStatusBar => self.handle_command(crate::command::Command::ToggleStatusBar),
+            AppCommand::CommandPalette => {
+                self.handle_command(crate::command::Command::CommandPalette)
+            }
+            AppCommand::ToggleWrapMode => {
+                self.handle_command(crate::command::Command::ToggleWrapMode)
+            }
+            AppCommand::ToggleVisibleWhitespace => {
+                self.handle_command(crate::command::Command::ToggleVisibleWhitespace)
+            }
+            AppCommand::ToggleIndentGuides => {
+                self.handle_command(crate::command::Command::ToggleIndentGuides)
+            }
+            AppCommand::ToggleMinimap => {
+                self.handle_command(crate::command::Command::ToggleMinimap)
+            }
+            AppCommand::ToggleStatusBar => {
+                self.handle_command(crate::command::Command::ToggleStatusBar)
+            }
             AppCommand::ToggleTheme => self.handle_command(crate::command::Command::ToggleTheme),
             AppCommand::GoToLine => {
                 self.goto_line.visible = true;
@@ -1006,6 +1060,10 @@ impl PileApp {
             NewScratch => self.execute_command(AppCommand::NewScratch),
             CloseScratch => self.execute_command(AppCommand::CloseScratch),
             RenameTab => self.execute_command(AppCommand::RenameTab),
+            Cut => self.execute_command(AppCommand::Cut),
+            Copy => self.execute_command(AppCommand::Copy),
+            Paste => self.execute_command(AppCommand::Paste),
+            SelectAll => self.execute_command(AppCommand::SelectAll),
             Undo => self.execute_command(AppCommand::Undo),
             Redo => self.execute_command(AppCommand::Redo),
 
@@ -1195,9 +1253,11 @@ impl PileApp {
                 self.search.search_all_tabs = true;
                 self.open_search();
             }
+            GoToLine => self.execute_command(AppCommand::GoToLine),
 
             // View
             CommandPalette => self.command_palette.toggle(),
+            QuickSwitchTabs => self.tab_switcher.toggle(&self.state),
             ToggleWrapMode => {
                 self.settings.wrap_mode = self.settings.wrap_mode.cycle();
                 let settings_path = default_settings_path();
@@ -1234,6 +1294,24 @@ impl PileApp {
             ImportFile => self.import_file(),
             ExportFile => self.export_file(),
             Preferences => self.preferences.toggle(),
+            ToggleBookmark => self.toggle_bookmark(),
+            JumpToNextBookmark => self.jump_to_next_bookmark(),
+            ClearBookmarks => self.clear_bookmarks(),
+            SplitPaneHorizontal => self.split_pane_horizontal(),
+            SplitPaneVertical => self.split_pane_vertical(),
+            ClosePane => self.close_pane(),
+            PinTab => {
+                let active = self.state.active_document;
+                self.toggle_pin_tab(active);
+            }
+            MoveTabLeft => {
+                let active = self.state.active_document;
+                self.move_tab_left(active);
+            }
+            MoveTabRight => {
+                let active = self.state.active_document;
+                self.move_tab_right(active);
+            }
         }
     }
 
@@ -1291,6 +1369,16 @@ impl PileApp {
             self.execute_command(AppCommand::Redo);
         }
 
+        let select_all = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND,
+                logical_key: egui::Key::A,
+            })
+        });
+        if select_all {
+            self.execute_command(AppCommand::SelectAll);
+        }
+
         let open_replace = ctx.input_mut(|input| {
             input.consume_shortcut(&egui::KeyboardShortcut {
                 modifiers: egui::Modifiers::COMMAND.plus(egui::Modifiers::ALT),
@@ -1328,6 +1416,35 @@ impl PileApp {
             self.select_next_occurrence();
         }
 
+        let add_all_or_split_lines = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::L,
+            })
+        });
+        if add_all_or_split_lines {
+            let split_multiline_selection = self
+                .state
+                .active_document()
+                .and_then(|document| {
+                    document.selections.first().map(|selection| {
+                        let (start, end) = crate::editor::selection_range(*selection);
+                        start < end
+                            && document
+                                .rope
+                                .byte_slice(start..end)
+                                .chars()
+                                .any(|ch| ch == '\n')
+                    })
+                })
+                .unwrap_or(false);
+            if split_multiline_selection {
+                self.execute_command(AppCommand::SplitSelectionIntoLines);
+            } else {
+                self.execute_command(AppCommand::AddAllMatches);
+            }
+        }
+
         let find_under_cursor =
             ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F3));
         if find_under_cursor {
@@ -1354,10 +1471,43 @@ impl PileApp {
             self.tab_switcher.toggle(&self.state);
         }
 
-        // Tab reordering shortcuts (Alt+Left/Right)
+        let duplicate_lines = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::D,
+            }) || input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::ALT | egui::Modifiers::SHIFT,
+                logical_key: egui::Key::ArrowDown,
+            })
+        });
+        if duplicate_lines {
+            self.execute_command(AppCommand::DuplicateLines);
+        }
+
+        let move_line_up = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::ALT,
+                logical_key: egui::Key::ArrowUp,
+            })
+        });
+        if move_line_up {
+            self.execute_command(AppCommand::MoveLinesUp);
+        }
+
+        let move_line_down = ctx.input_mut(|input| {
+            input.consume_shortcut(&egui::KeyboardShortcut {
+                modifiers: egui::Modifiers::ALT,
+                logical_key: egui::Key::ArrowDown,
+            })
+        });
+        if move_line_down {
+            self.execute_command(AppCommand::MoveLinesDown);
+        }
+
+        // Tab reordering shortcuts (Cmd+Alt+Left/Right)
         let move_left = ctx.input_mut(|input| {
             input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::ALT | egui::Modifiers::SHIFT,
+                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::ALT,
                 logical_key: egui::Key::ArrowLeft,
             })
         });
@@ -1368,7 +1518,7 @@ impl PileApp {
 
         let move_right = ctx.input_mut(|input| {
             input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::ALT | egui::Modifiers::SHIFT,
+                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::ALT,
                 logical_key: egui::Key::ArrowRight,
             })
         });
@@ -1486,7 +1636,10 @@ impl PileApp {
     fn close_active_scratch(&mut self) {
         self.commit_rename();
         let old_active = self.state.active_document;
-        self.state.close_active(self.settings.default_tab_width, self.settings.default_soft_tabs);
+        self.state.close_active(
+            self.settings.default_tab_width,
+            self.settings.default_soft_tabs,
+        );
         // Update any panes that were pointing to the closed document
         for pane in &mut self.panes {
             if pane.document_id == old_active {
@@ -1499,10 +1652,7 @@ impl PileApp {
     }
 
     fn import_file(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title("Import File")
-            .pick_file()
-        {
+        if let Some(path) = rfd::FileDialog::new().set_title("Import File").pick_file() {
             self.import_dropped_file(&path);
         }
     }
@@ -1512,7 +1662,11 @@ impl PileApp {
             Ok(content) => {
                 // Create a new document for the dropped file
                 let index = self.state.next_untitled_index;
-                let mut doc = Document::new_untitled(index, self.settings.default_tab_width, self.settings.default_soft_tabs);
+                let mut doc = Document::new_untitled(
+                    index,
+                    self.settings.default_tab_width,
+                    self.settings.default_soft_tabs,
+                );
                 self.state.next_untitled_index += 1;
                 doc.rope = crop::Rope::from(content);
                 doc.revision += 1;
@@ -2101,7 +2255,10 @@ impl PileApp {
         // Ensure the document exists; if not, create a new one
         if self.state.document(pane.document_id).is_none() {
             tracing::warn!(?pane.document_id, pane_index, "document not found, creating new one");
-            self.state.open_untitled(self.settings.default_tab_width, self.settings.default_soft_tabs);
+            self.state.open_untitled(
+                self.settings.default_tab_width,
+                self.settings.default_soft_tabs,
+            );
             pane.document_id = self.state.active_document;
         }
 
@@ -2299,6 +2456,7 @@ impl eframe::App for PileApp {
         }
 
         self.handle_native_menu_commands();
+        self.handle_clipboard_events(ctx);
         self.handle_keyboard_shortcuts(ctx);
         self.handle_parse_events();
 

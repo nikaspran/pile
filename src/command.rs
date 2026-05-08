@@ -6,6 +6,10 @@ pub enum Command {
     NewScratch,
     CloseScratch,
     RenameTab,
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
     Undo,
     Redo,
 
@@ -90,9 +94,11 @@ pub enum Command {
     FindUnderCursor,
     SelectNextOccurrence,
     SearchInTabs,
+    GoToLine,
 
     // View
     CommandPalette,
+    QuickSwitchTabs,
     ToggleWrapMode,
     ToggleVisibleWhitespace,
     ToggleIndentGuides,
@@ -104,6 +110,19 @@ pub enum Command {
     ImportFile,
     ExportFile,
     Preferences,
+
+    // Bookmarks
+    ToggleBookmark,
+    JumpToNextBookmark,
+    ClearBookmarks,
+
+    // Window / tabs
+    SplitPaneHorizontal,
+    SplitPaneVertical,
+    ClosePane,
+    PinTab,
+    MoveTabLeft,
+    MoveTabRight,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -117,6 +136,163 @@ pub enum CommandCategory {
     Editing,
     Search,
     View,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct ShortcutBinding {
+    pub command: Command,
+    pub shortcut: egui::KeyboardShortcut,
+}
+
+pub fn default_shortcuts() -> Vec<ShortcutBinding> {
+    use Command::*;
+    use egui::{Key, KeyboardShortcut, Modifiers};
+
+    let binding = |command, modifiers, logical_key| ShortcutBinding {
+        command,
+        shortcut: KeyboardShortcut {
+            modifiers,
+            logical_key,
+        },
+    };
+
+    vec![
+        binding(NewScratch, Modifiers::COMMAND, Key::N),
+        binding(CloseScratch, Modifiers::COMMAND, Key::W),
+        binding(RenameTab, Modifiers::NONE, Key::F2),
+        binding(Cut, Modifiers::COMMAND, Key::X),
+        binding(Copy, Modifiers::COMMAND, Key::C),
+        binding(Paste, Modifiers::COMMAND, Key::V),
+        binding(SelectAll, Modifiers::COMMAND, Key::A),
+        binding(Undo, Modifiers::COMMAND, Key::Z),
+        binding(Redo, Modifiers::COMMAND | Modifiers::SHIFT, Key::Z),
+        binding(MoveLeft, Modifiers::NONE, Key::ArrowLeft),
+        binding(MoveRight, Modifiers::NONE, Key::ArrowRight),
+        binding(MoveWordLeft, Modifiers::ALT, Key::ArrowLeft),
+        binding(MoveWordRight, Modifiers::ALT, Key::ArrowRight),
+        binding(MoveUp, Modifiers::NONE, Key::ArrowUp),
+        binding(MoveDown, Modifiers::NONE, Key::ArrowDown),
+        binding(MoveDocumentStart, Modifiers::CTRL, Key::Home),
+        binding(MoveDocumentEnd, Modifiers::CTRL, Key::End),
+        binding(MoveLineStart, Modifiers::NONE, Key::Home),
+        binding(MoveLineEnd, Modifiers::NONE, Key::End),
+        binding(PageUp, Modifiers::NONE, Key::PageUp),
+        binding(PageDown, Modifiers::NONE, Key::PageDown),
+        binding(SelectLeft, Modifiers::SHIFT, Key::ArrowLeft),
+        binding(SelectRight, Modifiers::SHIFT, Key::ArrowRight),
+        binding(
+            SelectWordLeft,
+            Modifiers::SHIFT | Modifiers::ALT,
+            Key::ArrowLeft,
+        ),
+        binding(
+            SelectWordRight,
+            Modifiers::SHIFT | Modifiers::ALT,
+            Key::ArrowRight,
+        ),
+        binding(SelectUp, Modifiers::SHIFT, Key::ArrowUp),
+        binding(SelectDown, Modifiers::SHIFT, Key::ArrowDown),
+        binding(ExpandWord, Modifiers::ALT, Key::W),
+        binding(ContractWord, Modifiers::SHIFT | Modifiers::ALT, Key::W),
+        binding(ExpandLine, Modifiers::ALT, Key::L),
+        binding(ContractLine, Modifiers::SHIFT | Modifiers::ALT, Key::L),
+        binding(ExpandBracketPair, Modifiers::ALT, Key::B),
+        binding(
+            ContractBracketPair,
+            Modifiers::SHIFT | Modifiers::ALT,
+            Key::B,
+        ),
+        binding(ExpandIndentBlock, Modifiers::ALT, Key::I),
+        binding(
+            ContractIndentBlock,
+            Modifiers::SHIFT | Modifiers::ALT,
+            Key::I,
+        ),
+        binding(Indent, Modifiers::NONE, Key::Tab),
+        binding(Outdent, Modifiers::SHIFT, Key::Tab),
+        binding(
+            DuplicateLines,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::D,
+        ),
+        binding(
+            DuplicateLines,
+            Modifiers::SHIFT | Modifiers::ALT,
+            Key::ArrowDown,
+        ),
+        binding(DeleteLines, Modifiers::COMMAND | Modifiers::SHIFT, Key::K),
+        binding(MoveLinesUp, Modifiers::ALT, Key::ArrowUp),
+        binding(MoveLinesDown, Modifiers::ALT, Key::ArrowDown),
+        binding(JoinLines, Modifiers::COMMAND, Key::J),
+        binding(SortLines, Modifiers::COMMAND | Modifiers::SHIFT, Key::S),
+        binding(ReverseLines, Modifiers::COMMAND | Modifiers::SHIFT, Key::R),
+        binding(
+            TrimTrailingWhitespace,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::T,
+        ),
+        binding(AddNextMatch, Modifiers::COMMAND, Key::D),
+        binding(AddAllMatches, Modifiers::COMMAND | Modifiers::SHIFT, Key::L),
+        binding(
+            SplitSelectionIntoLines,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::L,
+        ),
+        binding(ClearSecondaryCursors, Modifiers::NONE, Key::Escape),
+        binding(ToggleComments, Modifiers::COMMAND, Key::Slash),
+        binding(UpperCase, Modifiers::COMMAND | Modifiers::CTRL, Key::U),
+        binding(LowerCase, Modifiers::COMMAND | Modifiers::CTRL, Key::L),
+        binding(TitleCase, Modifiers::COMMAND | Modifiers::CTRL, Key::T),
+        binding(Find, Modifiers::COMMAND, Key::F),
+        binding(FindReplace, Modifiers::COMMAND | Modifiers::ALT, Key::F),
+        binding(FindUnderCursor, Modifiers::NONE, Key::F3),
+        binding(GoToLine, Modifiers::COMMAND, Key::G),
+        binding(
+            CommandPalette,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::P,
+        ),
+        binding(QuickSwitchTabs, Modifiers::COMMAND, Key::P),
+        binding(Preferences, Modifiers::COMMAND, Key::Comma),
+        binding(ImportFile, Modifiers::COMMAND | Modifiers::SHIFT, Key::I),
+        binding(ExportFile, Modifiers::COMMAND | Modifiers::SHIFT, Key::E),
+        binding(ToggleBookmark, Modifiers::COMMAND, Key::F2),
+        binding(JumpToNextBookmark, Modifiers::NONE, Key::F4),
+        binding(
+            ClearBookmarks,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::F2,
+        ),
+        binding(
+            SplitPaneHorizontal,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::H,
+        ),
+        binding(
+            SplitPaneVertical,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::V,
+        ),
+        binding(ClosePane, Modifiers::COMMAND | Modifiers::SHIFT, Key::W),
+        binding(PinTab, Modifiers::ALT | Modifiers::SHIFT, Key::P),
+        binding(
+            MoveTabLeft,
+            Modifiers::COMMAND | Modifiers::ALT,
+            Key::ArrowLeft,
+        ),
+        binding(
+            MoveTabRight,
+            Modifiers::COMMAND | Modifiers::ALT,
+            Key::ArrowRight,
+        ),
+    ]
+}
+
+fn primary_shortcut(command: Command) -> Option<egui::KeyboardShortcut> {
+    default_shortcuts()
+        .into_iter()
+        .find(|binding| binding.command == command)
+        .map(|binding| binding.shortcut)
 }
 
 pub struct CommandMetadata {
@@ -137,7 +313,9 @@ impl CommandMetadata {
         let query = query.to_lowercase();
         self.name.to_lowercase().contains(&query)
             || self.description.to_lowercase().contains(&query)
-            || format!("{:?}", self.command).to_lowercase().contains(&query)
+            || format!("{:?}", self.command)
+                .to_lowercase()
+                .contains(&query)
     }
 }
 
@@ -262,7 +440,7 @@ pub fn fuzzy_match(query: &str, target: &str) -> bool {
 pub fn all_commands() -> Vec<CommandMetadata> {
     use Command::*;
     use CommandCategory::*;
-    use egui::{KeyboardShortcut, Key, Modifiers};
+    use egui::{Key, KeyboardShortcut, Modifiers};
 
     vec![
         // App commands
@@ -271,50 +449,63 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             name: "New Scratch",
             description: "Create a new scratch buffer",
             category: App,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::COMMAND,
-                logical_key: Key::N,
-            }),
+            shortcut: primary_shortcut(NewScratch),
         },
         CommandMetadata {
             command: CloseScratch,
             name: "Close Scratch",
             description: "Close the current scratch buffer",
             category: App,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::COMMAND,
-                logical_key: Key::W,
-            }),
+            shortcut: primary_shortcut(CloseScratch),
         },
         CommandMetadata {
             command: RenameTab,
             name: "Rename Tab",
             description: "Rename the current tab",
             category: App,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::NONE,
-                logical_key: Key::F2,
-            }),
+            shortcut: primary_shortcut(RenameTab),
+        },
+        CommandMetadata {
+            command: Cut,
+            name: "Cut",
+            description: "Cut selected text to the clipboard",
+            category: App,
+            shortcut: primary_shortcut(Cut),
+        },
+        CommandMetadata {
+            command: Copy,
+            name: "Copy",
+            description: "Copy selected text to the clipboard",
+            category: App,
+            shortcut: primary_shortcut(Copy),
+        },
+        CommandMetadata {
+            command: Paste,
+            name: "Paste",
+            description: "Paste clipboard text into the current scratch",
+            category: App,
+            shortcut: primary_shortcut(Paste),
+        },
+        CommandMetadata {
+            command: SelectAll,
+            name: "Select All",
+            description: "Select all text in the current scratch",
+            category: App,
+            shortcut: primary_shortcut(SelectAll),
         },
         CommandMetadata {
             command: Undo,
             name: "Undo",
             description: "Undo the last edit",
             category: App,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::COMMAND,
-                logical_key: Key::Z,
-            }),
+            shortcut: primary_shortcut(Undo),
         },
         CommandMetadata {
             command: Redo,
             name: "Redo",
             description: "Redo the last undone edit",
             category: App,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::COMMAND | Modifiers::SHIFT,
-                logical_key: Key::Z,
-            }),
+            shortcut: primary_shortcut(Redo),
         },
         // Motion commands
         CommandMetadata {
@@ -382,20 +573,14 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             name: "Move to Document Start",
             description: "Move cursor to the start of the document",
             category: Motion,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::ALT,
-                logical_key: Key::Home,
-            }),
+            shortcut: primary_shortcut(MoveDocumentStart),
         },
         CommandMetadata {
             command: MoveDocumentEnd,
             name: "Move to Document End",
             description: "Move cursor to the end of the document",
             category: Motion,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::ALT,
-                logical_key: Key::End,
-            }),
+            shortcut: primary_shortcut(MoveDocumentEnd),
         },
         CommandMetadata {
             command: MoveLineStart,
@@ -422,20 +607,14 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             name: "Move Paragraph Up",
             description: "Move cursor up by one paragraph",
             category: Motion,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::ALT,
-                logical_key: Key::ArrowUp,
-            }),
+            shortcut: None,
         },
         CommandMetadata {
             command: MoveParagraphDown,
             name: "Move Paragraph Down",
             description: "Move cursor down by one paragraph",
             category: Motion,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::ALT,
-                logical_key: Key::ArrowDown,
-            }),
+            shortcut: None,
         },
         CommandMetadata {
             command: PageUp,
@@ -625,7 +804,7 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             name: "Duplicate Lines",
             description: "Duplicate the selected lines",
             category: LineOperations,
-            shortcut: None,
+            shortcut: primary_shortcut(DuplicateLines),
         },
         CommandMetadata {
             command: DeleteLines,
@@ -642,20 +821,14 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             name: "Move Lines Up",
             description: "Move the selected lines up",
             category: LineOperations,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::COMMAND | Modifiers::ALT,
-                logical_key: Key::ArrowUp,
-            }),
+            shortcut: primary_shortcut(MoveLinesUp),
         },
         CommandMetadata {
             command: MoveLinesDown,
             name: "Move Lines Down",
             description: "Move the selected lines down",
             category: LineOperations,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::COMMAND | Modifiers::ALT,
-                logical_key: Key::ArrowDown,
-            }),
+            shortcut: primary_shortcut(MoveLinesDown),
         },
         CommandMetadata {
             command: JoinLines,
@@ -720,10 +893,7 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             name: "Add All Matches",
             description: "Add all matches of the current selection as cursors",
             category: MultiCursor,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::COMMAND | Modifiers::SHIFT,
-                logical_key: Key::D,
-            }),
+            shortcut: primary_shortcut(AddAllMatches),
         },
         CommandMetadata {
             command: SplitSelectionIntoLines,
@@ -822,10 +992,7 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             name: "Select Next Occurrence",
             description: "Select the next occurrence of the current word",
             category: Search,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::COMMAND,
-                logical_key: Key::D,
-            }),
+            shortcut: None,
         },
         CommandMetadata {
             command: SearchInTabs,
@@ -834,16 +1001,27 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             category: Search,
             shortcut: None,
         },
+        CommandMetadata {
+            command: GoToLine,
+            name: "Go to Line",
+            description: "Jump to a line number in the current scratch",
+            category: Search,
+            shortcut: primary_shortcut(GoToLine),
+        },
         // View
         CommandMetadata {
             command: CommandPalette,
             name: "Command Palette",
             description: "Open the command palette",
             category: View,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::COMMAND | Modifiers::SHIFT,
-                logical_key: Key::P,
-            }),
+            shortcut: primary_shortcut(CommandPalette),
+        },
+        CommandMetadata {
+            command: QuickSwitchTabs,
+            name: "Quick Switch Tabs",
+            description: "Open the quick tab switcher",
+            category: View,
+            shortcut: primary_shortcut(QuickSwitchTabs),
         },
         CommandMetadata {
             command: ToggleWrapMode,
@@ -892,10 +1070,7 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             name: "Preferences",
             description: "Open the preferences window",
             category: View,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::COMMAND,
-                logical_key: Key::Comma,
-            }),
+            shortcut: primary_shortcut(Preferences),
         },
         // File commands
         CommandMetadata {
@@ -903,20 +1078,77 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             name: "Import File",
             description: "Import text from a file into the current scratch buffer",
             category: App,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::COMMAND | Modifiers::SHIFT,
-                logical_key: Key::I,
-            }),
+            shortcut: primary_shortcut(ImportFile),
         },
         CommandMetadata {
             command: ExportFile,
             name: "Export File",
             description: "Export the current scratch buffer content to a file",
             category: App,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::COMMAND | Modifiers::SHIFT,
-                logical_key: Key::E,
-            }),
+            shortcut: primary_shortcut(ExportFile),
+        },
+        CommandMetadata {
+            command: ToggleBookmark,
+            name: "Toggle Bookmark",
+            description: "Toggle a bookmark at the current line",
+            category: View,
+            shortcut: primary_shortcut(ToggleBookmark),
+        },
+        CommandMetadata {
+            command: JumpToNextBookmark,
+            name: "Jump to Next Bookmark",
+            description: "Move the cursor to the next bookmark",
+            category: View,
+            shortcut: primary_shortcut(JumpToNextBookmark),
+        },
+        CommandMetadata {
+            command: ClearBookmarks,
+            name: "Clear Bookmarks",
+            description: "Clear all bookmarks in the current scratch",
+            category: View,
+            shortcut: primary_shortcut(ClearBookmarks),
+        },
+        CommandMetadata {
+            command: SplitPaneHorizontal,
+            name: "Split Pane Horizontal",
+            description: "Split the editor pane horizontally",
+            category: View,
+            shortcut: primary_shortcut(SplitPaneHorizontal),
+        },
+        CommandMetadata {
+            command: SplitPaneVertical,
+            name: "Split Pane Vertical",
+            description: "Split the editor pane vertically",
+            category: View,
+            shortcut: primary_shortcut(SplitPaneVertical),
+        },
+        CommandMetadata {
+            command: ClosePane,
+            name: "Close Pane",
+            description: "Close the active editor pane",
+            category: View,
+            shortcut: primary_shortcut(ClosePane),
+        },
+        CommandMetadata {
+            command: PinTab,
+            name: "Pin Tab",
+            description: "Pin or unpin the current tab",
+            category: View,
+            shortcut: primary_shortcut(PinTab),
+        },
+        CommandMetadata {
+            command: MoveTabLeft,
+            name: "Move Tab Left",
+            description: "Move the current tab left",
+            category: View,
+            shortcut: primary_shortcut(MoveTabLeft),
+        },
+        CommandMetadata {
+            command: MoveTabRight,
+            name: "Move Tab Right",
+            description: "Move the current tab right",
+            category: View,
+            shortcut: primary_shortcut(MoveTabRight),
         },
     ]
 }
