@@ -88,6 +88,16 @@ pub(super) fn handle_input(
                     changed = true;
                     view_state.preferred_column = None;
                 }
+                egui::Key::ArrowUp => {
+                    move_document_start(document, false);
+                    changed = true;
+                    view_state.preferred_column = None;
+                }
+                egui::Key::ArrowDown => {
+                    move_document_end(document, false);
+                    changed = true;
+                    view_state.preferred_column = None;
+                }
                 _ => {}
             },
             egui::Event::Key {

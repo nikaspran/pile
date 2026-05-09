@@ -174,6 +174,8 @@ pub fn default_shortcuts() -> Vec<ShortcutBinding> {
         binding(MoveDown, Modifiers::NONE, Key::ArrowDown),
         binding(MoveDocumentStart, Modifiers::CTRL, Key::Home),
         binding(MoveDocumentEnd, Modifiers::CTRL, Key::End),
+        binding(MoveDocumentStart, Modifiers::COMMAND, Key::ArrowUp),
+        binding(MoveDocumentEnd, Modifiers::COMMAND, Key::ArrowDown),
         binding(MoveLineStart, Modifiers::NONE, Key::Home),
         binding(MoveLineEnd, Modifiers::NONE, Key::End),
         binding(PageUp, Modifiers::NONE, Key::PageUp),
