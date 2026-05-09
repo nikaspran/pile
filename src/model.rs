@@ -13,6 +13,12 @@ const FALLBACK_TITLE: &str = "Untitled";
 const MAX_AUTO_TITLE_CHARS: usize = 48;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ClosedDocument {
+    pub document: Document,
+    pub order: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppState {
     pub documents: Vec<Document>,
     pub tab_order: Vec<DocumentId>,
@@ -22,7 +28,11 @@ pub struct AppState {
         serialize_with = "serialize_recent_order",
         deserialize_with = "deserialize_recent_order"
     )]
-    recent_order: Vec<DocumentId>,
+    pub(crate) recent_order: Vec<DocumentId>,
+    #[serde(default)]
+    pub closed_documents: Vec<ClosedDocument>,
+    #[serde(default)]
+    pub next_closed_order: u64,
 }
 
 impl AppState {
@@ -36,6 +46,8 @@ impl AppState {
             active_document,
             next_untitled_index: 2,
             recent_order: vec![active_document],
+            closed_documents: Vec::new(),
+            next_closed_order: 0,
         }
     }
 
@@ -80,6 +92,14 @@ impl AppState {
         for document in &mut self.documents {
             document.validate();
         }
+
+        // Validate closed documents
+        self.closed_documents.retain(|cd| {
+            !valid_ids.contains(&cd.document.id)
+        });
+        for cd in &mut self.closed_documents {
+            cd.document.validate();
+        }
     }
 
     pub fn active_document(&self) -> Option<&Document> {
@@ -122,14 +142,21 @@ impl AppState {
 
     pub fn close_active(&mut self, default_tab_width: usize, default_soft_tabs: bool) {
         if self.documents.len() <= 1 {
-            if let Some(document) = self.active_document_mut() {
-                document.replace_text("");
-            }
-            return;
+            // Create a new untitled document first, then close the old one
+            let document = Document::new_untitled(
+                self.next_untitled_index,
+                default_tab_width,
+                default_soft_tabs,
+            );
+            let new_id = document.id;
+            self.next_untitled_index += 1;
+            self.documents.push(document);
+            self.tab_order.push(new_id);
+            self.recent_order.push(new_id);
         }
 
         let old_active = self.active_document;
-        self.documents.retain(|document| document.id != old_active);
+        self.push_closed_document(old_active);
         self.tab_order.retain(|id| *id != old_active);
         self.recent_order.retain(|id| *id != old_active);
         self.active_document = self.tab_order.first().copied().unwrap_or_else(|| {
@@ -148,6 +175,60 @@ impl AppState {
         self.update_recent_order(self.active_document);
     }
 
+    pub fn close_document_by_id(
+        &mut self,
+        document_id: DocumentId,
+    ) -> bool {
+        if self.document(document_id).is_none() {
+            return false;
+        }
+        self.push_closed_document(document_id);
+        self.tab_order.retain(|id| *id != document_id);
+        self.recent_order.retain(|id| *id != document_id);
+        true
+    }
+
+    fn push_closed_document(&mut self, document_id: DocumentId) {
+        if let Some(pos) = self.documents.iter().position(|d| d.id == document_id) {
+            let doc = self.documents.remove(pos);
+            self.closed_documents.push(ClosedDocument {
+                document: doc,
+                order: self.next_closed_order,
+            });
+            self.next_closed_order += 1;
+        }
+    }
+
+    pub fn reopen_document(&mut self, document_id: DocumentId) -> bool {
+        let pos = match self.closed_documents.iter().position(|cd| cd.document.id == document_id) {
+            Some(p) => p,
+            None => return false,
+        };
+        let closed = self.closed_documents.remove(pos);
+        let mut doc = closed.document;
+        doc.selections = vec![Selection::caret(0)];
+        let id = doc.id;
+        self.documents.push(doc);
+        self.tab_order.push(id);
+        self.active_document = id;
+        self.update_recent_order(id);
+        true
+    }
+
+    pub fn permanently_delete_document(&mut self, document_id: DocumentId) -> bool {
+        let len = self.closed_documents.len();
+        self.closed_documents.retain(|cd| cd.document.id != document_id);
+        self.closed_documents.len() < len
+    }
+
+    pub fn last_closed_document(&self) -> Option<&ClosedDocument> {
+        self.closed_documents.iter().max_by_key(|cd| cd.order)
+    }
+
+    pub fn closed_documents(&self) -> &[ClosedDocument] {
+        &self.closed_documents
+    }
+
     pub fn set_active(&mut self, document_id: DocumentId) -> bool {
         if self.tab_order.contains(&document_id) && self.document(document_id).is_some() {
             self.active_document = document_id;
@@ -162,6 +243,7 @@ impl AppState {
         &self.recent_order
     }
 
+    #[allow(dead_code)]
     pub fn recent_order_mut(&mut self) -> &mut Vec<DocumentId> {
         &mut self.recent_order
     }
@@ -182,7 +264,7 @@ where
     empty.serialize(serializer)
 }
 
-fn deserialize_recent_order<'de, D>(deserializer: D) -> Result<Vec<DocumentId>, D::Error>
+pub(crate) fn deserialize_recent_order<'de, D>(deserializer: D) -> Result<Vec<DocumentId>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -721,11 +803,14 @@ mod tests {
 
         assert_eq!(state.documents.len(), 1);
         assert_eq!(state.active_document, first);
+        assert_eq!(state.closed_documents().len(), 1);
 
+        // Closing the last document creates a new scratch instead of clearing text
         state.close_active(4, true);
 
         assert_eq!(state.documents.len(), 1);
-        assert_eq!(state.active_document, first);
+        assert_ne!(state.active_document, first);
+        assert_eq!(state.closed_documents().len(), 2);
     }
 
     #[test]
@@ -1074,6 +1159,8 @@ mod tests {
             active_document: Uuid::new_v4(),
             next_untitled_index: 2,
             recent_order: vec![],
+            closed_documents: vec![],
+            next_closed_order: 0,
         };
 
         state.validate();
@@ -1776,5 +1863,88 @@ mod tests {
 
         undo.discard_group();
         assert!(!undo.can_undo()); // typing group discarded
+    }
+
+    #[test]
+    fn close_active_moves_document_to_closed_history() {
+        let mut state = AppState::empty();
+        // Open a second document
+        let id2 = state.open_untitled(4, true);
+        assert_eq!(state.documents.len(), 2);
+        assert!(state.closed_documents().is_empty());
+
+        // Close active (the second doc)
+        state.close_active(4, true);
+        assert_eq!(state.documents.len(), 1);
+        assert_eq!(state.closed_documents().len(), 1);
+        assert_eq!(state.closed_documents()[0].document.id, id2);
+
+        // Close active again (now the first doc)
+        state.close_active(4, true);
+        assert_eq!(state.documents.len(), 1); // always at least 1
+        assert_eq!(state.closed_documents().len(), 2); // first doc also moved to history
+    }
+
+    #[test]
+    fn close_document_by_id_moves_to_history() {
+        let mut state = AppState::empty();
+        let id2 = state.open_untitled(4, true);
+        assert_eq!(state.documents.len(), 2);
+
+        // Close the non-active document
+        assert!(state.close_document_by_id(id2));
+        assert_eq!(state.documents.len(), 1);
+        assert_eq!(state.closed_documents().len(), 1);
+
+        // Reopen it
+        assert!(state.reopen_document(id2));
+        assert_eq!(state.documents.len(), 2);
+        assert_eq!(state.closed_documents().len(), 0);
+        assert_eq!(state.active_document, id2);
+    }
+
+    #[test]
+    fn reopen_document_restores_content() {
+        let mut state = AppState::empty();
+        let id2 = state.open_untitled(4, true);
+
+        // Add some content to doc2
+        if let Some(doc) = state.document_mut(id2) {
+            doc.replace_text("hello world");
+        }
+
+        // Close it
+        state.close_active(4, true);
+        assert!(state.document(id2).is_none());
+
+        // Reopen and verify content
+        assert!(state.reopen_document(id2));
+        let reopened = state.document(id2).expect("document should exist");
+        assert_eq!(reopened.rope.to_string(), "hello world");
+    }
+
+    #[test]
+    fn permanently_delete_removes_from_history() {
+        let mut state = AppState::empty();
+        let id2 = state.open_untitled(4, true);
+        state.close_active(4, true);
+        assert_eq!(state.closed_documents().len(), 1);
+
+        assert!(state.permanently_delete_document(id2));
+        assert_eq!(state.closed_documents().len(), 0);
+
+        // Cannot delete again
+        assert!(!state.permanently_delete_document(id2));
+    }
+
+    #[test]
+    fn last_closed_document_returns_most_recent() {
+        let mut state = AppState::empty();
+        let id2 = state.open_untitled(4, true);
+        state.close_active(4, true);
+
+        let last = state.last_closed_document();
+        assert!(last.is_some());
+        assert_eq!(last.unwrap().document.id, id2);
     }
 }

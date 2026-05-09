@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs,
     io::Write,
     path::PathBuf,
@@ -13,7 +14,7 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, warn};
 
-use crate::model::SessionSnapshot;
+use crate::model::{ClosedDocument, Document, DocumentId, SessionSnapshot};
 use crate::settings::Settings;
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -21,7 +22,7 @@ const SESSION_FILE: &str = ".session.bin";
 const BACKUP_ROTATION_COUNT: usize = 5;
 
 /// Current envelope version. Increment this when the session format changes.
-const ENVELOPE_VERSION: u32 = 3;
+const ENVELOPE_VERSION: u32 = 4;
 
 /// Maximum allowed serialized snapshot size in bytes (50 MB).
 /// If the snapshot exceeds this, the save is skipped to prevent stalling the UI.
@@ -68,6 +69,7 @@ pub enum RecoveryEventKind {
     QuarantineFailed,
     SaveFailed,
     SaveSucceeded,
+    DocumentsRecovered,
 }
 
 /// Telemetry collected by the save worker across the session.
@@ -142,7 +144,7 @@ impl SessionEnvelope {
         let payload_bytes = bincode::serialize(&payload)?;
         Ok(Self {
             envelope_version: ENVELOPE_VERSION,
-            min_compatible_version: 3,
+            min_compatible_version: 4,
             payload_bytes,
             payload_type: "SessionSnapshot".to_owned(),
         })
@@ -224,6 +226,9 @@ fn migrate_session(mut envelope: SessionEnvelope) -> Result<SessionSnapshot> {
     if envelope.envelope_version == 2 {
         envelope = migrate_v2_to_v3(envelope)?;
     }
+    if envelope.envelope_version == 3 {
+        envelope = migrate_v3_to_v4(envelope)?;
+    }
 
     // Now at current version, deserialize
     if envelope.payload_type != "SessionSnapshot" {
@@ -282,6 +287,56 @@ fn migrate_v2_to_v3(envelope: SessionEnvelope) -> Result<SessionEnvelope> {
     Ok(SessionEnvelope {
         envelope_version: 3,
         min_compatible_version: 3,
+        payload_bytes,
+        payload_type: "SessionSnapshot".to_owned(),
+    })
+}
+
+/// Migration from envelope v3 to v4.
+/// v3 lacked closed_document history support; v4 adds AppState::closed_documents
+/// and AppState::next_closed_order.
+fn migrate_v3_to_v4(envelope: SessionEnvelope) -> Result<SessionEnvelope> {
+    use crate::model::{AppState, Document, DocumentId, PaneSnapshot, deserialize_recent_order};
+
+    #[derive(Deserialize)]
+    #[allow(dead_code)]
+    struct SnapshotV3 {
+        schema_version: u32,
+        documents: Vec<Document>,
+        tab_order: Vec<DocumentId>,
+        active_document: DocumentId,
+        next_untitled_index: u64,
+        #[serde(deserialize_with = "deserialize_recent_order")]
+        recent_order: Vec<DocumentId>,
+        panes: Vec<PaneSnapshot>,
+        active_pane: usize,
+    }
+
+    let v3: SnapshotV3 = bincode::deserialize(&envelope.payload_bytes)
+        .with_context(|| "failed to deserialize v3 session")?;
+
+    let new_state = AppState {
+        documents: v3.documents,
+        tab_order: v3.tab_order,
+        active_document: v3.active_document,
+        next_untitled_index: v3.next_untitled_index,
+        recent_order: v3.recent_order,
+        closed_documents: Vec::new(),
+        next_closed_order: 0,
+    };
+
+    let new_payload = SessionSnapshot {
+        schema_version: 4,
+        state: new_state,
+        panes: v3.panes,
+        active_pane: v3.active_pane,
+    };
+
+    let payload_bytes = bincode::serialize(&new_payload)?;
+
+    Ok(SessionEnvelope {
+        envelope_version: 4,
+        min_compatible_version: 4,
         payload_bytes,
         payload_type: "SessionSnapshot".to_owned(),
     })
@@ -412,7 +467,11 @@ pub fn load_session(
     // Try to deserialize as new envelope format first
     match SessionEnvelope::from_bytes(&bytes) {
         Ok(envelope) => {
-            let snapshot = SessionEnvelope::open(envelope)?;
+            let original_version = envelope.envelope_version;
+            let mut snapshot = SessionEnvelope::open(envelope)?;
+            if original_version < 4 {
+                recover_orphan_documents(path, &mut snapshot, telemetry);
+            }
             Ok(Some(snapshot))
         }
         Err(_) => {
@@ -421,12 +480,13 @@ pub fn load_session(
                 Ok(snapshot) => {
                     // Support schema v1 by migrating to v2
                     if snapshot.schema_version == 1 {
-                        let migrated = SessionSnapshot {
+                        let mut migrated = SessionSnapshot {
                             schema_version: 2,
                             state: snapshot.state,
                             panes: vec![],
                             active_pane: 0,
                         };
+                        recover_orphan_documents(path, &mut migrated, telemetry);
                         return Ok(Some(migrated));
                     }
 
@@ -434,6 +494,8 @@ pub fn load_session(
                         anyhow::bail!("unsupported session schema {}", snapshot.schema_version);
                     }
 
+                    let mut snapshot = snapshot;
+                    recover_orphan_documents(path, &mut snapshot, telemetry);
                     Ok(Some(snapshot))
                 }
                 Err(_) => {
@@ -447,12 +509,13 @@ pub fn load_session(
                     match bincode::deserialize::<OldSessionV1>(&bytes) {
                         Ok(old) => {
                             // Migrate v1 to current format
-                            let migrated = SessionSnapshot {
+                            let mut migrated = SessionSnapshot {
                                 schema_version: 2,
                                 state: old.state,
                                 panes: vec![],
                                 active_pane: 0,
                             };
+                            recover_orphan_documents(path, &mut migrated, telemetry);
                             return Ok(Some(migrated));
                         }
                         Err(_) => {
@@ -785,6 +848,112 @@ pub fn load_session_from_backup(
     Ok(None)
 }
 
+/// After loading a session, check backup files for documents that exist in
+/// backups but not in the current state. Any found are added to closed_documents.
+/// This protects against silent data loss during version migrations.
+fn recover_orphan_documents(
+    session_path: &PathBuf,
+    snapshot: &mut SessionSnapshot,
+    telemetry: &mut SaveTelemetry,
+) {
+    let current_ids: HashSet<DocumentId> =
+        snapshot.state.documents.iter().map(|d| d.id).collect();
+    let mut recovered = Vec::new();
+    let mut next_order = snapshot.state.next_closed_order;
+
+    for i in 1..=BACKUP_ROTATION_COUNT {
+        let backup_path = session_path.with_extension(format!("bin.{}", i));
+        if !backup_path.exists() {
+            continue;
+        }
+
+        match load_documents_from_backup(&backup_path) {
+            Ok(docs) => {
+                for doc in docs {
+                    if current_ids.contains(&doc.id) {
+                        continue;
+                    }
+                    if recovered.iter().any(|d: &Document| d.id == doc.id) {
+                        continue;
+                    }
+                    if snapshot
+                        .state
+                        .closed_documents
+                        .iter()
+                        .any(|cd| cd.document.id == doc.id)
+                    {
+                        continue;
+                    }
+                    recovered.push(doc);
+                }
+            }
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    backup_path = %backup_path.display(),
+                    "failed to read backup during document recovery"
+                );
+                continue;
+            }
+        }
+    }
+
+    if !recovered.is_empty() {
+        info!(
+            count = recovered.len(),
+            "recovered {} orphaned documents from session backups",
+            recovered.len(),
+        );
+        telemetry.recovery_events.push(RecoveryEvent {
+            timestamp: std::time::SystemTime::now(),
+            kind: RecoveryEventKind::DocumentsRecovered,
+            message: format!(
+                "Recovered {} orphaned documents from backups",
+                recovered.len()
+            ),
+        });
+
+        for doc in recovered {
+            snapshot
+                .state
+                .closed_documents
+                .push(ClosedDocument {
+                    document: doc,
+                    order: next_order,
+                });
+            next_order += 1;
+        }
+        snapshot.state.next_closed_order = next_order;
+    }
+}
+
+/// Read document list from a backup file, handling any format version.
+fn load_documents_from_backup(path: &PathBuf) -> Result<Vec<Document>> {
+    let bytes = fs::read(path)?;
+
+    // Try envelope format (v3+)
+    if let Ok(envelope) = SessionEnvelope::from_bytes(&bytes) {
+        let snapshot = SessionEnvelope::open(envelope)?;
+        return Ok(snapshot.state.documents);
+    }
+
+    // Try legacy flat format (v2)
+    if let Ok(snapshot) = bincode::deserialize::<SessionSnapshot>(&bytes) {
+        return Ok(snapshot.state.documents);
+    }
+
+    // Try v1 format (no schema_version field)
+    #[derive(Deserialize)]
+    struct V1State {
+        pub documents: Vec<Document>,
+    }
+    if let Ok(v1) = bincode::deserialize::<V1State>(&bytes) {
+        return Ok(v1.documents);
+    }
+
+    anyhow::bail!("unrecognized backup format");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -811,7 +980,7 @@ mod tests {
             .unwrap();
 
         let loaded = load_session(&path, &mut telemetry).unwrap().unwrap();
-        assert_eq!(loaded.schema_version, 3); // Now using envelope v3
+        assert_eq!(loaded.schema_version, 4); // Now using envelope v4
         assert_eq!(loaded.state.documents.len(), 1);
 
         worker.shutdown();
@@ -825,7 +994,7 @@ mod tests {
         let envelope = SessionEnvelope::wrap(&snapshot).unwrap();
         let loaded = SessionEnvelope::open(envelope).unwrap();
 
-        assert_eq!(loaded.schema_version, 3);
+        assert_eq!(loaded.schema_version, 4);
         assert_eq!(loaded.state.documents.len(), 1);
     }
 
@@ -856,7 +1025,7 @@ mod tests {
         // This should migrate through v1->v2->v3
         let migrated = SessionEnvelope::open(v1_envelope).unwrap();
 
-        assert_eq!(migrated.schema_version, 3);
+        assert_eq!(migrated.schema_version, 4);
         assert_eq!(migrated.state.documents.len(), 1);
     }
 
@@ -968,7 +1137,7 @@ mod tests {
 
         // Verify main session exists and is valid
         let loaded = load_session(&path, &mut telemetry).unwrap().unwrap();
-        assert_eq!(loaded.schema_version, 3);
+        assert_eq!(loaded.schema_version, 4);
 
         // Now corrupt the main session file
         fs::write(&path, "corrupted data").unwrap();
@@ -1071,7 +1240,7 @@ mod tests {
         // Migrate to v3
         let migrated = SessionEnvelope::open(v2_envelope).unwrap();
 
-        assert_eq!(migrated.schema_version, 3);
+        assert_eq!(migrated.schema_version, 4);
         assert_eq!(migrated.state.documents.len(), state.documents.len());
     }
 
@@ -1111,7 +1280,7 @@ mod tests {
 
         let migrated = SessionEnvelope::open(v1_envelope).unwrap();
 
-        assert_eq!(migrated.schema_version, 3);
+        assert_eq!(migrated.schema_version, 4);
         assert_eq!(migrated.state.documents.len(), 3); // 2 + 1 default
         assert!(migrated.panes.is_empty());
     }
@@ -1182,7 +1351,7 @@ mod tests {
         match result {
             Ok(Some(snapshot)) => {
                 // Successfully restored from backup
-                assert_eq!(snapshot.schema_version, 3);
+                assert_eq!(snapshot.schema_version, 4);
             }
             Ok(None) => {
                 // No backup available or backup also corrupt
@@ -1255,8 +1424,8 @@ mod tests {
         let payload_bytes = bincode::serialize(&snapshot).unwrap();
 
         let envelope = SessionEnvelope {
-            envelope_version: 3,
-            min_compatible_version: 3,
+            envelope_version: 4,
+            min_compatible_version: 4,
             payload_bytes,
             payload_type: "WrongType".to_owned(),
         };
@@ -1324,7 +1493,7 @@ mod tests {
         assert!(loaded.is_some());
 
         let (snapshot, backup_path) = loaded.unwrap();
-        assert_eq!(snapshot.schema_version, 3);
+        assert_eq!(snapshot.schema_version, 4);
         assert_eq!(backup_path, path.with_extension("bin.2"));
 
         // Cleanup
@@ -1373,6 +1542,110 @@ mod tests {
 
         // Cleanup
         let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn recover_orphan_documents_from_backups() {
+        let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let session_path = dir.join(".session.bin");
+
+        // Main state: [A, B]
+        let mut main_state = AppState::empty();
+        let doc_a = main_state.active_document;
+        let _doc_b = main_state.open_untitled(4, true);
+
+        // Clone main state to create backup before any close
+        let mut backup_state = main_state.clone();
+
+        // Add an orphan doc (C) to backup that never existed in main
+        let orphan = backup_state.open_untitled(4, true);
+        if let Some(doc) = backup_state.document_mut(orphan) {
+            doc.replace_text("orphaned from v3 close");
+        }
+        // backup_state.documents = [A, B, C]
+
+        let backup_snapshot = SessionSnapshot::from(&backup_state);
+        let backup_path = session_path.with_extension("bin.1");
+        write_snapshot(&backup_path, &backup_snapshot).unwrap();
+
+        // Current snapshot (no C ever existed)
+        let mut snapshot = SessionSnapshot::from(&main_state);
+        assert!(snapshot.state.document(orphan).is_none());
+
+        // Run recovery
+        let mut telemetry = SaveTelemetry::default();
+        recover_orphan_documents(&session_path, &mut snapshot, &mut telemetry);
+
+        // C was recovered into closed_documents
+        assert!(
+            snapshot
+                .state
+                .closed_documents
+                .iter()
+                .any(|cd| cd.document.id == orphan),
+        );
+        let recovered = snapshot
+            .state
+            .closed_documents
+            .iter()
+            .find(|cd| cd.document.id == orphan)
+            .unwrap();
+        assert_eq!(recovered.document.rope.to_string(), "orphaned from v3 close");
+
+        // Telemetry recorded
+        assert!(telemetry
+            .recovery_events
+            .iter()
+            .any(|e| matches!(e.kind, RecoveryEventKind::DocumentsRecovered)));
+
+        // A and B were NOT recovered (they are open)
+        assert!(!snapshot
+            .state
+            .closed_documents
+            .iter()
+            .any(|cd| cd.document.id == doc_a));
+
+        // Cleanup
+        let _ = fs::remove_file(&backup_path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn recover_orphan_documents_skips_already_closed() {
+        let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let session_path = dir.join(".session.bin");
+
+        // Main state: [A, B, C]
+        let mut main_state = AppState::empty();
+        let _doc_b = main_state.open_untitled(4, true);
+        let doc_c = main_state.open_untitled(4, true);
+
+        // Clone backup BEFORE closing C
+        let backup_state = main_state.clone();
+        // backup_state.documents = [A, B, C]
+
+        // Close C in main
+        main_state.close_document_by_id(doc_c);
+        // main_state.documents = [A, B], closed = [C]
+
+        let mut snapshot = SessionSnapshot::from(&main_state);
+
+        let backup_snapshot = SessionSnapshot::from(&backup_state);
+        let backup_path = session_path.with_extension("bin.1");
+        write_snapshot(&backup_path, &backup_snapshot).unwrap();
+
+        let mut telemetry = SaveTelemetry::default();
+        recover_orphan_documents(&session_path, &mut snapshot, &mut telemetry);
+
+        // C should NOT be recovered (already in closed_documents)
+        assert_eq!(snapshot.state.closed_documents.len(), 1);
+        assert_eq!(snapshot.state.closed_documents[0].document.id, doc_c);
+
+        // Cleanup
+        let _ = fs::remove_file(&backup_path);
         let _ = fs::remove_dir_all(&dir);
     }
 }

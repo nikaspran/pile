@@ -123,6 +123,7 @@ pub enum Command {
     PinTab,
     MoveTabLeft,
     MoveTabRight,
+    ReopenLastClosed,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -230,7 +231,7 @@ pub fn default_shortcuts() -> Vec<ShortcutBinding> {
         binding(ReverseLines, Modifiers::COMMAND | Modifiers::SHIFT, Key::R),
         binding(
             TrimTrailingWhitespace,
-            Modifiers::COMMAND | Modifiers::SHIFT,
+            Modifiers::COMMAND | Modifiers::ALT,
             Key::T,
         ),
         binding(AddNextMatch, Modifiers::COMMAND, Key::D),
@@ -278,6 +279,11 @@ pub fn default_shortcuts() -> Vec<ShortcutBinding> {
         binding(ClosePane, Modifiers::COMMAND | Modifiers::SHIFT, Key::W),
         binding(PinTab, Modifiers::ALT | Modifiers::SHIFT, Key::P),
         binding(
+            ReopenLastClosed,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::T,
+        ),
+        binding(
             MoveTabLeft,
             Modifiers::COMMAND | Modifiers::ALT,
             Key::ArrowLeft,
@@ -289,6 +295,45 @@ pub fn default_shortcuts() -> Vec<ShortcutBinding> {
         ),
     ]
 }
+
+/// Commands checked by the app-level keyboard shortcut handler.
+/// This is the single source of truth for which `default_shortcuts` bindings
+/// are dispatched via `handle_command` (as opposed to editor-only commands
+/// handled by `editor/input.rs`).
+pub const KEYBOARD_COMMANDS: &[Command] = &[
+    Command::NewScratch,
+    Command::CloseScratch,
+    Command::Undo,
+    Command::Redo,
+    Command::SelectAll,
+    Command::Find,
+    Command::FindReplace,
+    Command::DuplicateLines,
+    Command::MoveLinesUp,
+    Command::MoveLinesDown,
+    Command::MoveTabLeft,
+    Command::MoveTabRight,
+    Command::PinTab,
+    Command::SplitPaneHorizontal,
+    Command::SplitPaneVertical,
+    Command::ClosePane,
+    Command::ImportFile,
+    Command::ExportFile,
+    Command::GoToLine,
+    Command::CommandPalette,
+    Command::QuickSwitchTabs,
+    Command::ToggleBookmark,
+    Command::ClearBookmarks,
+    Command::ToggleWrapMode,
+    Command::ToggleVisibleWhitespace,
+    Command::ToggleIndentGuides,
+    Command::ToggleMinimap,
+    Command::ToggleStatusBar,
+    Command::ToggleTheme,
+    Command::SearchInTabs,
+    Command::Preferences,
+    Command::ReopenLastClosed,
+];
 
 fn primary_shortcut(command: Command) -> Option<egui::KeyboardShortcut> {
     default_shortcuts()
@@ -867,10 +912,7 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             name: "Trim Trailing Whitespace",
             description: "Remove trailing whitespace from selected lines",
             category: LineOperations,
-            shortcut: Some(KeyboardShortcut {
-                modifiers: Modifiers::COMMAND | Modifiers::SHIFT,
-                logical_key: Key::T,
-            }),
+            shortcut: primary_shortcut(TrimTrailingWhitespace),
         },
         CommandMetadata {
             command: NormalizeWhitespace,
@@ -1151,6 +1193,13 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             description: "Move the current tab right",
             category: View,
             shortcut: primary_shortcut(MoveTabRight),
+        },
+        CommandMetadata {
+            command: ReopenLastClosed,
+            name: "Reopen Last Closed",
+            description: "Reopen the most recently closed document",
+            category: App,
+            shortcut: primary_shortcut(ReopenLastClosed),
         },
     ]
 }

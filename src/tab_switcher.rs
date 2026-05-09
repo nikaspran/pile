@@ -15,6 +15,7 @@ pub struct TabSwitcher {
 struct TabItem {
     id: Uuid,
     title: String,
+    closed: bool,
 }
 
 impl TabSwitcher {
@@ -41,7 +42,7 @@ impl TabSwitcher {
     fn build_tab_list(&mut self, state: &AppState) {
         self.tabs.clear();
 
-        // Use recent_order if available, otherwise fall back to tab_order
+        // Open tabs from recent_order (most recent first)
         let order = if !state.recent_order().is_empty() {
             state.recent_order()
         } else {
@@ -53,12 +54,29 @@ impl TabSwitcher {
                 self.tabs.push(TabItem {
                     id: doc_id,
                     title: doc.display_title(),
+                    closed: false,
                 });
             }
         }
+
+        // Closed documents appended below, most recently closed first
+        let closed = state.closed_documents();
+        for cd in closed.iter().rev() {
+            self.tabs.push(TabItem {
+                id: cd.document.id,
+                title: cd.document.display_title(),
+                closed: true,
+            });
+        }
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, state: &AppState, on_switch: &mut dyn FnMut(Uuid)) {
+    pub fn show(
+        &mut self,
+        ctx: &egui::Context,
+        state: &AppState,
+        on_switch: &mut dyn FnMut(Uuid),
+        on_delete: &mut dyn FnMut(Uuid),
+    ) {
         if !self.visible {
             return;
         }
@@ -92,22 +110,58 @@ impl TabSwitcher {
                     .collect();
 
                 if filtered.is_empty() {
-                    ui.label("No tabs found");
+                    ui.label("No documents found");
                 } else {
                     egui::ScrollArea::vertical()
                         .max_height(300.0)
                         .show(ui, |ui| {
-                            for (list_idx, (_, item)) in filtered.iter().enumerate() {
+                            let mut delete_id: Option<Uuid> = None;
+                            for (list_idx, (_orig_idx, item)) in filtered.iter().enumerate() {
                                 let is_selected = list_idx == self.selected_index;
-                                let response = ui.selectable_label(is_selected, &item.title);
-                                if is_selected {
-                                    response.scroll_to_me(Some(egui::Align::Center));
-                                }
-                                if response.clicked() {
-                                    self.selected_index = list_idx;
-                                    on_switch(item.id);
-                                    self.visible = false;
-                                }
+
+                                ui.horizontal(|ui| {
+                                    let prefix = if item.closed { "○ " } else { "" };
+                                    let label_text = format!("{}{}", prefix, item.title);
+
+                                    let response = if item.closed {
+                                        ui.add(
+                                            egui::Label::new(
+                                                egui::RichText::new(&label_text)
+                                                    .color(egui::Color32::GRAY),
+                                            )
+                                            .sense(egui::Sense::click()),
+                                        )
+                                    } else {
+                                        ui.selectable_label(is_selected, &label_text)
+                                    };
+
+                                    if is_selected {
+                                        response.scroll_to_me(Some(egui::Align::Center));
+                                    }
+                                    if response.clicked() {
+                                        self.selected_index = list_idx;
+                                        on_switch(item.id);
+                                        self.visible = false;
+                                    }
+
+                                    // Delete button for closed docs on hover or when selected
+                                    if item.closed {
+                                        if is_selected || ui.rect_contains_pointer(response.rect) {
+                                            if ui
+                                                .small_button("✕")
+                                                .on_hover_text("Delete forever")
+                                                .clicked()
+                                            {
+                                                delete_id = Some(item.id);
+                                                self.visible = false;
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+
+                            if let Some(id) = delete_id {
+                                on_delete(id);
                             }
                         });
                 }
@@ -135,14 +189,13 @@ impl TabSwitcher {
                     self.selected_index = self.selected_index.saturating_sub(1);
                 }
                 if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
-                    let filtered: Vec<Uuid> = self
+                    let filtered: Vec<&TabItem> = self
                         .tabs
                         .iter()
                         .filter(|item| fuzzy_match(&self.query, &item.title))
-                        .map(|item| item.id)
                         .collect();
-                    if let Some(&id) = filtered.get(self.selected_index) {
-                        on_switch(id);
+                    if let Some(item) = filtered.get(self.selected_index) {
+                        on_switch(item.id);
                         self.visible = false;
                     }
                 }

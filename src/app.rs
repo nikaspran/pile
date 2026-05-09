@@ -95,6 +95,7 @@ enum AppCommand {
     PinTab,
     MoveTabLeft,
     MoveTabRight,
+    ReopenLastClosed,
 }
 
 impl From<NativeMenuCommand> for AppCommand {
@@ -216,6 +217,7 @@ pub struct PileApp {
     panes: Vec<EditorPane>,
     active_pane: usize,
     goto_line: GotoLineState,
+    pending_delete_confirmation: Option<DocumentId>,
     telemetry: SaveTelemetry,
     recovery_events: Vec<RecoveryEvent>,
     worker_event_rx: Option<Receiver<WorkerEvent>>,
@@ -353,6 +355,7 @@ impl PileApp {
             panes,
             active_pane,
             goto_line: GotoLineState::new(),
+            pending_delete_confirmation: None,
             telemetry,
             recovery_events: Vec::new(),
             worker_event_rx: Some(event_rx),
@@ -686,11 +689,7 @@ impl PileApp {
         if self.state.active_document == document_id {
             self.close_active_scratch();
         } else {
-            self.state.documents.retain(|doc| doc.id != document_id);
-            self.state.tab_order.retain(|id| *id != document_id);
-            self.state
-                .recent_order_mut()
-                .retain(|id| *id != document_id);
+            self.state.close_document_by_id(document_id);
             // Update any panes that were pointing to the closed document
             for pane in &mut self.panes {
                 if pane.document_id == document_id {
@@ -1051,6 +1050,18 @@ impl PileApp {
                 let active = self.state.active_document;
                 self.move_tab_right(active);
             }
+            AppCommand::ReopenLastClosed => {
+                if let Some(closed) = self.state.last_closed_document() {
+                    let id = closed.document.id;
+                    self.state.reopen_document(id);
+                    if let Some(pane) = self.panes.get_mut(self.active_pane) {
+                        pane.document_id = id;
+                    }
+                    self.mark_changed();
+                    self.refresh_active_document_metadata();
+                    self.editor_focus_pending = true;
+                }
+            }
         }
     }
 
@@ -1312,6 +1323,7 @@ impl PileApp {
                 let active = self.state.active_document;
                 self.move_tab_right(active);
             }
+            ReopenLastClosed => self.execute_command(AppCommand::ReopenLastClosed),
         }
     }
 
@@ -1329,76 +1341,26 @@ impl PileApp {
     }
 
     fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
-        let new_scratch = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND,
-                logical_key: egui::Key::N,
-            })
-        });
-        if new_scratch {
-            self.execute_command(AppCommand::NewScratch);
+        use crate::command::KEYBOARD_COMMANDS;
+
+        let shortcuts = crate::command::default_shortcuts();
+        let mut pressed: Vec<Command> = Vec::new();
+
+        for binding in shortcuts {
+            if KEYBOARD_COMMANDS.contains(&binding.command) {
+                let consumed =
+                    ctx.input_mut(|input| input.consume_shortcut(&binding.shortcut));
+                if consumed {
+                    pressed.push(binding.command);
+                }
+            }
         }
 
-        let close_scratch = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND,
-                logical_key: egui::Key::W,
-            })
-        });
-        if close_scratch {
-            self.execute_command(AppCommand::CloseScratch);
+        for command in pressed {
+            self.handle_command(command);
         }
 
-        let undo = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND,
-                logical_key: egui::Key::Z,
-            })
-        });
-        if undo {
-            self.execute_command(AppCommand::Undo);
-        }
-
-        let redo = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                logical_key: egui::Key::Z,
-            })
-        });
-        if redo {
-            self.execute_command(AppCommand::Redo);
-        }
-
-        let select_all = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND,
-                logical_key: egui::Key::A,
-            })
-        });
-        if select_all {
-            self.execute_command(AppCommand::SelectAll);
-        }
-
-        let open_replace = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND.plus(egui::Modifiers::ALT),
-                logical_key: egui::Key::F,
-            })
-        });
-        if open_replace {
-            self.open_search();
-            self.search.replace_visible = true;
-        }
-
-        let open_search = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND,
-                logical_key: egui::Key::F,
-            })
-        });
-        if open_search {
-            self.open_search();
-        }
+        // Raw key handlers (not shortcuts, just single-key presses)
 
         let rename_tab =
             ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2));
@@ -1406,6 +1368,19 @@ impl PileApp {
             self.execute_command(AppCommand::RenameTab);
         }
 
+        let find_under_cursor =
+            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F3));
+        if find_under_cursor {
+            self.find_under_cursor();
+        }
+
+        let next_bookmark =
+            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F4));
+        if next_bookmark {
+            self.jump_to_next_bookmark();
+        }
+
+        // Special-case: Cmd+D calls select_next_occurrence (not raw add_next_match)
         let select_next = ctx.input_mut(|input| {
             input.consume_shortcut(&egui::KeyboardShortcut {
                 modifiers: egui::Modifiers::COMMAND,
@@ -1416,6 +1391,7 @@ impl PileApp {
             self.select_next_occurrence();
         }
 
+        // Special-case: Cmd+Shift+L chooses between split_selection and add_all_matches
         let add_all_or_split_lines = ctx.input_mut(|input| {
             input.consume_shortcut(&egui::KeyboardShortcut {
                 modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
@@ -1443,193 +1419,6 @@ impl PileApp {
             } else {
                 self.execute_command(AppCommand::AddAllMatches);
             }
-        }
-
-        let find_under_cursor =
-            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F3));
-        if find_under_cursor {
-            self.find_under_cursor();
-        }
-
-        let toggle_palette = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                logical_key: egui::Key::P,
-            })
-        });
-        if toggle_palette {
-            self.command_palette.toggle();
-        }
-
-        let toggle_tab_switcher = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND,
-                logical_key: egui::Key::P,
-            })
-        });
-        if toggle_tab_switcher {
-            self.tab_switcher.toggle(&self.state);
-        }
-
-        let duplicate_lines = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                logical_key: egui::Key::D,
-            }) || input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::ALT | egui::Modifiers::SHIFT,
-                logical_key: egui::Key::ArrowDown,
-            })
-        });
-        if duplicate_lines {
-            self.execute_command(AppCommand::DuplicateLines);
-        }
-
-        let move_line_up = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::ALT,
-                logical_key: egui::Key::ArrowUp,
-            })
-        });
-        if move_line_up {
-            self.execute_command(AppCommand::MoveLinesUp);
-        }
-
-        let move_line_down = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::ALT,
-                logical_key: egui::Key::ArrowDown,
-            })
-        });
-        if move_line_down {
-            self.execute_command(AppCommand::MoveLinesDown);
-        }
-
-        // Tab reordering shortcuts (Cmd+Alt+Left/Right)
-        let move_left = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::ALT,
-                logical_key: egui::Key::ArrowLeft,
-            })
-        });
-        if move_left {
-            let active = self.state.active_document;
-            self.move_tab_left(active);
-        }
-
-        let move_right = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::ALT,
-                logical_key: egui::Key::ArrowRight,
-            })
-        });
-        if move_right {
-            let active = self.state.active_document;
-            self.move_tab_right(active);
-        }
-
-        // Pin/unpin shortcut (Alt+Shift+P)
-        let toggle_pin = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::ALT | egui::Modifiers::SHIFT,
-                logical_key: egui::Key::P,
-            })
-        });
-        if toggle_pin {
-            let active = self.state.active_document;
-            self.toggle_pin_tab(active);
-        }
-
-        // Split pane shortcuts (Cmd+Shift+H/V)
-        let split_h = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                logical_key: egui::Key::H,
-            })
-        });
-        if split_h {
-            self.split_pane_horizontal();
-        }
-
-        let split_v = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                logical_key: egui::Key::V,
-            })
-        });
-        if split_v {
-            self.split_pane_vertical();
-        }
-
-        // Close pane shortcut (Cmd+Shift+W)
-        let close_pane = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                logical_key: egui::Key::W,
-            })
-        });
-        if close_pane {
-            self.close_pane();
-        }
-
-        // Import file shortcut (Cmd+Shift+I)
-        let import_file = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                logical_key: egui::Key::I,
-            })
-        });
-        if import_file {
-            self.import_file();
-        }
-
-        // Export file shortcut (Cmd+Shift+E)
-        let export_file = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                logical_key: egui::Key::E,
-            })
-        });
-        if export_file {
-            self.export_file();
-        }
-
-        // Go to line shortcut (Cmd+G)
-        let goto_line = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND,
-                logical_key: egui::Key::G,
-            })
-        });
-        if goto_line {
-            self.goto_line.visible = true;
-            self.goto_line.focus_pending = true;
-        }
-
-        // Bookmark shortcuts (F2 and F4)
-        let toggle_bookmark = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND,
-                logical_key: egui::Key::F2,
-            })
-        });
-        if toggle_bookmark {
-            self.toggle_bookmark();
-        }
-
-        let next_bookmark =
-            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F4));
-        if next_bookmark {
-            self.jump_to_next_bookmark();
-        }
-
-        let clear_bookmarks = ctx.input_mut(|input| {
-            input.consume_shortcut(&egui::KeyboardShortcut {
-                modifiers: egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                logical_key: egui::Key::F2,
-            })
-        });
-        if clear_bookmarks {
-            self.clear_bookmarks();
         }
     }
 
@@ -2647,10 +2436,68 @@ impl eframe::App for PileApp {
         }
 
         let mut switch_to = None;
-        self.tab_switcher
-            .show(ctx, &self.state, &mut |id| switch_to = Some(id));
+        let mut delete_doc = None;
+        self.tab_switcher.show(
+            ctx,
+            &self.state,
+            &mut |id| switch_to = Some(id),
+            &mut |id| delete_doc = Some(id),
+        );
+
         if let Some(document_id) = switch_to {
-            self.set_active_document(document_id);
+            if self.state.document(document_id).is_none() {
+                // Closed document: reopen and explicitly update the pane
+                self.state.reopen_document(document_id);
+                if let Some(pane) = self.panes.get_mut(self.active_pane) {
+                    pane.document_id = document_id;
+                }
+                self.mark_changed();
+                self.refresh_active_document_metadata();
+                self.editor_focus_pending = true;
+            } else {
+                self.set_active_document(document_id);
+            }
+        }
+
+        if let Some(document_id) = delete_doc {
+            self.pending_delete_confirmation = Some(document_id);
+        }
+
+        // Show confirmation dialog for permanent deletion
+        if let Some(doc_id) = self.pending_delete_confirmation {
+            let doc_title = self
+                .state
+                .closed_documents()
+                .iter()
+                .find(|cd| cd.document.id == doc_id)
+                .map(|cd| cd.document.display_title())
+                .unwrap_or_default();
+
+            let mut dialog_open = true;
+            egui::Window::new("Delete forever")
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .collapsible(false)
+                .resizable(false)
+                .open(&mut dialog_open)
+                .show(ctx, |ui| {
+                    ui.label(format!(
+                        "Permanently delete \"{doc_title}\"? This cannot be undone."
+                    ));
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            self.pending_delete_confirmation = None;
+                        }
+                        if ui.button("Delete").clicked() {
+                            self.state.permanently_delete_document(doc_id);
+                            self.mark_changed();
+                            self.pending_delete_confirmation = None;
+                        }
+                    });
+                });
+
+            if !dialog_open {
+                self.pending_delete_confirmation = None;
+            }
         }
 
         // Show preferences window

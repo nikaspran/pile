@@ -529,7 +529,7 @@ fn build_menu() -> muda::Result<muda::Menu> {
         "pile.trim_whitespace",
         "Trim Trailing Whitespace",
         true,
-        Some(parse_accel("cmdorctrl+shift+t")?),
+        Some(parse_accel("cmdorctrl+alt+t")?),
     );
 
     let line_ops_menu = Submenu::with_items(
