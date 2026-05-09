@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -40,6 +45,18 @@ jobs:
       - name: Build
         run: cargo build --locked --release
 
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp target/release/pile dist/pile-ubuntu
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pile-ubuntu
+          path: dist/pile-ubuntu
+          if-no-files-found: error
+
   debian:
     name: Debian
     runs-on: ubuntu-latest
@@ -74,6 +91,18 @@ jobs:
 
       - name: Build
         run: cargo build --locked --release
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp target/release/pile dist/pile-debian
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pile-debian
+          path: dist/pile-debian
+          if-no-files-found: error
 
   fedora:
     name: Fedora
@@ -111,6 +140,18 @@ jobs:
       - name: Build
         run: cargo build --locked --release
 
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp target/release/pile dist/pile-fedora
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pile-fedora
+          path: dist/pile-fedora
+          if-no-files-found: error
+
   arch:
     name: Arch Linux
     runs-on: ubuntu-latest
@@ -146,6 +187,18 @@ jobs:
       - name: Build
         run: cargo build --locked --release
 
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp target/release/pile dist/pile-arch
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pile-arch
+          path: dist/pile-arch
+          if-no-files-found: error
+
   macos:
     name: macOS
     runs-on: macos-latest
@@ -159,6 +212,18 @@ jobs:
       - name: Build
         run: cargo build --locked --release
 
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp target/release/pile dist/pile-macos
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pile-macos
+          path: dist/pile-macos
+          if-no-files-found: error
+
   windows:
     name: Windows
     runs-on: windows-latest
@@ -171,3 +236,38 @@ jobs:
 
       - name: Build
         run: cargo build --locked --release
+
+      - name: Package binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item target\release\pile.exe dist\pile-windows.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pile-windows
+          path: dist/pile-windows.exe
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - ubuntu
+      - debian
+      - fedora
+      - arch
+      - macos
+      - windows
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/pile-*
