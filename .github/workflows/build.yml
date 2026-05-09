@@ -1,0 +1,173 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ubuntu:
+    name: Ubuntu
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.88
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libx11-dev \
+            libxi-dev \
+            libgl1-mesa-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            libudev-dev \
+            libgtk-3-dev
+
+      - name: Build
+        run: cargo build --locked --release
+
+  debian:
+    name: Debian
+    runs-on: ubuntu-latest
+    container: debian:stable
+    steps:
+      - name: Install base tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            git \
+            build-essential \
+            pkg-config \
+            libx11-dev \
+            libxi-dev \
+            libgl1-mesa-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            libudev-dev \
+            libgtk-3-dev
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.88
+
+      - name: Build
+        run: cargo build --locked --release
+
+  fedora:
+    name: Fedora
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Install base tools
+        run: |
+          dnf install -y \
+            ca-certificates \
+            curl \
+            git \
+            gcc \
+            gcc-c++ \
+            make \
+            pkgconf-pkg-config \
+            libX11-devel \
+            libXi-devel \
+            mesa-libGL-devel \
+            libXrandr-devel \
+            libXcursor-devel \
+            libXinerama-devel \
+            libxkbcommon-devel \
+            libxkbcommon-x11-devel \
+            wayland-devel \
+            systemd-devel \
+            gtk3-devel
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.88
+
+      - name: Build
+        run: cargo build --locked --release
+
+  arch:
+    name: Arch Linux
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install base tools
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed \
+            ca-certificates \
+            curl \
+            git \
+            base-devel \
+            pkgconf \
+            libx11 \
+            libxi \
+            mesa \
+            libxrandr \
+            libxcursor \
+            libxinerama \
+            libxkbcommon \
+            libxkbcommon-x11 \
+            wayland \
+            systemd \
+            gtk3
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.88
+
+      - name: Build
+        run: cargo build --locked --release
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.88
+
+      - name: Build
+        run: cargo build --locked --release
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.88
+
+      - name: Build
+        run: cargo build --locked --release
