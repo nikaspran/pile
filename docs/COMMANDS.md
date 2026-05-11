@@ -24,11 +24,13 @@ Categories (defined in `CommandCategory`):
 - **Search** - search UI and navigation (Find, FindReplace, FindUnderCursor, etc.)
 - **View** - display toggles (CommandPalette, ToggleWrapMode, ToggleMinimap, etc.)
 
-### `AppCommand` (src/app.rs:34-43)
+### `AppCommand` (src/app/commands.rs)
 
 A smaller enum for app-level commands that require state changes outside the
-editor (tab management, bookmarks, undo/redo routing). These are handled by
-`execute_command()` and `handle_command()` in `app.rs`.
+editor (tab management, bookmarks, undo/redo routing). These are converted from
+native menu commands and, where behavior is identical, from command
+palette/shortcut commands before dispatch through `execute_command()` in
+`app.rs`.
 
 ### `NativeMenuCommand` (src/native_menu.rs:2-8)
 
@@ -37,7 +39,7 @@ via a `From` impl for dispatch.
 
 ## Command Metadata and Shortcuts
 
-Each command carries metadata via `CommandMetadata` (src/command.rs:108-114):
+Each command carries metadata via `CommandMetadata`:
 
 ```rust
 pub struct CommandMetadata {
@@ -49,8 +51,8 @@ pub struct CommandMetadata {
 }
 ```
 
-The `all_commands()` function (src/command.rs:148-769) returns the full list
-with shortcuts defined using `egui::KeyboardShortcut`.
+The `all_commands()` function returns the full list with shortcuts defined
+using `egui::KeyboardShortcut`.
 
 ### Shortcut Modifiers
 
@@ -65,8 +67,8 @@ with shortcuts defined using `egui::KeyboardShortcut`.
 
 Shortcuts are currently defined in two places:
 
-1. **`command.rs`** - `all_commands()` for palette display and metadata
-2. **`app.rs`** - `handle_keyboard_shortcuts()` (lines 760-969) for actual handling
+1. **`command.rs`** - `default_shortcuts()` and command metadata
+2. **`app.rs`** - `handle_keyboard_shortcuts()` for app-level handling
 
 Additionally, **`editor/input.rs`** (lines 26-331) handles editor-local keyboard
 input directly (typing, arrows, delete, etc.) without going through the command
@@ -95,10 +97,11 @@ Activation: `Cmd+Shift+P` (or via `CommandPalette` command).
 User input
 ├── editor/input.rs (typing, arrows, editor-local keys)
 ├── app.rs:handle_keyboard_shortcuts() (app-level shortcuts)
-└── Command palette selection
+├── native menu command
+└── command palette selection
     └── app.rs:handle_command()
-        ├── AppCommand → execute_command()
-        └── Editor commands → forwarded to active editor
+        ├── AppCommand::from_command(...) → execute_command()
+        └── command-specific app/search/view handling
 ```
 
 ## Keybinding Conventions
@@ -112,7 +115,5 @@ User input
 
 ## Future Work
 
-- Unify shortcut registration into a single source of truth instead of duplicating
-  between `command.rs` and `app.rs`
 - Add user-configurable keybinding overrides (see ROADMAP.md: "Add keybinding configuration")
 - Consider adding a shortcut conflict detection system

@@ -31,7 +31,8 @@ details to focused submodules:
   line operations and line-range helpers.
 - `editor/motion.rs`: cursor and selection movement.
 - `editor/replace.rs`: replace and replace-all operations.
-- `editor/tests.rs`: editor behavior tests.
+- `editor/tests.rs` and `editor/tests/`: editor behavior tests grouped by
+  editing, motion, replacement/undo, selection, and layout behavior.
 
 Prefer keeping new editor behavior in the smallest matching submodule. Avoid
 adding new behavior directly to `editor.rs` unless it is part of rendering or the
@@ -90,7 +91,7 @@ order and record one grouped undo step.
 Persistence runs on a background thread via `SaveWorker`. The UI thread never blocks on routine saves. The worker:
 
 1. Receives `SaveMsg::Changed(snapshot)` messages via `crossbeam-channel`
-2. Debounces rapid edits using a timer (default: 2 seconds)
+2. Debounces rapid edits using a timer (default: 500 ms)
 3. Serializes `SessionSnapshot` using `bincode` into a temporary buffer
 4. Atomically replaces the session file using `atomic-write-file`
 5. Tracks telemetry: save count, duration, last error, and last success time
@@ -99,7 +100,7 @@ Persistence runs on a background thread via `SaveWorker`. The UI thread never bl
 
 Sessions are stored in a versioned envelope (`SessionEnvelope`):
 
-- `schema_version`: Current version is 3
+- `schema_version`: Current version is 4
 - `payload_type`: Always "SessionSnapshot"
 - `payload_bytes`: Bincode-serialized `SessionSnapshot`
 
