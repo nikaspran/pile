@@ -18,7 +18,7 @@ use crate::{
     },
     grammar_registry::GrammarRegistry,
     model::{AppState, Document, DocumentId, PaneSnapshot, Selection, SessionSnapshot},
-    native_menu::{NativeMenu, NativeMenuCommand},
+    native_menu::NativeMenu,
     parse_worker::{ParseEvent, ParseWorker},
     persistence::{
         RecoveryEvent, RecoveryEventKind, SaveMsg, SaveTelemetry, SaveWorker, WorkerEvent,
@@ -33,137 +33,8 @@ use crate::{
     theme::apply_theme,
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AppCommand {
-    NewScratch,
-    CloseScratch,
-    RenameTab,
-    ImportFile,
-    ExportFile,
-    Preferences,
-    Quit,
-    Undo,
-    Redo,
-    Cut,
-    Copy,
-    Paste,
-    SelectAll,
-    ToggleComments,
-    UpperCase,
-    LowerCase,
-    TitleCase,
-    ExpandWord,
-    ContractWord,
-    ExpandLine,
-    ContractLine,
-    ExpandBracketPair,
-    ContractBracketPair,
-    ExpandIndentBlock,
-    ContractIndentBlock,
-    Indent,
-    Outdent,
-    DuplicateLines,
-    DeleteLines,
-    MoveLinesUp,
-    MoveLinesDown,
-    JoinLines,
-    SortLines,
-    ReverseLines,
-    TrimTrailingWhitespace,
-    AddNextMatch,
-    AddAllMatches,
-    SplitSelectionIntoLines,
-    ClearSecondaryCursors,
-    Find,
-    FindReplace,
-    FindUnderCursor,
-    SearchInTabs,
-    CommandPalette,
-    ToggleWrapMode,
-    ToggleVisibleWhitespace,
-    ToggleIndentGuides,
-    ToggleMinimap,
-    ToggleStatusBar,
-    ToggleTheme,
-    GoToLine,
-    ToggleBookmark,
-    JumpToNextBookmark,
-    ClearBookmarks,
-    SplitPaneHorizontal,
-    SplitPaneVertical,
-    ClosePane,
-    PinTab,
-    MoveTabLeft,
-    MoveTabRight,
-    ReopenLastClosed,
-}
-
-impl From<NativeMenuCommand> for AppCommand {
-    fn from(command: NativeMenuCommand) -> Self {
-        match command {
-            NativeMenuCommand::NewScratch => Self::NewScratch,
-            NativeMenuCommand::CloseScratch => Self::CloseScratch,
-            NativeMenuCommand::RenameTab => Self::RenameTab,
-            NativeMenuCommand::ImportFile => Self::ImportFile,
-            NativeMenuCommand::ExportFile => Self::ExportFile,
-            NativeMenuCommand::Preferences => Self::Preferences,
-            NativeMenuCommand::Quit => Self::Quit,
-            NativeMenuCommand::Undo => Self::Undo,
-            NativeMenuCommand::Redo => Self::Redo,
-            NativeMenuCommand::Cut => Self::Cut,
-            NativeMenuCommand::Copy => Self::Copy,
-            NativeMenuCommand::Paste => Self::Paste,
-            NativeMenuCommand::SelectAll => Self::SelectAll,
-            NativeMenuCommand::ToggleComments => Self::ToggleComments,
-            NativeMenuCommand::UpperCase => Self::UpperCase,
-            NativeMenuCommand::LowerCase => Self::LowerCase,
-            NativeMenuCommand::TitleCase => Self::TitleCase,
-            NativeMenuCommand::ExpandWord => Self::ExpandWord,
-            NativeMenuCommand::ContractWord => Self::ContractWord,
-            NativeMenuCommand::ExpandLine => Self::ExpandLine,
-            NativeMenuCommand::ContractLine => Self::ContractLine,
-            NativeMenuCommand::ExpandBracketPair => Self::ExpandBracketPair,
-            NativeMenuCommand::ContractBracketPair => Self::ContractBracketPair,
-            NativeMenuCommand::ExpandIndentBlock => Self::ExpandIndentBlock,
-            NativeMenuCommand::ContractIndentBlock => Self::ContractIndentBlock,
-            NativeMenuCommand::Indent => Self::Indent,
-            NativeMenuCommand::Outdent => Self::Outdent,
-            NativeMenuCommand::DuplicateLines => Self::DuplicateLines,
-            NativeMenuCommand::DeleteLines => Self::DeleteLines,
-            NativeMenuCommand::MoveLinesUp => Self::MoveLinesUp,
-            NativeMenuCommand::MoveLinesDown => Self::MoveLinesDown,
-            NativeMenuCommand::JoinLines => Self::JoinLines,
-            NativeMenuCommand::SortLines => Self::SortLines,
-            NativeMenuCommand::ReverseLines => Self::ReverseLines,
-            NativeMenuCommand::TrimTrailingWhitespace => Self::TrimTrailingWhitespace,
-            NativeMenuCommand::AddNextMatch => Self::AddNextMatch,
-            NativeMenuCommand::AddAllMatches => Self::AddAllMatches,
-            NativeMenuCommand::SplitSelectionIntoLines => Self::SplitSelectionIntoLines,
-            NativeMenuCommand::ClearSecondaryCursors => Self::ClearSecondaryCursors,
-            NativeMenuCommand::Find => Self::Find,
-            NativeMenuCommand::FindReplace => Self::FindReplace,
-            NativeMenuCommand::FindUnderCursor => Self::FindUnderCursor,
-            NativeMenuCommand::SearchInTabs => Self::SearchInTabs,
-            NativeMenuCommand::CommandPalette => Self::CommandPalette,
-            NativeMenuCommand::ToggleWrapMode => Self::ToggleWrapMode,
-            NativeMenuCommand::ToggleVisibleWhitespace => Self::ToggleVisibleWhitespace,
-            NativeMenuCommand::ToggleIndentGuides => Self::ToggleIndentGuides,
-            NativeMenuCommand::ToggleMinimap => Self::ToggleMinimap,
-            NativeMenuCommand::ToggleStatusBar => Self::ToggleStatusBar,
-            NativeMenuCommand::ToggleTheme => Self::ToggleTheme,
-            NativeMenuCommand::GoToLine => Self::GoToLine,
-            NativeMenuCommand::ToggleBookmark => Self::ToggleBookmark,
-            NativeMenuCommand::JumpToNextBookmark => Self::JumpToNextBookmark,
-            NativeMenuCommand::ClearBookmarks => Self::ClearBookmarks,
-            NativeMenuCommand::SplitPaneHorizontal => Self::SplitPaneHorizontal,
-            NativeMenuCommand::SplitPaneVertical => Self::SplitPaneVertical,
-            NativeMenuCommand::ClosePane => Self::ClosePane,
-            NativeMenuCommand::PinTab => Self::PinTab,
-            NativeMenuCommand::MoveTabLeft => Self::MoveTabLeft,
-            NativeMenuCommand::MoveTabRight => Self::MoveTabRight,
-        }
-    }
-}
+mod commands;
+use commands::AppCommand;
 
 struct GotoLineState {
     visible: bool,
@@ -1066,6 +937,11 @@ impl PileApp {
     }
 
     fn handle_command(&mut self, command: Command) {
+        if let Some(app_command) = AppCommand::from_command(command) {
+            self.execute_command(app_command);
+            return;
+        }
+
         use Command::*;
         match command {
             NewScratch => self.execute_command(AppCommand::NewScratch),
@@ -1348,8 +1224,7 @@ impl PileApp {
 
         for binding in shortcuts {
             if KEYBOARD_COMMANDS.contains(&binding.command) {
-                let consumed =
-                    ctx.input_mut(|input| input.consume_shortcut(&binding.shortcut));
+                let consumed = ctx.input_mut(|input| input.consume_shortcut(&binding.shortcut));
                 if consumed {
                     pressed.push(binding.command);
                 }

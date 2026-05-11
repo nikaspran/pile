@@ -66,6 +66,7 @@ mod tests {
         for i in 0..100 {
             let pos = (i * 1000) % (doc.text().len().max(1));
             let rope_pos = pos.min(doc.rope.byte_len());
+            assert!(doc.rope.is_char_boundary(rope_pos));
             doc.rope = crop::Rope::from(doc.text());
             doc.revision += 1;
         }

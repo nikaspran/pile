@@ -8,11 +8,6 @@ use pile::DocumentEdit;
 use pile::model::{Document, Selection};
 use proptest::prelude::*;
 
-/// Generate arbitrary valid UTF-8 strings.
-fn arb_string() -> impl Strategy<Value = String> {
-    "\\PC*" // Proptest string strategy
-}
-
 /// Find the nearest character boundary at or before the given byte position.
 fn floor_char_boundary(s: &str, mut pos: usize) -> usize {
     pos = pos.min(s.len());

@@ -108,7 +108,6 @@ impl TextLayoutPipeline {
         content_height: f32,
         line_count: usize,
     ) -> Self {
-        use crate::settings::WrapMode as SettingsWrapMode;
         Self {
             row_height,
             char_width,

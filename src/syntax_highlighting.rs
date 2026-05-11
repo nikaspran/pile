@@ -543,7 +543,7 @@ mod tests {
             .any(|span| span.start >= rust_start && span.end <= rust_end && span.highlight != 0);
 
         // The injection should produce spans in the Rust code region
-        assert!(!spans.is_empty(), "Injection should produce spans");
+        assert!(has_rust_spans, "Injection should produce Rust code spans");
     }
 
     #[test]
