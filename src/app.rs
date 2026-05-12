@@ -58,6 +58,17 @@ struct EditorPane {
     view_state: EditorViewState,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TabAction {
+    Select,
+    Rename,
+    Close,
+    TogglePin,
+}
+
+const TAB_HEIGHT: f32 = 28.0;
+const TAB_STRIP_HEIGHT: f32 = 30.0;
+
 impl EditorPane {
     fn new(document_id: DocumentId) -> Self {
         Self {
@@ -498,33 +509,238 @@ impl PileApp {
 
         let selected = document_id == self.state.active_document;
         let title = document.display_title();
-        let pinnd = document.pinned;
+        let pinned = document.pinned;
+        let action = Self::tab_button(ui, &title, selected, pinned);
 
-        ui.horizontal(|ui| {
-            // Pin button (if pinned)
-            if pinnd {
-                if ui.small_button("📌").on_hover_text("Unpin tab").clicked() {
-                    self.toggle_pin_tab(document_id);
+        match action {
+            Some(TabAction::Select) => self.set_active_document(document_id),
+            Some(TabAction::Rename) => self.begin_rename(document_id),
+            Some(TabAction::Close) => self.close_document(document_id),
+            Some(TabAction::TogglePin) => self.toggle_pin_tab(document_id),
+            None => {}
+        }
+    }
+
+    fn tab_button(
+        ui: &mut egui::Ui,
+        title: &str,
+        selected: bool,
+        pinned: bool,
+    ) -> Option<TabAction> {
+        let font_id = egui::TextStyle::Button.resolve(ui.style());
+        let title_galley = ui.painter().layout_no_wrap(
+            title.to_owned(),
+            font_id.clone(),
+            ui.visuals().text_color(),
+        );
+        let title_width = title_galley.size().x.min(150.0);
+        let pin_width = if pinned { 15.0 } else { 0.0 };
+        let close_width = if pinned { 0.0 } else { 20.0 };
+        let tab_width = (title_width + pin_width + close_width + 28.0).clamp(88.0, 200.0);
+
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(tab_width, TAB_HEIGHT), egui::Sense::click());
+
+        let hovered = response.hovered();
+        let dark = ui.visuals().dark_mode;
+        let (bar_fill, active_fill, inactive_fill, hover_fill, stroke, active_accent) = if dark {
+            (
+                egui::Color32::from_rgb(15, 15, 15),
+                egui::Color32::from_rgb(25, 25, 25),
+                egui::Color32::from_rgb(15, 15, 15),
+                egui::Color32::from_rgb(23, 23, 23),
+                egui::Color32::from_rgb(47, 47, 47),
+                egui::Color32::from_rgb(92, 160, 255),
+            )
+        } else {
+            (
+                egui::Color32::from_rgb(218, 218, 218),
+                egui::Color32::from_rgb(248, 248, 248),
+                egui::Color32::from_rgb(232, 232, 232),
+                egui::Color32::from_rgb(238, 238, 238),
+                egui::Color32::from_rgb(190, 190, 190),
+                egui::Color32::from_rgb(0, 110, 220),
+            )
+        };
+
+        if ui.is_rect_visible(rect) {
+            let painter = ui.painter();
+            let fill = if selected {
+                active_fill
+            } else if hovered {
+                hover_fill
+            } else {
+                inactive_fill
+            };
+
+            painter.rect_filled(rect, egui::CornerRadius::ZERO, fill);
+            painter.line_segment(
+                [rect.right_top(), rect.right_bottom()],
+                egui::Stroke::new(1.0, stroke),
+            );
+            if selected {
+                painter.line_segment(
+                    [rect.left_top(), rect.left_bottom()],
+                    egui::Stroke::new(1.0, stroke),
+                );
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        rect.left_top(),
+                        rect.right_top() + egui::vec2(0.0, 2.0),
+                    ),
+                    egui::CornerRadius::ZERO,
+                    active_accent,
+                );
+            } else {
+                painter.line_segment(
+                    [rect.left_bottom(), rect.right_bottom()],
+                    egui::Stroke::new(1.0, bar_fill),
+                );
+            }
+
+            let mut x = rect.left() + 12.0;
+            let text_color = if selected {
+                ui.visuals().strong_text_color()
+            } else {
+                ui.visuals().text_color()
+            };
+
+            if pinned {
+                let pin_center = egui::pos2(x + 5.0, rect.center().y);
+                painter.line_segment(
+                    [
+                        egui::pos2(pin_center.x, pin_center.y - 5.0),
+                        egui::pos2(pin_center.x, pin_center.y + 4.0),
+                    ],
+                    egui::Stroke::new(1.4, text_color),
+                );
+                painter.circle_filled(
+                    egui::pos2(pin_center.x, pin_center.y - 5.0),
+                    2.6,
+                    text_color,
+                );
+                x += pin_width;
+            }
+
+            let title_clip = egui::Rect::from_min_max(
+                egui::pos2(x, rect.top()),
+                egui::pos2(rect.right() - close_width - 9.0, rect.bottom()),
+            );
+            let galley = painter.layout_no_wrap(title.to_owned(), font_id, text_color);
+            let title_pos = egui::pos2(x, rect.center().y - galley.size().y / 2.0);
+            painter
+                .with_clip_rect(title_clip)
+                .galley(title_pos, galley, text_color);
+
+            if !pinned && (selected || hovered) {
+                let close_rect = egui::Rect::from_center_size(
+                    egui::pos2(rect.right() - 12.0, rect.center().y),
+                    egui::vec2(15.0, 15.0),
+                );
+                if close_rect.contains(
+                    ui.input(|input| input.pointer.hover_pos())
+                        .unwrap_or_default(),
+                ) {
+                    painter.rect_filled(close_rect, egui::CornerRadius::same(2), stroke);
                 }
+                let close_color = if dark {
+                    egui::Color32::from_rgb(210, 210, 210)
+                } else {
+                    egui::Color32::from_rgb(70, 70, 70)
+                };
+                painter.line_segment(
+                    [
+                        close_rect.left_top() + egui::vec2(4.8, 4.8),
+                        close_rect.right_bottom() - egui::vec2(4.8, 4.8),
+                    ],
+                    egui::Stroke::new(1.35, close_color),
+                );
+                painter.line_segment(
+                    [
+                        close_rect.right_top() + egui::vec2(-4.8, 4.8),
+                        close_rect.left_bottom() + egui::vec2(4.8, -4.8),
+                    ],
+                    egui::Stroke::new(1.35, close_color),
+                );
             }
+        }
 
-            let response = ui
-                .selectable_label(selected, title)
-                .on_hover_text("Double-click to rename");
+        if response.double_clicked() {
+            return Some(TabAction::Rename);
+        }
 
-            if response.clicked() {
-                self.set_active_document(document_id);
+        if response.clicked() {
+            if pinned
+                && response
+                    .interact_pointer_pos()
+                    .is_some_and(|pos| pos.x <= rect.left() + 12.0 + pin_width)
+            {
+                return Some(TabAction::TogglePin);
             }
-
-            if response.double_clicked() {
-                self.begin_rename(document_id);
+            if !pinned
+                && response
+                    .interact_pointer_pos()
+                    .is_some_and(|pos| pos.x >= rect.right() - close_width - 2.0)
+            {
+                return Some(TabAction::Close);
             }
+            return Some(TabAction::Select);
+        }
 
-            // Close button (not shown for pinned tabs)
-            if !pinnd && ui.small_button("×").on_hover_text("Close tab").clicked() {
-                self.close_document(document_id);
+        None
+    }
+
+    fn new_tab_button(ui: &mut egui::Ui) -> egui::Response {
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(30.0, TAB_HEIGHT), egui::Sense::click());
+        let dark = ui.visuals().dark_mode;
+        let (hover_fill, icon) = if dark {
+            (
+                egui::Color32::from_rgb(26, 26, 26),
+                egui::Color32::from_rgb(210, 210, 210),
+            )
+        } else {
+            (
+                egui::Color32::from_rgb(242, 242, 242),
+                egui::Color32::from_rgb(55, 55, 55),
+            )
+        };
+
+        if ui.is_rect_visible(rect) {
+            let painter = ui.painter();
+            if response.hovered() {
+                painter.rect_filled(
+                    rect.shrink2(egui::vec2(3.0, 3.0)),
+                    egui::CornerRadius::same(2),
+                    hover_fill,
+                );
             }
-        });
+            let center = rect.center();
+            painter.line_segment(
+                [
+                    center + egui::vec2(-4.5, 0.0),
+                    center + egui::vec2(4.5, 0.0),
+                ],
+                egui::Stroke::new(1.5, icon),
+            );
+            painter.line_segment(
+                [
+                    center + egui::vec2(0.0, -4.5),
+                    center + egui::vec2(0.0, 4.5),
+                ],
+                egui::Stroke::new(1.5, icon),
+            );
+        }
+
+        response.on_hover_text("New scratch")
+    }
+
+    fn tab_strip_fill(dark: bool) -> egui::Color32 {
+        if dark {
+            egui::Color32::from_rgb(15, 15, 15)
+        } else {
+            egui::Color32::from_rgb(218, 218, 218)
+        }
     }
 
     fn new_scratch(&mut self) {
@@ -2152,28 +2368,38 @@ impl eframe::App for PileApp {
             }
         }
 
-        egui::TopBottomPanel::top("tabs").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("+").on_hover_text("New scratch").clicked() {
-                    self.execute_command(AppCommand::NewScratch);
-                }
-
-                // Horizontal tab list with scrolling
-                let tab_ids: Vec<_> = self.state.tab_order.iter().copied().collect();
-                if !tab_ids.is_empty() {
-                    egui::ScrollArea::horizontal()
-                        .id_salt("tab-scroll")
-                        .auto_shrink([false, true])
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                for document_id in tab_ids {
-                                    self.render_tab(ui, document_id);
-                                }
+        let tab_strip_fill = Self::tab_strip_fill(ctx.style().visuals.dark_mode);
+        egui::TopBottomPanel::top("tabs")
+            .exact_height(TAB_STRIP_HEIGHT)
+            .frame(
+                egui::Frame::new()
+                    .fill(tab_strip_fill)
+                    .inner_margin(egui::Margin::symmetric(0, 1)),
+            )
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.horizontal(|ui| {
+                    // Horizontal tab list with scrolling
+                    let tab_ids: Vec<_> = self.state.tab_order.iter().copied().collect();
+                    if !tab_ids.is_empty() {
+                        egui::ScrollArea::horizontal()
+                            .id_salt("tab-scroll")
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    for document_id in tab_ids {
+                                        self.render_tab(ui, document_id);
+                                    }
+                                    if Self::new_tab_button(ui).clicked() {
+                                        self.execute_command(AppCommand::NewScratch);
+                                    }
+                                });
                             });
-                        });
-                }
+                    } else if Self::new_tab_button(ui).clicked() {
+                        self.execute_command(AppCommand::NewScratch);
+                    }
+                });
             });
-        });
 
         if self.settings.show_status_bar {
             egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
