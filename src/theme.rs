@@ -106,7 +106,7 @@ fn dark_visuals() -> egui::Visuals {
     visuals.widgets.active.bg_fill = egui::Color32::from_rgb(50, 50, 50);
     visuals.window_fill = egui::Color32::from_rgb(25, 25, 25);
     visuals.panel_fill = egui::Color32::from_rgb(30, 30, 30);
-    visuals.selection.bg_fill = egui::Color32::from_rgba_premultiplied(100, 150, 255, 100);
+    visuals.selection.bg_fill = egui::Color32::from_rgba_unmultiplied(80, 120, 190, 70);
     visuals.selection.stroke.color = egui::Color32::from_rgb(255, 255, 255);
     visuals.override_text_color = Some(egui::Color32::from_rgb(220, 220, 220));
     visuals.warn_fg_color = egui::Color32::from_rgb(255, 200, 50);
