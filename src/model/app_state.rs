@@ -236,6 +236,21 @@ impl AppState {
         }
     }
 
+    pub fn move_tab_to_index(&mut self, document_id: DocumentId, target_index: usize) -> bool {
+        let Some(current_index) = self.tab_order.iter().position(|id| *id == document_id) else {
+            return false;
+        };
+
+        let target_index = target_index.min(self.tab_order.len().saturating_sub(1));
+        if current_index == target_index {
+            return false;
+        }
+
+        let document_id = self.tab_order.remove(current_index);
+        self.tab_order.insert(target_index, document_id);
+        true
+    }
+
     pub fn recent_order(&self) -> &[DocumentId] {
         &self.recent_order
     }

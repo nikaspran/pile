@@ -385,6 +385,31 @@ fn validate_repairs_stale_tab_order() {
 }
 
 #[test]
+fn move_tab_to_index_reorders_tabs() {
+    let mut state = AppState::empty();
+    let first = state.active_document;
+    let second = state.open_untitled(4, true);
+    let third = state.open_untitled(4, true);
+
+    assert!(state.move_tab_to_index(third, 0));
+    assert_eq!(state.tab_order, vec![third, first, second]);
+
+    assert!(state.move_tab_to_index(third, 2));
+    assert_eq!(state.tab_order, vec![first, second, third]);
+}
+
+#[test]
+fn move_tab_to_index_ignores_missing_or_unchanged_tabs() {
+    let mut state = AppState::empty();
+    let first = state.active_document;
+    let second = state.open_untitled(4, true);
+
+    assert!(!state.move_tab_to_index(Uuid::new_v4(), 0));
+    assert!(!state.move_tab_to_index(first, 0));
+    assert_eq!(state.tab_order, vec![first, second]);
+}
+
+#[test]
 fn validate_fixes_missing_active_document() {
     let mut state = AppState::empty();
     state.active_document = Uuid::new_v4(); // missing

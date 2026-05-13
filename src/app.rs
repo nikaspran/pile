@@ -66,6 +66,17 @@ enum TabAction {
     TogglePin,
 }
 
+struct TabButtonOutput {
+    action: Option<TabAction>,
+    response: egui::Response,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TabDragState {
+    document_id: DocumentId,
+    grab_offset: egui::Vec2,
+}
+
 const TAB_HEIGHT: f32 = 28.0;
 const TAB_STRIP_HEIGHT: f32 = 30.0;
 
@@ -99,6 +110,7 @@ pub struct PileApp {
     panes: Vec<EditorPane>,
     active_pane: usize,
     goto_line: GotoLineState,
+    dragging_tab: Option<TabDragState>,
     pending_delete_confirmation: Option<DocumentId>,
     telemetry: SaveTelemetry,
     recovery_events: Vec<RecoveryEvent>,
@@ -237,6 +249,7 @@ impl PileApp {
             panes,
             active_pane,
             goto_line: GotoLineState::new(),
+            dragging_tab: None,
             pending_delete_confirmation: None,
             telemetry,
             recovery_events: Vec::new(),
@@ -524,9 +537,18 @@ impl PileApp {
         let selected = document_id == self.state.active_document;
         let title = document.display_title();
         let pinned = document.pinned;
-        let action = Self::tab_button(ui, &title, selected, pinned);
+        let output = Self::tab_button(
+            ui,
+            document_id,
+            &title,
+            selected,
+            pinned,
+            self.dragging_tab
+                .filter(|drag| drag.document_id == document_id),
+        );
+        self.handle_tab_drag(document_id, &output.response);
 
-        match action {
+        match output.action {
             Some(TabAction::Select) => self.set_active_document(document_id),
             Some(TabAction::Rename) => self.begin_rename(document_id),
             Some(TabAction::Close) => self.close_document(document_id),
@@ -537,10 +559,12 @@ impl PileApp {
 
     fn tab_button(
         ui: &mut egui::Ui,
+        document_id: DocumentId,
         title: &str,
         selected: bool,
         pinned: bool,
-    ) -> Option<TabAction> {
+        dragging: Option<TabDragState>,
+    ) -> TabButtonOutput {
         let font_id = egui::TextStyle::Button.resolve(ui.style());
         let title_galley = ui.painter().layout_no_wrap(
             title.to_owned(),
@@ -552,10 +576,16 @@ impl PileApp {
         let close_width = if pinned { 0.0 } else { 20.0 };
         let tab_width = (title_width + pin_width + close_width + 28.0).clamp(88.0, 200.0);
 
-        let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(tab_width, TAB_HEIGHT), egui::Sense::click());
+        let (rect, _) =
+            ui.allocate_exact_size(egui::vec2(tab_width, TAB_HEIGHT), egui::Sense::hover());
+        let response = ui.interact(
+            rect,
+            ui.id().with(("tab", document_id)),
+            egui::Sense::click_and_drag(),
+        );
 
-        let hovered = response.hovered();
+        let dragging_this_tab = dragging.is_some();
+        let hovered = response.hovered() && !dragging_this_tab;
         let dark = ui.visuals().dark_mode;
         let (bar_fill, active_fill, inactive_fill, hover_fill, stroke, active_accent) = if dark {
             (
@@ -578,7 +608,50 @@ impl PileApp {
         };
 
         if ui.is_rect_visible(rect) {
-            let painter = ui.painter();
+            if dragging_this_tab {
+                ui.painter()
+                    .rect_filled(rect, egui::CornerRadius::ZERO, bar_fill);
+                ui.painter().line_segment(
+                    [rect.right_top(), rect.right_bottom()],
+                    egui::Stroke::new(1.0, stroke),
+                );
+            }
+
+            let mut paint_rect = dragging
+                .and_then(|drag| {
+                    response
+                        .ctx
+                        .input(|input| input.pointer.hover_pos())
+                        .map(|pointer_pos| {
+                            egui::Rect::from_min_size(pointer_pos - drag.grab_offset, rect.size())
+                        })
+                })
+                .unwrap_or(rect);
+            if dragging_this_tab {
+                let content_rect = response.ctx.content_rect();
+                let max_min = content_rect.max - paint_rect.size();
+                let clamped_min = egui::pos2(
+                    paint_rect
+                        .min
+                        .x
+                        .clamp(content_rect.min.x, max_min.x.max(content_rect.min.x)),
+                    paint_rect
+                        .min
+                        .y
+                        .clamp(content_rect.min.y, max_min.y.max(content_rect.min.y)),
+                );
+                paint_rect = egui::Rect::from_min_size(clamped_min, paint_rect.size());
+            }
+            let foreground_painter;
+            let painter = if dragging_this_tab {
+                foreground_painter = response.ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::TOP,
+                    response.id.with("drag_visual"),
+                ));
+                &foreground_painter
+            } else {
+                ui.painter()
+            };
             let fill = if selected {
                 active_fill
             } else if hovered {
@@ -587,32 +660,32 @@ impl PileApp {
                 inactive_fill
             };
 
-            painter.rect_filled(rect, egui::CornerRadius::ZERO, fill);
+            painter.rect_filled(paint_rect, egui::CornerRadius::ZERO, fill);
             painter.line_segment(
-                [rect.right_top(), rect.right_bottom()],
+                [paint_rect.right_top(), paint_rect.right_bottom()],
                 egui::Stroke::new(1.0, stroke),
             );
             if selected {
                 painter.line_segment(
-                    [rect.left_top(), rect.left_bottom()],
+                    [paint_rect.left_top(), paint_rect.left_bottom()],
                     egui::Stroke::new(1.0, stroke),
                 );
                 painter.rect_filled(
                     egui::Rect::from_min_max(
-                        rect.left_top(),
-                        rect.right_top() + egui::vec2(0.0, 2.0),
+                        paint_rect.left_top(),
+                        paint_rect.right_top() + egui::vec2(0.0, 2.0),
                     ),
                     egui::CornerRadius::ZERO,
                     active_accent,
                 );
             } else {
                 painter.line_segment(
-                    [rect.left_bottom(), rect.right_bottom()],
+                    [paint_rect.left_bottom(), paint_rect.right_bottom()],
                     egui::Stroke::new(1.0, bar_fill),
                 );
             }
 
-            let mut x = rect.left() + 12.0;
+            let mut x = paint_rect.left() + 12.0;
             let text_color = if selected {
                 ui.visuals().strong_text_color()
             } else {
@@ -620,7 +693,7 @@ impl PileApp {
             };
 
             if pinned {
-                let pin_center = egui::pos2(x + 5.0, rect.center().y);
+                let pin_center = egui::pos2(x + 5.0, paint_rect.center().y);
                 painter.line_segment(
                     [
                         egui::pos2(pin_center.x, pin_center.y - 5.0),
@@ -637,18 +710,18 @@ impl PileApp {
             }
 
             let title_clip = egui::Rect::from_min_max(
-                egui::pos2(x, rect.top()),
-                egui::pos2(rect.right() - close_width - 9.0, rect.bottom()),
+                egui::pos2(x, paint_rect.top()),
+                egui::pos2(paint_rect.right() - close_width - 9.0, paint_rect.bottom()),
             );
             let galley = painter.layout_no_wrap(title.to_owned(), font_id, text_color);
-            let title_pos = egui::pos2(x, rect.center().y - galley.size().y / 2.0);
+            let title_pos = egui::pos2(x, paint_rect.center().y - galley.size().y / 2.0);
             painter
                 .with_clip_rect(title_clip)
                 .galley(title_pos, galley, text_color);
 
             if !pinned && (selected || hovered) {
                 let close_rect = egui::Rect::from_center_size(
-                    egui::pos2(rect.right() - 12.0, rect.center().y),
+                    egui::pos2(paint_rect.right() - 12.0, paint_rect.center().y),
                     egui::vec2(15.0, 15.0),
                 );
                 if close_rect.contains(
@@ -679,29 +752,74 @@ impl PileApp {
             }
         }
 
-        if response.double_clicked() {
-            return Some(TabAction::Rename);
-        }
-
-        if response.clicked() {
+        let action = if response.double_clicked() {
+            Some(TabAction::Rename)
+        } else if response.clicked() {
             if pinned
                 && response
                     .interact_pointer_pos()
                     .is_some_and(|pos| pos.x <= rect.left() + 12.0 + pin_width)
             {
-                return Some(TabAction::TogglePin);
-            }
-            if !pinned
+                Some(TabAction::TogglePin)
+            } else if !pinned
                 && response
                     .interact_pointer_pos()
                     .is_some_and(|pos| pos.x >= rect.right() - close_width - 2.0)
             {
-                return Some(TabAction::Close);
+                Some(TabAction::Close)
+            } else {
+                Some(TabAction::Select)
             }
-            return Some(TabAction::Select);
+        } else {
+            None
+        };
+
+        TabButtonOutput { action, response }
+    }
+
+    fn handle_tab_drag(&mut self, document_id: DocumentId, response: &egui::Response) {
+        if response.drag_started() {
+            let grab_offset = response
+                .interact_pointer_pos()
+                .map(|pointer_pos| pointer_pos - response.rect.min)
+                .unwrap_or(egui::Vec2::ZERO);
+            self.dragging_tab = Some(TabDragState {
+                document_id,
+                grab_offset,
+            });
         }
 
-        None
+        if let Some(dragged_id) = self.dragging_tab.map(|drag| drag.document_id)
+            && dragged_id != document_id
+            && let Some(pointer_pos) = response.ctx.input(|input| input.pointer.hover_pos())
+            && response.rect.contains(pointer_pos)
+            && let Some(target_index) = self
+                .state
+                .tab_order
+                .iter()
+                .position(|id| *id == document_id)
+            && let Some(current_index) =
+                self.state.tab_order.iter().position(|id| *id == dragged_id)
+        {
+            let should_move_right =
+                current_index < target_index && pointer_pos.x > response.rect.center().x;
+            let should_move_left =
+                current_index > target_index && pointer_pos.x < response.rect.center().x;
+
+            if (should_move_right || should_move_left)
+                && self.state.move_tab_to_index(dragged_id, target_index)
+            {
+                self.mark_changed();
+            }
+        }
+
+        if response.drag_stopped()
+            && self
+                .dragging_tab
+                .is_some_and(|drag| drag.document_id == document_id)
+        {
+            self.dragging_tab = None;
+        }
     }
 
     fn new_tab_button(ui: &mut egui::Ui) -> egui::Response {
@@ -810,8 +928,9 @@ impl PileApp {
             .position(|id| *id == document_id)
         {
             if pos > 0 {
-                self.state.tab_order.swap(pos, pos - 1);
-                self.mark_changed();
+                if self.state.move_tab_to_index(document_id, pos - 1) {
+                    self.mark_changed();
+                }
             }
         }
     }
@@ -824,8 +943,9 @@ impl PileApp {
             .position(|id| *id == document_id)
         {
             if pos < self.state.tab_order.len() - 1 {
-                self.state.tab_order.swap(pos, pos + 1);
-                self.mark_changed();
+                if self.state.move_tab_to_index(document_id, pos + 1) {
+                    self.mark_changed();
+                }
             }
         }
     }
@@ -2340,6 +2460,9 @@ impl eframe::App for PileApp {
         self.handle_keyboard_shortcuts(ctx);
         if self.handle_parse_events() {
             ctx.request_repaint();
+        }
+        if !ctx.input(|input| input.pointer.primary_down()) {
+            self.dragging_tab = None;
         }
 
         // Drain worker events
