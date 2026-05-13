@@ -45,8 +45,8 @@ impl Theme {
     /// Current line highlight color for this theme.
     pub fn current_line_highlight(self) -> egui::Color32 {
         match self {
-            Theme::Dark => egui::Color32::from_rgba_premultiplied(255, 255, 255, 8),
-            Theme::Light => egui::Color32::from_rgba_premultiplied(0, 0, 0, 8),
+            Theme::Dark => egui::Color32::from_rgba_unmultiplied(255, 255, 255, 8),
+            Theme::Light => egui::Color32::from_rgba_unmultiplied(0, 0, 0, 8),
         }
     }
 
