@@ -83,6 +83,11 @@ pub enum Command {
     ClearSecondaryCursors,
 
     // Editor - editing
+    Backspace,
+    DeleteForward,
+    BackspaceWord,
+    DeleteWordForward,
+    InsertNewline,
     ToggleComments,
     UpperCase,
     LowerCase,
@@ -171,6 +176,10 @@ pub fn default_shortcuts() -> Vec<ShortcutBinding> {
         binding(MoveRight, Modifiers::NONE, Key::ArrowRight),
         binding(MoveWordLeft, Modifiers::ALT, Key::ArrowLeft),
         binding(MoveWordRight, Modifiers::ALT, Key::ArrowRight),
+        binding(MoveWordLeft, Modifiers::CTRL, Key::ArrowLeft),
+        binding(MoveWordRight, Modifiers::CTRL, Key::ArrowRight),
+        binding(MoveWordLeft, Modifiers::COMMAND, Key::ArrowLeft),
+        binding(MoveWordRight, Modifiers::COMMAND, Key::ArrowRight),
         binding(MoveUp, Modifiers::NONE, Key::ArrowUp),
         binding(MoveDown, Modifiers::NONE, Key::ArrowDown),
         binding(MoveDocumentStart, Modifiers::CTRL, Key::Home),
@@ -193,8 +202,42 @@ pub fn default_shortcuts() -> Vec<ShortcutBinding> {
             Modifiers::SHIFT | Modifiers::ALT,
             Key::ArrowRight,
         ),
+        binding(
+            SelectWordLeft,
+            Modifiers::SHIFT | Modifiers::CTRL,
+            Key::ArrowLeft,
+        ),
+        binding(
+            SelectWordRight,
+            Modifiers::SHIFT | Modifiers::CTRL,
+            Key::ArrowRight,
+        ),
+        binding(
+            SelectWordLeft,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::ArrowLeft,
+        ),
+        binding(
+            SelectWordRight,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::ArrowRight,
+        ),
         binding(SelectUp, Modifiers::SHIFT, Key::ArrowUp),
         binding(SelectDown, Modifiers::SHIFT, Key::ArrowDown),
+        binding(
+            SelectDocumentStart,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::ArrowUp,
+        ),
+        binding(
+            SelectDocumentEnd,
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::ArrowDown,
+        ),
+        binding(SelectLineStart, Modifiers::SHIFT, Key::Home),
+        binding(SelectLineEnd, Modifiers::SHIFT, Key::End),
+        binding(SelectPageUp, Modifiers::SHIFT, Key::PageUp),
+        binding(SelectPageDown, Modifiers::SHIFT, Key::PageDown),
         binding(ExpandWord, Modifiers::ALT, Key::W),
         binding(ContractWord, Modifiers::SHIFT | Modifiers::ALT, Key::W),
         binding(ExpandLine, Modifiers::ALT, Key::L),
@@ -242,6 +285,13 @@ pub fn default_shortcuts() -> Vec<ShortcutBinding> {
             Key::L,
         ),
         binding(ClearSecondaryCursors, Modifiers::NONE, Key::Escape),
+        binding(Backspace, Modifiers::NONE, Key::Backspace),
+        binding(DeleteForward, Modifiers::NONE, Key::Delete),
+        binding(BackspaceWord, Modifiers::ALT, Key::Backspace),
+        binding(DeleteWordForward, Modifiers::ALT, Key::Delete),
+        binding(BackspaceWord, Modifiers::CTRL, Key::Backspace),
+        binding(DeleteWordForward, Modifiers::CTRL, Key::Delete),
+        binding(InsertNewline, Modifiers::NONE, Key::Enter),
         binding(ToggleComments, Modifiers::COMMAND, Key::Slash),
         binding(UpperCase, Modifiers::COMMAND | Modifiers::CTRL, Key::U),
         binding(LowerCase, Modifiers::COMMAND | Modifiers::CTRL, Key::L),
@@ -303,11 +353,13 @@ pub fn default_shortcuts() -> Vec<ShortcutBinding> {
 pub const KEYBOARD_COMMANDS: &[Command] = &[
     Command::NewScratch,
     Command::CloseScratch,
+    Command::RenameTab,
     Command::Undo,
     Command::Redo,
     Command::SelectAll,
     Command::Find,
     Command::FindReplace,
+    Command::FindUnderCursor,
     Command::DuplicateLines,
     Command::MoveLinesUp,
     Command::MoveLinesDown,
@@ -323,6 +375,7 @@ pub const KEYBOARD_COMMANDS: &[Command] = &[
     Command::CommandPalette,
     Command::QuickSwitchTabs,
     Command::ToggleBookmark,
+    Command::JumpToNextBookmark,
     Command::ClearBookmarks,
     Command::ToggleWrapMode,
     Command::ToggleVisibleWhitespace,
@@ -334,6 +387,89 @@ pub const KEYBOARD_COMMANDS: &[Command] = &[
     Command::Preferences,
     Command::ReopenLastClosed,
 ];
+
+/// Commands that are dispatched inside the custom editor widget from key events.
+///
+/// Text and paste events remain outside this list because they carry input data
+/// rather than just a shortcut shape.
+pub const EDITOR_KEY_COMMANDS: &[Command] = &[
+    Command::Undo,
+    Command::Redo,
+    Command::MoveLeft,
+    Command::MoveRight,
+    Command::MoveWordLeft,
+    Command::MoveWordRight,
+    Command::MoveUp,
+    Command::MoveDown,
+    Command::MoveDocumentStart,
+    Command::MoveDocumentEnd,
+    Command::MoveLineStart,
+    Command::MoveLineEnd,
+    Command::MoveParagraphUp,
+    Command::MoveParagraphDown,
+    Command::PageUp,
+    Command::PageDown,
+    Command::SelectLeft,
+    Command::SelectRight,
+    Command::SelectWordLeft,
+    Command::SelectWordRight,
+    Command::SelectUp,
+    Command::SelectDown,
+    Command::SelectDocumentStart,
+    Command::SelectDocumentEnd,
+    Command::SelectLineStart,
+    Command::SelectLineEnd,
+    Command::SelectParagraphUp,
+    Command::SelectParagraphDown,
+    Command::SelectPageUp,
+    Command::SelectPageDown,
+    Command::ExpandWord,
+    Command::ContractWord,
+    Command::ExpandLine,
+    Command::ContractLine,
+    Command::ExpandBracketPair,
+    Command::ContractBracketPair,
+    Command::ExpandIndentBlock,
+    Command::ContractIndentBlock,
+    Command::Indent,
+    Command::Outdent,
+    Command::DuplicateLines,
+    Command::DeleteLines,
+    Command::MoveLinesUp,
+    Command::MoveLinesDown,
+    Command::JoinLines,
+    Command::SortLines,
+    Command::ReverseLines,
+    Command::TrimTrailingWhitespace,
+    Command::AddNextMatch,
+    Command::AddAllMatches,
+    Command::SplitSelectionIntoLines,
+    Command::ClearSecondaryCursors,
+    Command::Backspace,
+    Command::DeleteForward,
+    Command::BackspaceWord,
+    Command::DeleteWordForward,
+    Command::InsertNewline,
+    Command::ToggleComments,
+    Command::UpperCase,
+    Command::LowerCase,
+    Command::TitleCase,
+];
+
+pub fn command_for_key_event(
+    key: egui::Key,
+    modifiers: egui::Modifiers,
+    candidates: &[Command],
+) -> Option<Command> {
+    default_shortcuts()
+        .into_iter()
+        .find(|binding| {
+            candidates.contains(&binding.command)
+                && binding.shortcut.logical_key == key
+                && modifiers.matches_exact(binding.shortcut.modifiers)
+        })
+        .map(|binding| binding.command)
+}
 
 fn primary_shortcut(command: Command) -> Option<egui::KeyboardShortcut> {
     default_shortcuts()
@@ -960,6 +1096,41 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             }),
         },
         // Editing
+        CommandMetadata {
+            command: Backspace,
+            name: "Backspace",
+            description: "Delete the previous character",
+            category: Editing,
+            shortcut: primary_shortcut(Backspace),
+        },
+        CommandMetadata {
+            command: DeleteForward,
+            name: "Delete Forward",
+            description: "Delete the next character",
+            category: Editing,
+            shortcut: primary_shortcut(DeleteForward),
+        },
+        CommandMetadata {
+            command: BackspaceWord,
+            name: "Backspace Word",
+            description: "Delete to the previous word boundary",
+            category: Editing,
+            shortcut: primary_shortcut(BackspaceWord),
+        },
+        CommandMetadata {
+            command: DeleteWordForward,
+            name: "Delete Word Forward",
+            description: "Delete to the next word boundary",
+            category: Editing,
+            shortcut: primary_shortcut(DeleteWordForward),
+        },
+        CommandMetadata {
+            command: InsertNewline,
+            name: "Insert Newline",
+            description: "Insert a newline with indentation",
+            category: Editing,
+            shortcut: primary_shortcut(InsertNewline),
+        },
         CommandMetadata {
             command: ToggleComments,
             name: "Toggle Comments",

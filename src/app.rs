@@ -1301,6 +1301,9 @@ impl PileApp {
             }
 
             // Editing
+            Backspace | DeleteForward | BackspaceWord | DeleteWordForward | InsertNewline => {
+                // Primitive text edits are handled by editor input.
+            }
             ToggleComments => {
                 if let Some(document) = self.state.active_document_mut() {
                     let comment_prefix = document
@@ -1465,26 +1468,6 @@ impl PileApp {
 
         for command in pressed {
             self.handle_command(command);
-        }
-
-        // Raw key handlers (not shortcuts, just single-key presses)
-
-        let rename_tab =
-            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2));
-        if rename_tab {
-            self.execute_command(AppCommand::RenameTab);
-        }
-
-        let find_under_cursor =
-            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F3));
-        if find_under_cursor {
-            self.find_under_cursor();
-        }
-
-        let next_bookmark =
-            ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F4));
-        if next_bookmark {
-            self.jump_to_next_bookmark();
         }
 
         // Special-case: Cmd+D calls select_next_occurrence (not raw add_next_match)

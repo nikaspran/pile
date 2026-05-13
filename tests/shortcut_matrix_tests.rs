@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use egui::{Key, KeyboardShortcut, Modifiers};
-use pile::command::{Command, all_commands, default_shortcuts};
+use pile::command::{
+    Command, EDITOR_KEY_COMMANDS, all_commands, command_for_key_event, default_shortcuts,
+};
 
 fn shortcut(modifiers: Modifiers, logical_key: Key) -> KeyboardShortcut {
     KeyboardShortcut {
@@ -159,5 +161,32 @@ fn command_metadata_primary_shortcuts_are_registered_defaults() {
                 shortcut
             );
         }
+    }
+}
+
+#[test]
+fn editor_key_commands_resolve_through_default_shortcuts() {
+    use Command::*;
+
+    let cases = [
+        (Modifiers::NONE, Key::Backspace, Backspace),
+        (Modifiers::NONE, Key::Delete, DeleteForward),
+        (Modifiers::ALT, Key::Backspace, BackspaceWord),
+        (Modifiers::ALT, Key::Delete, DeleteWordForward),
+        (Modifiers::CTRL, Key::Backspace, BackspaceWord),
+        (Modifiers::CTRL, Key::Delete, DeleteWordForward),
+        (Modifiers::NONE, Key::ArrowLeft, MoveLeft),
+        (Modifiers::SHIFT, Key::ArrowRight, SelectRight),
+        (Modifiers::ALT, Key::W, ExpandWord),
+        (Modifiers::SHIFT | Modifiers::ALT, Key::W, ContractWord),
+        (Modifiers::NONE, Key::Enter, InsertNewline),
+    ];
+
+    for (modifiers, key, command) in cases {
+        assert_eq!(
+            command_for_key_event(key, modifiers, EDITOR_KEY_COMMANDS),
+            Some(command),
+            "{modifiers:?}+{key:?} should resolve to {command:?}"
+        );
     }
 }

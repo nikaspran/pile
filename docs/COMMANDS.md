@@ -63,23 +63,26 @@ using `egui::KeyboardShortcut`.
 | Alt/Option | `Modifiers::ALT` |
 | Ctrl (explicit) | `Modifiers::CTRL` |
 
-### Shortcut Registration Locations
+### Shortcut Registration
 
-Shortcuts are currently defined in two places:
+Default keybindings are registered in **`command.rs`** via
+`default_shortcuts()`. Raw key events are resolved through
+`command_for_key_event()` against a command list for the active layer:
 
-1. **`command.rs`** - `default_shortcuts()` and command metadata
-2. **`app.rs`** - `handle_keyboard_shortcuts()` for app-level handling
+- **`KEYBOARD_COMMANDS`** - app-level shortcuts consumed by
+  `app.rs:handle_keyboard_shortcuts()`
+- **`EDITOR_KEY_COMMANDS`** - editor-local shortcuts consumed by
+  `editor/input.rs`
 
-Additionally, **`editor/input.rs`** (lines 26-331) handles editor-local keyboard
-input directly (typing, arrows, delete, etc.) without going through the command
-system.
+Text and paste events remain data-bearing input events in `editor/input.rs`;
+key-only actions such as movement, selection, delete/backspace, newline, line
+operations, and case conversion resolve through the command shortcut table.
 
 ### Commands Without Default Shortcuts
 
 Some commands are available in the palette but have no default keyboard shortcut:
 `ToggleWrapMode`, `ToggleVisibleWhitespace`, `ToggleIndentGuides`,
-`ToggleMinimap`, `ToggleTheme`, `SearchInTabs`, `DuplicateLines`,
-`NormalizeWhitespace`.
+`ToggleMinimap`, `ToggleTheme`, `SearchInTabs`, `NormalizeWhitespace`.
 
 ## Command Palette (src/command_palette.rs)
 
@@ -95,8 +98,11 @@ Activation: `Cmd+Shift+P` (or via `CommandPalette` command).
 
 ```
 User input
-├── editor/input.rs (typing, arrows, editor-local keys)
+├── editor/input.rs
+│   ├── text/paste events
+│   └── command.rs:command_for_key_event(..., EDITOR_KEY_COMMANDS)
 ├── app.rs:handle_keyboard_shortcuts() (app-level shortcuts)
+│   └── command.rs:default_shortcuts() filtered by KEYBOARD_COMMANDS
 ├── native menu command
 └── command palette selection
     └── app.rs:handle_command()
@@ -109,11 +115,13 @@ User input
 - **Cmd (⌘)** is the primary modifier for actions (new, close, save-free actions)
 - **Cmd+Shift** is used for reverse or extended versions (Redo, Add All Matches)
 - **Cmd+Alt** is used for find/replace and split pane actions
-- **Alt** alone is used for word movement and selection expansion
+- **Alt/Option** is used for word movement, word deletion, and selection expansion
+- **Ctrl** variants are available for common non-macOS word deletion defaults
 - **F-keys** are used for tab operations (F2 rename, F3 find under cursor, F4 bookmarks)
 - **Cmd+P** opens quick tab switcher (distinct from command palette at Cmd+Shift+P)
 
 ## Future Work
 
-- Add user-configurable keybinding overrides (see ROADMAP.md: "Add keybinding configuration")
+- Add user-configurable keybinding overrides by replacing or layering on top of
+  `default_shortcuts()` before dispatch
 - Consider adding a shortcut conflict detection system
