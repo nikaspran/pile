@@ -77,8 +77,15 @@ impl GrammarConfig {
             "punctuation.delimiter",
             "punctuation.special",
             "string",
+            "string.escape",
             "string.special",
             "tag",
+            "text.emphasis",
+            "text.literal",
+            "text.reference",
+            "text.strong",
+            "text.title",
+            "text.uri",
             "type",
             "type.builtin",
             "variable",
@@ -190,8 +197,15 @@ impl GrammarRegistry {
                 "punctuation.delimiter",
                 "punctuation.special",
                 "string",
+                "string.escape",
                 "string.special",
                 "tag",
+                "text.emphasis",
+                "text.literal",
+                "text.reference",
+                "text.strong",
+                "text.title",
+                "text.uri",
                 "type",
                 "type.builtin",
                 "variable",
@@ -208,6 +222,17 @@ impl GrammarRegistry {
                         map.insert(alias, arc_config.clone());
                     }
                 }
+            }
+
+            if let Ok(mut config) = HighlightConfiguration::new(
+                tree_sitter_md::INLINE_LANGUAGE.into(),
+                "markdown_inline",
+                tree_sitter_md::HIGHLIGHT_QUERY_INLINE,
+                tree_sitter_md::INJECTION_QUERY_INLINE,
+                "",
+            ) {
+                config.configure(highlight_names);
+                map.insert("markdown_inline", Arc::new(config));
             }
 
             map
@@ -257,19 +282,24 @@ fn register_builtin_grammars(registry: &mut GrammarRegistry) {
         block_comment: None,
         detection_rules: &[
             DetectionRule {
-                weight: 0.3,
+                weight: 0.5,
                 check: |text| {
                     let heading = text
                         .lines()
-                        .filter(|l| l.starts_with("# ") || l.starts_with("## "))
+                        .filter(|l| {
+                            let trimmed = l.trim_start();
+                            trimmed.starts_with("# ")
+                                || trimmed.starts_with("## ")
+                                || trimmed.starts_with("### ")
+                        })
                         .count();
-                    (heading as f32 / 10.0).min(1.0)
+                    (heading as f32 / 2.0).min(1.0)
                 },
             },
             DetectionRule {
-                weight: 0.2,
+                weight: 0.35,
                 check: |text| {
-                    if text.lines().any(|l| l.starts_with("```")) {
+                    if text.lines().any(|l| l.trim_start().starts_with("```")) {
                         1.0
                     } else {
                         0.0
@@ -277,13 +307,18 @@ fn register_builtin_grammars(registry: &mut GrammarRegistry) {
                 },
             },
             DetectionRule {
-                weight: 0.2,
+                weight: 0.25,
                 check: |text| {
                     let list = text
                         .lines()
-                        .filter(|l| l.starts_with("- ") || l.starts_with("* "))
+                        .filter(|l| {
+                            let trimmed = l.trim_start();
+                            trimmed.starts_with("- ")
+                                || trimmed.starts_with("* ")
+                                || trimmed.starts_with("1. ")
+                        })
                         .count();
-                    (list as f32 / 20.0).min(1.0)
+                    (list as f32 / 3.0).min(1.0)
                 },
             },
             DetectionRule {
@@ -544,7 +579,7 @@ fn register_builtin_grammars(registry: &mut GrammarRegistry) {
                 },
             },
             DetectionRule {
-                weight: 0.20,
+                weight: 0.25,
                 check: |text| {
                     if text.contains("console.log") || text.contains("export ") {
                         1.0

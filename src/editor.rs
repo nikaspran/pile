@@ -543,38 +543,30 @@ pub fn show_editor(
                 // Get syntax highlight spans for this line
                 let highlight_spans: Vec<(usize, usize, egui::Color32)> = if !is_large_file {
                     if let Some(detection) = document.detect_syntax() {
-                        if detection.language != crate::syntax::LanguageId::PlainText {
-                            let spans = document.syntax_state.highlight(
-                                detection.language,
-                                document.revision,
-                                visible_start,
-                                visible_end,
-                            );
-                            let line_end_byte = line_start_byte + line_text.byte_len();
-                            // Spans are relative to visible_text (offset 0), so add visible_start
-                            spans
-                                .into_iter()
-                                .filter_map(|span| {
-                                    let abs_start = span.start + visible_start;
-                                    let abs_end = span.end + visible_start;
-                                    let start = abs_start.max(line_start_byte);
-                                    let end = abs_end.min(line_end_byte);
-                                    if start < end {
-                                        let color =
-                                            highlight_color(&highlight_name(span.highlight), theme);
-                                        Some((
-                                            start - line_start_byte,
-                                            end - line_start_byte,
-                                            color,
-                                        ))
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect()
-                        } else {
-                            Vec::new()
-                        }
+                        let spans = document.syntax_state.highlight(
+                            detection.language,
+                            document.revision,
+                            visible_start,
+                            visible_end,
+                        );
+                        let line_end_byte = line_start_byte + line_text.byte_len();
+                        // Spans are relative to visible_text (offset 0), so add visible_start
+                        spans
+                            .into_iter()
+                            .filter_map(|span| {
+                                let abs_start = span.start + visible_start;
+                                let abs_end = span.end + visible_start;
+                                let start = abs_start.max(line_start_byte);
+                                let end = abs_end.min(line_end_byte);
+                                if start < end {
+                                    let color =
+                                        highlight_color(&highlight_name(span.highlight), theme);
+                                    Some((start - line_start_byte, end - line_start_byte, color))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect()
                     } else {
                         Vec::new()
                     }

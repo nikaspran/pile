@@ -28,7 +28,7 @@ use crate::{
     preferences::PreferencesState,
     search::{SearchMatch, SearchState},
     settings::Settings,
-    syntax::LanguageDetection,
+    syntax::{LanguageDetection, LanguageId},
     tab_switcher::TabSwitcher,
     theme::apply_theme,
 };
@@ -151,7 +151,7 @@ impl PileApp {
         let syntax = GrammarRegistry::default();
         let last_detection = state
             .active_document()
-            .map(|document| syntax.detect_rope(&document.rope))
+            .and_then(|document| document.detect_syntax())
             .unwrap_or_else(|| syntax.detect(""));
 
         let (panes, active_pane) = if let Some((saved_panes, saved_active_pane)) = saved_panes {
@@ -216,7 +216,7 @@ impl PileApp {
         // Spawn the background parse worker
         let parse_worker = ParseWorker::spawn();
 
-        Self {
+        let mut app = Self {
             ctx,
             state,
             settings,
@@ -244,7 +244,9 @@ impl PileApp {
             shutdown_flag: shutdown_flag.clone(),
             parse_worker: Some(parse_worker),
             frame_time_ms: 0.0,
-        }
+        };
+        app.request_background_parse_for_active();
+        app
     }
 
     fn extract_selected_text(document: &crate::model::Document) -> String {
@@ -301,26 +303,20 @@ impl PileApp {
         let mut detection = self
             .state
             .active_document()
-            .map(|document| self.syntax.detect_rope(&document.rope))
+            .and_then(|document| document.detect_syntax())
             .unwrap_or_else(|| self.syntax.detect(""));
 
         // Override detection if language is in ignored list
-        let lang_name = match detection.language {
-            crate::syntax::LanguageId::PlainText => "PlainText",
-            crate::syntax::LanguageId::Markdown => "Markdown",
-            crate::syntax::LanguageId::Rust => "Rust",
-            crate::syntax::LanguageId::JavaScript => "JavaScript",
-            crate::syntax::LanguageId::TypeScript => "TypeScript",
-            crate::syntax::LanguageId::Python => "Python",
-            crate::syntax::LanguageId::Json => "Json",
-            crate::syntax::LanguageId::Toml => "Toml",
-            crate::syntax::LanguageId::Yaml => "Yaml",
-            crate::syntax::LanguageId::Bash => "Bash",
-        };
-        if self
-            .settings
-            .ignored_languages
-            .contains(&lang_name.to_string())
+        let is_manual = self
+            .state
+            .active_document()
+            .and_then(|document| document.syntax_override)
+            .is_some();
+        if !is_manual
+            && self
+                .settings
+                .ignored_languages
+                .contains(&ignored_language_name(detection.language).to_owned())
         {
             detection.language = crate::syntax::LanguageId::PlainText;
             detection.confidence = 0.0;
@@ -340,6 +336,22 @@ impl PileApp {
         self.request_background_parse_for_active();
     }
 
+    fn set_active_syntax_override(&mut self, syntax_override: Option<LanguageId>) {
+        let Some(document) = self.state.active_document_mut() else {
+            return;
+        };
+
+        if document.syntax_override == syntax_override {
+            return;
+        }
+
+        document.syntax_override = syntax_override;
+        document.syntax_state.invalidate_parse();
+        self.refresh_active_document_detection();
+        self.mark_changed();
+        self.request_background_parse_for_active();
+    }
+
     /// Request a background parse for the active document if needed.
     fn request_background_parse_for_active(&mut self) {
         let Some(worker) = self.parse_worker.as_ref() else {
@@ -353,10 +365,6 @@ impl PileApp {
         let Some(detection) = document.detect_syntax() else {
             return;
         };
-
-        if detection.language == crate::syntax::LanguageId::PlainText {
-            return;
-        }
 
         // Check if we need to parse
         if !document
@@ -380,6 +388,7 @@ impl PileApp {
             document_id: document.id,
             revision: document.revision,
             language: detection.language,
+            force_language: document.syntax_override.is_some(),
             text: document
                 .rope
                 .byte_slice(visible_start..visible_end)
@@ -392,11 +401,12 @@ impl PileApp {
     }
 
     /// Handle parse events from the background worker.
-    fn handle_parse_events(&mut self) {
+    fn handle_parse_events(&mut self) -> bool {
         let Some(worker) = self.parse_worker.as_ref() else {
-            return;
+            return false;
         };
 
+        let mut accepted_any = false;
         while let Some(event) = worker.try_recv() {
             match event {
                 ParseEvent::Result(result) => {
@@ -412,11 +422,13 @@ impl PileApp {
                                 result.visible_start,
                                 result.visible_end,
                             );
+                            accepted_any = true;
                         }
                     }
                 }
             }
         }
+        accepted_any
     }
 
     fn set_active_document(&mut self, document_id: DocumentId) {
@@ -429,6 +441,7 @@ impl PileApp {
                 pane.document_id = document_id;
             }
             self.refresh_active_document_metadata();
+            self.request_background_parse_for_active();
             self.mark_changed();
             self.editor_focus_pending = true;
         }
@@ -444,6 +457,7 @@ impl PileApp {
                 pane.document_id = document_id;
             }
             self.refresh_active_document_detection();
+            self.request_background_parse_for_active();
             self.mark_changed();
             self.editor_focus_pending = true;
         }
@@ -755,6 +769,7 @@ impl PileApp {
         }
         self.mark_changed();
         self.refresh_active_document_metadata();
+        self.request_background_parse_for_active();
         self.editor_focus_pending = true;
     }
 
@@ -1146,6 +1161,7 @@ impl PileApp {
                     }
                     self.mark_changed();
                     self.refresh_active_document_metadata();
+                    self.request_background_parse_for_active();
                     self.editor_focus_pending = true;
                 }
             }
@@ -1528,6 +1544,7 @@ impl PileApp {
         }
         self.mark_changed();
         self.refresh_active_document_metadata();
+        self.request_background_parse_for_active();
         self.editor_focus_pending = true;
     }
 
@@ -2338,7 +2355,9 @@ impl eframe::App for PileApp {
         self.handle_native_menu_commands();
         self.handle_clipboard_events(ctx);
         self.handle_keyboard_shortcuts(ctx);
-        self.handle_parse_events();
+        if self.handle_parse_events() {
+            ctx.request_repaint();
+        }
 
         // Drain worker events
         if let Some(rx) = &self.worker_event_rx {
@@ -2438,6 +2457,12 @@ impl eframe::App for PileApp {
                     self.recovery_events.remove(idx);
                 }
 
+                let active_syntax_override = self
+                    .state
+                    .active_document()
+                    .and_then(|document| document.syntax_override);
+                let mut syntax_selection = None;
+
                 ui.horizontal(|ui| {
                     let (lang, confidence) =
                         (self.last_detection.language, self.last_detection.confidence);
@@ -2447,11 +2472,39 @@ impl eframe::App for PileApp {
                         .map_or(false, |doc| doc.syntax_state.has_parse_errors());
                     let low_confidence = confidence < 0.5;
 
-                    let lang_text = format!("{lang:?} ({confidence:.0}%)");
-                    let response = ui.label(lang_text);
-                    if low_confidence {
-                        response.highlight();
-                    }
+                    let lang_text = if active_syntax_override.is_some() {
+                        format!("{} (manual)", lang.display_name())
+                    } else {
+                        format!("{} ({confidence:.0}%)", lang.display_name())
+                    };
+                    let button_text = if low_confidence && active_syntax_override.is_none() {
+                        egui::RichText::new(lang_text)
+                            .background_color(ui.visuals().widgets.inactive.weak_bg_fill)
+                    } else {
+                        egui::RichText::new(lang_text)
+                    };
+                    ui.menu_button(button_text, |ui| {
+                        if ui
+                            .selectable_label(active_syntax_override.is_none(), "Auto")
+                            .clicked()
+                        {
+                            syntax_selection = Some(None);
+                            ui.close();
+                        }
+                        ui.separator();
+                        for language in LanguageId::ALL {
+                            if ui
+                                .selectable_label(
+                                    active_syntax_override == Some(language),
+                                    language.display_name(),
+                                )
+                                .clicked()
+                            {
+                                syntax_selection = Some(Some(language));
+                                ui.close();
+                            }
+                        }
+                    });
                     if has_parse_errors {
                         ui.label(
                             egui::RichText::new("⚠ parse issues")
@@ -2482,6 +2535,11 @@ impl eframe::App for PileApp {
                     ui.separator();
                     ui.label(format!("frame: {:.1}ms", self.frame_time_ms));
                 });
+
+                if let Some(syntax_override) = syntax_selection {
+                    self.set_active_syntax_override(syntax_override);
+                    ctx.request_repaint();
+                }
             });
         }
 
@@ -2554,6 +2612,7 @@ impl eframe::App for PileApp {
                 }
                 self.mark_changed();
                 self.refresh_active_document_metadata();
+                self.request_background_parse_for_active();
                 self.editor_focus_pending = true;
             } else {
                 self.set_active_document(document_id);
@@ -2659,6 +2718,21 @@ fn should_accept_parse_result(
     result: &crate::parse_worker::ParseResult,
 ) -> bool {
     document.revision == result.revision
+}
+
+fn ignored_language_name(language: LanguageId) -> &'static str {
+    match language {
+        LanguageId::PlainText => "PlainText",
+        LanguageId::Markdown => "Markdown",
+        LanguageId::Rust => "Rust",
+        LanguageId::JavaScript => "JavaScript",
+        LanguageId::TypeScript => "TypeScript",
+        LanguageId::Python => "Python",
+        LanguageId::Json => "Json",
+        LanguageId::Toml => "Toml",
+        LanguageId::Yaml => "Yaml",
+        LanguageId::Bash => "Bash",
+    }
 }
 
 #[cfg(test)]

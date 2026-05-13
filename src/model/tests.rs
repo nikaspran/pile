@@ -1,4 +1,5 @@
 use super::*;
+use crate::syntax::LanguageId;
 use uuid::Uuid;
 
 #[test]
@@ -56,6 +57,20 @@ fn document_title_tracks_first_non_empty_line_until_renamed() {
 
     document.rename("");
     assert_eq!(document.display_title(), "Different first line");
+}
+
+#[test]
+fn document_syntax_override_wins_over_auto_detection() {
+    let mut document = Document::new_untitled(1, 4, true);
+    document.replace_text("fn main() { let value = 1; }");
+
+    assert_eq!(document.detect_syntax().unwrap().language, LanguageId::Rust);
+
+    document.syntax_override = Some(LanguageId::Markdown);
+    let detection = document.detect_syntax().unwrap();
+
+    assert_eq!(detection.language, LanguageId::Markdown);
+    assert_eq!(detection.confidence, 1.0);
 }
 
 #[test]

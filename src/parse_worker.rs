@@ -20,6 +20,8 @@ pub struct ParseRequest {
     pub revision: u64,
     /// Language to parse as.
     pub language: LanguageId,
+    /// When true, parse the visible text as `language` instead of auto-detecting blocks.
+    pub force_language: bool,
     /// Document text for the visible range.
     /// Note: tree-sitter requires &[u8] input, so materialization is necessary.
     /// We only materialize the visible byte range to minimize allocation.
@@ -149,17 +151,23 @@ fn parse_worker_loop(request_rx: Receiver<ParseRequest>, event_tx: Sender<ParseE
 
 /// Process a single parse request.
 fn process_parse_request(request: ParseRequest, event_tx: &Sender<ParseEvent>) {
-    if request.language == LanguageId::PlainText {
-        return;
-    }
-
-    let registry = crate::grammar_registry::GrammarRegistry::default();
-    let Some(config) = registry.highlight_config(request.language) else {
-        return;
+    let mut spans = if request.force_language || request.language == LanguageId::Markdown {
+        if request.language == LanguageId::PlainText {
+            Vec::new()
+        } else {
+            let registry = crate::grammar_registry::GrammarRegistry::default();
+            registry
+                .highlight_config(request.language)
+                .map(|config| DocumentSyntaxState::generate_highlight_spans(&config, &request.text))
+                .unwrap_or_default()
+        }
+    } else {
+        DocumentSyntaxState::generate_block_highlight_spans(&request.text)
     };
 
-    // Generate highlight spans
-    let spans = DocumentSyntaxState::generate_highlight_spans(&config, &request.text);
+    if request.language == LanguageId::Markdown {
+        DocumentSyntaxState::add_markdown_extra_spans(&mut spans, &request.text);
+    }
 
     // Spans are relative to request.text, which is already the visible range.
     let visible_spans: Vec<HighlightSpan> = spans
@@ -193,7 +201,8 @@ mod tests {
         let request = ParseRequest {
             document_id: uuid::Uuid::new_v4(),
             revision: 1,
-            language: LanguageId::PlainText, // PlainText won't be processed
+            language: LanguageId::PlainText,
+            force_language: false,
             text: "".to_string(),
             visible_start: 0,
             visible_end: 0,
@@ -209,6 +218,7 @@ mod tests {
             document_id: uuid::Uuid::new_v4(),
             revision: 1,
             language: LanguageId::Rust,
+            force_language: false,
             text: "fn main() {}".to_string(),
             visible_start: 0,
             visible_end: 12,
@@ -224,6 +234,7 @@ mod tests {
             document_id: uuid::Uuid::new_v4(),
             revision: 1,
             language: LanguageId::Rust,
+            force_language: false,
             text: "fn main() {\n    let value = 1;\n}".to_owned(),
             visible_start: 1024,
             visible_end: 1056,
@@ -238,6 +249,113 @@ mod tests {
                 .spans
                 .iter()
                 .all(|span| span.end <= result.visible_end - result.visible_start)
+        );
+    }
+
+    #[test]
+    fn parse_result_highlights_mixed_blocks_for_plain_document_detection() {
+        let (event_tx, event_rx) = bounded(1);
+        let text = "plain note\n\nfn main() {\n    let value = 1;\n}\n\n{\"ok\": true}\n";
+        let request = ParseRequest {
+            document_id: uuid::Uuid::new_v4(),
+            revision: 1,
+            language: LanguageId::PlainText,
+            force_language: false,
+            text: text.to_owned(),
+            visible_start: 0,
+            visible_end: text.len(),
+        };
+
+        process_parse_request(request, &event_tx);
+
+        let ParseEvent::Result(result) = event_rx.try_recv().unwrap();
+        let rust_start = text.find("fn main").unwrap();
+        let json_start = text.find("{\"ok\"").unwrap();
+        assert!(result.spans.iter().any(|span| span.start >= rust_start));
+        assert!(result.spans.iter().any(|span| span.start >= json_start));
+    }
+
+    #[test]
+    fn parse_result_honors_forced_plain_text() {
+        let (event_tx, event_rx) = bounded(1);
+        let request = ParseRequest {
+            document_id: uuid::Uuid::new_v4(),
+            revision: 1,
+            language: LanguageId::PlainText,
+            force_language: true,
+            text: "fn main() {}".to_owned(),
+            visible_start: 0,
+            visible_end: 12,
+        };
+
+        process_parse_request(request, &event_tx);
+
+        let ParseEvent::Result(result) = event_rx.try_recv().unwrap();
+        assert!(result.spans.is_empty());
+    }
+
+    #[test]
+    fn parse_result_highlights_auto_markdown_as_whole_note() {
+        let (event_tx, event_rx) = bounded(1);
+        let text = "# Notes\n\nSome **important** text.\n\n```rust\nfn main() {}\n```\n";
+        let request = ParseRequest {
+            document_id: uuid::Uuid::new_v4(),
+            revision: 1,
+            language: LanguageId::Markdown,
+            force_language: false,
+            text: text.to_owned(),
+            visible_start: 0,
+            visible_end: text.len(),
+        };
+
+        process_parse_request(request, &event_tx);
+
+        let ParseEvent::Result(result) = event_rx.try_recv().unwrap();
+        assert!(
+            result
+                .spans
+                .iter()
+                .any(|span| span.start < text.find("Some").unwrap())
+        );
+        assert!(
+            result.spans.iter().any(|span| {
+                span.start >= text.find("important").unwrap()
+                    && crate::syntax_highlighting::highlight_name(span.highlight) == "text.strong"
+            }),
+            "Markdown strong emphasis should be highlighted"
+        );
+        assert!(
+            result
+                .spans
+                .iter()
+                .any(|span| span.start >= text.find("fn main").unwrap())
+        );
+    }
+
+    #[test]
+    fn parse_result_detects_unlabeled_markdown_code_fence() {
+        let (event_tx, event_rx) = bounded(1);
+        let text = "# Notes\n\n```\nfn main() {\n    let value = 1;\n}\n```\n";
+        let request = ParseRequest {
+            document_id: uuid::Uuid::new_v4(),
+            revision: 1,
+            language: LanguageId::Markdown,
+            force_language: false,
+            text: text.to_owned(),
+            visible_start: 0,
+            visible_end: text.len(),
+        };
+
+        process_parse_request(request, &event_tx);
+
+        let ParseEvent::Result(result) = event_rx.try_recv().unwrap();
+        let rust_start = text.find("fn main").unwrap();
+        assert!(
+            result.spans.iter().any(|span| {
+                span.start >= rust_start
+                    && crate::syntax_highlighting::highlight_name(span.highlight) == "keyword"
+            }),
+            "unlabeled fenced Rust should be detected within Markdown"
         );
     }
 }

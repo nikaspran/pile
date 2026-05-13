@@ -4,7 +4,7 @@ use crop::{Rope, RopeSlice};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
-use crate::syntax::LanguageDetection;
+use crate::syntax::{LanguageDetection, LanguageId};
 use crate::syntax_highlighting::DocumentSyntaxState;
 
 use super::{DocumentId, EditTransaction, ScrollState, Selection, UndoState};
@@ -33,6 +33,9 @@ pub struct Document {
     pub use_soft_tabs: bool,
     /// Whether this tab is pinned (cannot be closed, stays in place)
     pub pinned: bool,
+    /// Explicit syntax selection for this scratch document. `None` uses auto detection.
+    #[serde(default)]
+    pub syntax_override: Option<LanguageId>,
     /// Bookmarks stored as byte offsets (0-based) for consistency with selections
     pub bookmarks: BTreeSet<usize>,
     /// Per-document tree-sitter syntax state (parse tree + highlight cache)
@@ -74,6 +77,7 @@ impl Document {
             tab_width: default_tab_width,
             use_soft_tabs: default_soft_tabs,
             pinned: false,
+            syntax_override: None,
             bookmarks: BTreeSet::new(),
             syntax_state: DocumentSyntaxState::new(),
         }
@@ -110,6 +114,13 @@ impl Document {
     }
 
     pub fn detect_syntax(&self) -> Option<LanguageDetection> {
+        if let Some(language) = self.syntax_override {
+            return Some(LanguageDetection {
+                language,
+                confidence: 1.0,
+            });
+        }
+
         let registry = crate::grammar_registry::GrammarRegistry::default();
         Some(registry.detect_rope(&self.rope))
     }

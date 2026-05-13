@@ -1,6 +1,7 @@
 use crop::Rope;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum LanguageId {
     PlainText,
     Markdown,
@@ -15,6 +16,34 @@ pub enum LanguageId {
 }
 
 impl LanguageId {
+    pub const ALL: [LanguageId; 10] = [
+        LanguageId::PlainText,
+        LanguageId::Markdown,
+        LanguageId::Rust,
+        LanguageId::JavaScript,
+        LanguageId::TypeScript,
+        LanguageId::Python,
+        LanguageId::Json,
+        LanguageId::Toml,
+        LanguageId::Yaml,
+        LanguageId::Bash,
+    ];
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            LanguageId::PlainText => "Plain Text",
+            LanguageId::Markdown => "Markdown",
+            LanguageId::Rust => "Rust",
+            LanguageId::JavaScript => "JavaScript",
+            LanguageId::TypeScript => "TypeScript",
+            LanguageId::Python => "Python",
+            LanguageId::Json => "JSON",
+            LanguageId::Toml => "TOML",
+            LanguageId::Yaml => "YAML",
+            LanguageId::Bash => "Bash",
+        }
+    }
+
     /// Returns the line comment prefix for this language, if any.
     pub fn comment_prefix(&self) -> Option<&'static str> {
         match self {
@@ -77,19 +106,24 @@ impl ScoredDetector {
             LanguageId::Markdown,
             &[
                 DetectionRule {
-                    weight: 0.3,
+                    weight: 0.5,
                     check: |text| {
                         let heading = text
                             .lines()
-                            .filter(|l| l.starts_with("# ") || l.starts_with("## "))
+                            .filter(|l| {
+                                let trimmed = l.trim_start();
+                                trimmed.starts_with("# ")
+                                    || trimmed.starts_with("## ")
+                                    || trimmed.starts_with("### ")
+                            })
                             .count();
-                        (heading as f32 / 10.0).min(1.0)
+                        (heading as f32 / 2.0).min(1.0)
                     },
                 },
                 DetectionRule {
-                    weight: 0.2,
+                    weight: 0.35,
                     check: |text| {
-                        if text.lines().any(|l| l.starts_with("```")) {
+                        if text.lines().any(|l| l.trim_start().starts_with("```")) {
                             1.0
                         } else {
                             0.0
@@ -97,13 +131,18 @@ impl ScoredDetector {
                     },
                 },
                 DetectionRule {
-                    weight: 0.2,
+                    weight: 0.25,
                     check: |text| {
                         let list = text
                             .lines()
-                            .filter(|l| l.starts_with("- ") || l.starts_with("* "))
+                            .filter(|l| {
+                                let trimmed = l.trim_start();
+                                trimmed.starts_with("- ")
+                                    || trimmed.starts_with("* ")
+                                    || trimmed.starts_with("1. ")
+                            })
                             .count();
-                        (list as f32 / 20.0).min(1.0)
+                        (list as f32 / 3.0).min(1.0)
                     },
                 },
                 DetectionRule {
@@ -336,7 +375,7 @@ impl ScoredDetector {
                     },
                 },
                 DetectionRule {
-                    weight: 0.20,
+                    weight: 0.25,
                     check: |text| {
                         if text.contains("console.log") || text.contains("export ") {
                             1.0
@@ -688,6 +727,23 @@ mod tests {
     }
 
     #[test]
+    fn detects_markdown_for_common_whole_note_shapes() {
+        let registry = GrammarRegistry::default();
+
+        let heading = registry.detect("# Notes\n\nSome prose under a heading.\n");
+        assert_eq!(heading.language, LanguageId::Markdown);
+        assert!(heading.confidence > 0.2);
+
+        let list = registry.detect("- first\n- second\n- third\n");
+        assert_eq!(list.language, LanguageId::Markdown);
+        assert!(list.confidence > 0.2);
+
+        let fence = registry.detect("```rust\nfn main() {}\n```\n");
+        assert_eq!(fence.language, LanguageId::Markdown);
+        assert!(fence.confidence > 0.2);
+    }
+
+    #[test]
     fn detects_common_structured_scratch_content() {
         let registry = GrammarRegistry::default();
 
@@ -708,6 +764,14 @@ mod tests {
     fn detects_javascript_with_function_and_const() {
         let registry = GrammarRegistry::default();
         let detection = registry.detect("const add = (a, b) => a + b;");
+        assert_eq!(detection.language, LanguageId::JavaScript);
+        assert!(detection.confidence > 0.2);
+    }
+
+    #[test]
+    fn detects_javascript_console_log_snippet() {
+        let registry = GrammarRegistry::default();
+        let detection = registry.detect("console.log('hello')\n");
         assert_eq!(detection.language, LanguageId::JavaScript);
         assert!(detection.confidence > 0.2);
     }
