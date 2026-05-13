@@ -32,6 +32,7 @@ pub use multicursor::{
     add_all_matches, add_next_match, clear_secondary_cursors, delete_all, replace_selection_all,
     split_selection_into_lines,
 };
+use multicursor::{backspace_all, backspace_word_all, delete_word_all};
 use ops::*;
 pub use ops::{CaseType, convert_case_all_selections, convert_case_selection};
 pub use replace::{replace_all_matches, replace_match};

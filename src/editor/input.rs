@@ -2,14 +2,14 @@ use eframe::egui;
 
 use crate::model::Document;
 
-use super::multicursor::backspace_all;
 use super::{
-    CaseType, EditorViewState, add_all_matches, add_next_match, backspace_with_pair_deletion,
-    clear_secondary_cursors, contract_selection_by_bracket_pair,
-    contract_selection_by_indent_block, contract_selection_by_line, contract_selection_by_word,
-    convert_case_all_selections, convert_case_selection, delete, delete_all, delete_selected_lines,
-    expand_selection_by_bracket_pair, expand_selection_by_indent_block, expand_selection_by_line,
-    expand_selection_by_word, indent_selection, insert_char_with_pairing,
+    CaseType, EditorViewState, add_all_matches, add_next_match, backspace_all,
+    backspace_with_pair_deletion, backspace_word, backspace_word_all, clear_secondary_cursors,
+    contract_selection_by_bracket_pair, contract_selection_by_indent_block,
+    contract_selection_by_line, contract_selection_by_word, convert_case_all_selections,
+    convert_case_selection, delete, delete_all, delete_selected_lines, delete_word,
+    delete_word_all, expand_selection_by_bracket_pair, expand_selection_by_indent_block,
+    expand_selection_by_line, expand_selection_by_word, indent_selection, insert_char_with_pairing,
     insert_newline_with_auto_indent, join_selected_lines, move_document_end, move_document_start,
     move_end, move_home, move_left, move_page, move_paragraph_down, move_paragraph_up, move_right,
     move_selected_lines_down, move_selected_lines_up, move_vertical, move_word_left,
@@ -216,11 +216,29 @@ pub(super) fn handle_input(
                         view_state.preferred_column = None;
                         had_typing_event = true;
                     }
+                    egui::Key::Backspace if word && !extend => {
+                        changed |= if document.selections.len() > 1 {
+                            backspace_word_all(document)
+                        } else {
+                            backspace_word(document)
+                        };
+                        view_state.preferred_column = None;
+                        had_typing_event = true;
+                    }
                     egui::Key::Delete if plain => {
                         changed |= if document.selections.len() > 1 {
                             delete_all(document)
                         } else {
                             delete(document)
+                        };
+                        view_state.preferred_column = None;
+                        had_typing_event = true;
+                    }
+                    egui::Key::Delete if word && !extend => {
+                        changed |= if document.selections.len() > 1 {
+                            delete_word_all(document)
+                        } else {
+                            delete_word(document)
                         };
                         view_state.preferred_column = None;
                         had_typing_event = true;

@@ -572,3 +572,87 @@ fn backspace_and_delete_handle_boundaries_and_lines() {
     set_primary_selection(&mut document, Selection::caret(end));
     assert!(!delete(&mut document));
 }
+
+#[test]
+fn word_backspace_deletes_to_previous_word_boundary() {
+    let mut document = document("alpha beta  gamma");
+    set_primary_selection(&mut document, Selection::caret("alpha beta  gam".len()));
+
+    assert!(backspace_word(&mut document));
+
+    assert_eq!(document.text(), "alpha beta  ma");
+    assert_eq!(
+        primary_selection(&document),
+        Selection::caret("alpha beta  ".len())
+    );
+}
+
+#[test]
+fn word_delete_deletes_to_next_word_boundary() {
+    let mut document = document("alpha beta  gamma");
+    set_primary_selection(&mut document, Selection::caret("alpha ".len()));
+
+    assert!(delete_word(&mut document));
+
+    assert_eq!(document.text(), "alpha   gamma");
+    assert_eq!(
+        primary_selection(&document),
+        Selection::caret("alpha ".len())
+    );
+}
+
+#[test]
+fn word_deletion_replaces_selection_before_using_word_boundaries() {
+    let mut document = document("alpha beta gamma");
+    set_primary_selection(
+        &mut document,
+        Selection {
+            anchor: "alpha ".len(),
+            head: "alpha beta".len(),
+        },
+    );
+
+    assert!(backspace_word(&mut document));
+
+    assert_eq!(document.text(), "alpha  gamma");
+    assert_eq!(
+        primary_selection(&document),
+        Selection::caret("alpha ".len())
+    );
+}
+
+#[test]
+fn word_deletion_handles_multiple_cursors() {
+    let mut document = document("alpha beta gamma delta");
+    document.selections = vec![
+        Selection::caret("alpha be".len()),
+        Selection::caret("alpha beta gamma de".len()),
+    ];
+
+    assert!(backspace_word_all(&mut document));
+
+    assert_eq!(document.text(), "alpha ta gamma lta");
+    assert_eq!(
+        document.selections,
+        vec![
+            Selection::caret("alpha ".len()),
+            Selection::caret("alpha ta gamma ".len()),
+        ]
+    );
+
+    document.selections = vec![
+        Selection::caret("alpha ".len()),
+        Selection::caret("alpha ta ".len()),
+    ];
+
+    assert!(delete_word_all(&mut document));
+
+    assert_eq!(document.text(), "alpha   lta");
+    assert_eq!(
+        document.selections,
+        vec![
+            Selection::caret("alpha ".len()),
+            Selection::caret("alpha  ".len())
+        ]
+    );
+}

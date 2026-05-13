@@ -4,8 +4,8 @@ use crate::model::{Document, DocumentEdit, Selection};
 use crate::search;
 
 use super::{
-    byte_of_visual_line, line_index_of_byte, next_grapheme_boundary, previous_grapheme_boundary,
-    primary_selection,
+    byte_of_visual_line, line_index_of_byte, next_grapheme_boundary, next_word_boundary,
+    previous_grapheme_boundary, previous_word_boundary, primary_selection,
 };
 
 /// Adds the next occurrence of the word under the primary cursor as a new selection.
@@ -300,6 +300,50 @@ pub fn backspace_all(document: &mut Document) -> bool {
     }
 }
 
+/// Handles word-backspace across all selections.
+pub fn backspace_word_all(document: &mut Document) -> bool {
+    if document.selections.is_empty() {
+        return false;
+    }
+
+    let mut sorted_selections = document.selections.clone();
+    sorted_selections.sort_by_key(|s| s.anchor.min(s.head));
+
+    let mut edits = Vec::new();
+
+    for selection in &sorted_selections {
+        let (start, end) = if selection.anchor <= selection.head {
+            (selection.anchor, selection.head)
+        } else {
+            (selection.head, selection.anchor)
+        };
+
+        if start != end {
+            edits.push(DocumentEdit {
+                range: start..end,
+                inserted_text: String::new(),
+                selections_before: vec![*selection],
+                selections_after: vec![Selection::caret(start)],
+            });
+        } else if start > 0 {
+            let delete_start = previous_word_boundary(&document.rope, start);
+            edits.push(DocumentEdit {
+                range: delete_start..start,
+                inserted_text: String::new(),
+                selections_before: vec![*selection],
+                selections_after: vec![Selection::caret(delete_start)],
+            });
+        }
+    }
+
+    if !edits.is_empty() {
+        document.apply_multi_edit(edits);
+        true
+    } else {
+        false
+    }
+}
+
 /// Handles delete key across all selections.
 pub fn delete_all(document: &mut Document) -> bool {
     if document.selections.is_empty() {
@@ -330,6 +374,50 @@ pub fn delete_all(document: &mut Document) -> bool {
         } else if start < document.rope.byte_len() {
             // Delete next grapheme
             let delete_end = next_grapheme_boundary(&document.rope, start);
+            edits.push(DocumentEdit {
+                range: start..delete_end,
+                inserted_text: String::new(),
+                selections_before: vec![*selection],
+                selections_after: vec![Selection::caret(start)],
+            });
+        }
+    }
+
+    if !edits.is_empty() {
+        document.apply_multi_edit(edits);
+        true
+    } else {
+        false
+    }
+}
+
+/// Handles word-delete across all selections.
+pub fn delete_word_all(document: &mut Document) -> bool {
+    if document.selections.is_empty() {
+        return false;
+    }
+
+    let mut sorted_selections = document.selections.clone();
+    sorted_selections.sort_by_key(|s| s.anchor.min(s.head));
+
+    let mut edits = Vec::new();
+
+    for selection in &sorted_selections {
+        let (start, end) = if selection.anchor <= selection.head {
+            (selection.anchor, selection.head)
+        } else {
+            (selection.head, selection.anchor)
+        };
+
+        if start != end {
+            edits.push(DocumentEdit {
+                range: start..end,
+                inserted_text: String::new(),
+                selections_before: vec![*selection],
+                selections_after: vec![Selection::caret(start)],
+            });
+        } else if start < document.rope.byte_len() {
+            let delete_end = next_word_boundary(&document.rope, start);
             edits.push(DocumentEdit {
                 range: start..delete_end,
                 inserted_text: String::new(),

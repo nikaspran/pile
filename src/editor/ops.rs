@@ -2,7 +2,8 @@ use crop::Rope;
 
 use super::{
     byte_of_visual_line, clamp_primary_selection, line_index_of_byte, next_grapheme_boundary,
-    previous_grapheme_boundary, primary_selection, selection_range, set_primary_selection,
+    next_word_boundary, previous_grapheme_boundary, previous_word_boundary, primary_selection,
+    selection_range, set_primary_selection,
 };
 use crate::model::{Document, DocumentEdit, Selection};
 
@@ -95,6 +96,40 @@ pub fn delete(document: &mut Document) -> bool {
     }
 
     let delete_end = next_grapheme_boundary(&document.rope, start);
+    let edit = DocumentEdit::replace_selection(selection, start..delete_end, "");
+    document.apply_continuing_edit(edit);
+    true
+}
+
+pub fn backspace_word(document: &mut Document) -> bool {
+    clamp_primary_selection(document);
+    let selection = primary_selection(document);
+    let (start, end) = selection_range(selection);
+    if start != end {
+        return replace_selection_with(document, "");
+    }
+    if start == 0 {
+        return false;
+    }
+
+    let delete_start = previous_word_boundary(&document.rope, start);
+    let edit = DocumentEdit::replace_selection(selection, delete_start..start, "");
+    document.apply_continuing_edit(edit);
+    true
+}
+
+pub fn delete_word(document: &mut Document) -> bool {
+    clamp_primary_selection(document);
+    let selection = primary_selection(document);
+    let (start, end) = selection_range(selection);
+    if start != end {
+        return replace_selection_with(document, "");
+    }
+    if start >= document.rope.byte_len() {
+        return false;
+    }
+
+    let delete_end = next_word_boundary(&document.rope, start);
     let edit = DocumentEdit::replace_selection(selection, start..delete_end, "");
     document.apply_continuing_edit(edit);
     true
