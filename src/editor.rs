@@ -743,6 +743,13 @@ pub fn show_editor(
                     // Smooth scroll is handled above via animation
                 }
 
+                if is_primary && response.has_focus() && changed {
+                    ui.scroll_to_rect(
+                        caret_rect.expand2(egui::vec2(layout.char_width * 2.0, 0.0)),
+                        None,
+                    );
+                }
+
                 if response.has_focus() || !is_primary {
                     painter.line_segment(
                         [caret_rect.left_top(), caret_rect.left_bottom()],

@@ -166,6 +166,16 @@ fn high_dpi_visible_line_range_scales() {
 }
 
 #[test]
+fn longest_visual_line_chars_tracks_unwrapped_scroll_width() {
+    let rope = Rope::from("short\nthis line is much longer\nmid");
+
+    assert_eq!(
+        crate::editor::layout::longest_visual_line_chars(&rope),
+        "this line is much longer".chars().count()
+    );
+}
+
+#[test]
 fn font_fallback_renders_cjk_characters() {
     // CJK characters may fall back to a different font
     let text = "Hello 世界";

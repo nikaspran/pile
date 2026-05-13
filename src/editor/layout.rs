@@ -72,7 +72,12 @@ impl TextLayoutPipeline {
         };
 
         let content_width = match wrap_mode_enum {
-            WrapMode::NoWrap => available_width.max(text_origin_x + super::EDITOR_MIN_WIDTH),
+            WrapMode::NoWrap => {
+                let longest_line_width = longest_visual_line_chars(rope) as f32 * char_width;
+                available_width
+                    .max(text_origin_x + longest_line_width + super::LINE_GUTTER_PADDING)
+                    .max(text_origin_x + super::EDITOR_MIN_WIDTH)
+            }
             WrapMode::ViewportWrap | WrapMode::RulerWrap => {
                 let wrap_px = wrap_width_chars as f32 * char_width;
                 (text_origin_x + wrap_px).max(text_origin_x + super::EDITOR_MIN_WIDTH)
@@ -267,6 +272,13 @@ fn build_wrap_map(
     }
 
     (wrap_cols, map)
+}
+
+pub(crate) fn longest_visual_line_chars(rope: &Rope) -> usize {
+    (0..visual_line_count(rope))
+        .map(|line| visual_line_text(rope, line).chars().count())
+        .max()
+        .unwrap_or(0)
 }
 
 fn wrapped_line_and_column(

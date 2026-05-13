@@ -148,19 +148,25 @@ impl AppState {
         self.push_closed_document(old_active);
         self.tab_order.retain(|id| *id != old_active);
         self.recent_order.retain(|id| *id != old_active);
-        self.active_document = self.tab_order.first().copied().unwrap_or_else(|| {
-            let document = Document::new_untitled(
-                self.next_untitled_index,
-                default_tab_width,
-                default_soft_tabs,
-            );
-            let id = document.id;
-            self.next_untitled_index += 1;
-            self.documents.push(document);
-            self.tab_order.push(id);
-            self.recent_order.push(id);
-            id
-        });
+        self.active_document = self
+            .recent_order
+            .iter()
+            .copied()
+            .find(|id| self.tab_order.contains(id) && self.document(*id).is_some())
+            .or_else(|| self.tab_order.first().copied())
+            .unwrap_or_else(|| {
+                let document = Document::new_untitled(
+                    self.next_untitled_index,
+                    default_tab_width,
+                    default_soft_tabs,
+                );
+                let id = document.id;
+                self.next_untitled_index += 1;
+                self.documents.push(document);
+                self.tab_order.push(id);
+                self.recent_order.push(id);
+                id
+            });
         self.update_recent_order(self.active_document);
     }
 

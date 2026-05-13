@@ -42,6 +42,23 @@ fn set_active_ignores_unknown_documents() {
 }
 
 #[test]
+fn close_active_selects_other_most_recent_document() {
+    let mut state = AppState::empty();
+    let first = state.active_document;
+    let second = state.open_untitled(4, true);
+    let third = state.open_untitled(4, true);
+
+    assert!(state.set_active(second));
+    assert!(state.set_active(third));
+    assert!(state.set_active(first));
+
+    state.close_active(4, true);
+
+    assert_eq!(state.active_document, third);
+    assert_eq!(state.recent_order(), &[third, second]);
+}
+
+#[test]
 fn document_title_tracks_first_non_empty_line_until_renamed() {
     let mut document = Document::new_untitled(1, 4, true);
     assert_eq!(document.display_title(), "Untitled");
