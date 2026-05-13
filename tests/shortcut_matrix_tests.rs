@@ -176,6 +176,18 @@ fn editor_key_commands_resolve_through_default_shortcuts() {
         (Modifiers::CTRL, Key::Backspace, BackspaceWord),
         (Modifiers::CTRL, Key::Delete, DeleteWordForward),
         (Modifiers::NONE, Key::ArrowLeft, MoveLeft),
+        (Modifiers::COMMAND, Key::ArrowLeft, MoveLineStart),
+        (Modifiers::COMMAND, Key::ArrowRight, MoveLineEnd),
+        (
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::ArrowLeft,
+            SelectLineStart,
+        ),
+        (
+            Modifiers::COMMAND | Modifiers::SHIFT,
+            Key::ArrowRight,
+            SelectLineEnd,
+        ),
         (Modifiers::SHIFT, Key::ArrowRight, SelectRight),
         (Modifiers::ALT, Key::W, ExpandWord),
         (Modifiers::SHIFT | Modifiers::ALT, Key::W, ContractWord),

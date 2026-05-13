@@ -107,6 +107,12 @@ pub struct GrammarRegistry {
 }
 
 impl GrammarRegistry {
+    /// Returns the process-wide grammar registry.
+    pub fn shared() -> &'static Self {
+        static REGISTRY: OnceLock<GrammarRegistry> = OnceLock::new();
+        REGISTRY.get_or_init(GrammarRegistry::default)
+    }
+
     /// Creates a new empty grammar registry.
     pub fn new() -> Self {
         Self {

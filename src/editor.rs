@@ -3,7 +3,7 @@ use eframe::egui;
 use std::time::{Duration, Instant};
 
 use crate::model::{Document, Selection};
-use crate::syntax_highlighting::{highlight_color, highlight_name};
+use crate::syntax_highlighting::{HighlightSpan, highlight_color, highlight_name};
 
 pub mod geometry;
 mod input;
@@ -152,6 +152,30 @@ fn paint_bracket_highlight_for_line(
     if match_offset != bracket_offset {
         paint_bracket(match_offset);
     }
+}
+
+fn highlight_spans_for_line(
+    visible_spans: &[HighlightSpan],
+    visible_start: usize,
+    line_start_byte: usize,
+    line_end_byte: usize,
+    theme: crate::settings::Theme,
+) -> Vec<(usize, usize, egui::Color32)> {
+    visible_spans
+        .iter()
+        .filter_map(|span| {
+            let abs_start = span.start + visible_start;
+            let abs_end = span.end + visible_start;
+            let start = abs_start.max(line_start_byte);
+            let end = abs_end.min(line_end_byte);
+            if start < end {
+                let color = highlight_color(&highlight_name(span.highlight), theme);
+                Some((start - line_start_byte, end - line_start_byte, color))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 pub fn show_editor(
@@ -391,6 +415,21 @@ pub fn show_editor(
             let is_large_file = layout.line_count > LARGE_FILE_LINE_COUNT
                 || document.rope.byte_len() > LARGE_FILE_BYTE_SIZE;
 
+            let visible_highlight_spans = if !is_large_file {
+                if let Some(detection) = document.detect_syntax() {
+                    document.syntax_state.highlight(
+                        detection.language,
+                        document.revision,
+                        visible_start,
+                        visible_end,
+                    )
+                } else {
+                    Vec::new()
+                }
+            } else {
+                Vec::new()
+            };
+
             // Precompute bookmarked lines for this render pass (skip for large files)
             let bookmarked_lines: std::collections::HashSet<usize> = if !is_large_file {
                 document
@@ -542,38 +581,14 @@ pub fn show_editor(
                 let line_start_byte = layout.wrapped_line_byte_start(&document.rope, line_index);
 
                 // Get syntax highlight spans for this line
-                let highlight_spans: Vec<(usize, usize, egui::Color32)> = if !is_large_file {
-                    if let Some(detection) = document.detect_syntax() {
-                        let spans = document.syntax_state.highlight(
-                            detection.language,
-                            document.revision,
-                            visible_start,
-                            visible_end,
-                        );
-                        let line_end_byte = line_start_byte + line_text.byte_len();
-                        // Spans are relative to visible_text (offset 0), so add visible_start
-                        spans
-                            .into_iter()
-                            .filter_map(|span| {
-                                let abs_start = span.start + visible_start;
-                                let abs_end = span.end + visible_start;
-                                let start = abs_start.max(line_start_byte);
-                                let end = abs_end.min(line_end_byte);
-                                if start < end {
-                                    let color =
-                                        highlight_color(&highlight_name(span.highlight), theme);
-                                    Some((start - line_start_byte, end - line_start_byte, color))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect()
-                    } else {
-                        Vec::new()
-                    }
-                } else {
-                    Vec::new()
-                };
+                let line_end_byte = line_start_byte + line_text.byte_len();
+                let highlight_spans = highlight_spans_for_line(
+                    &visible_highlight_spans,
+                    visible_start,
+                    line_start_byte,
+                    line_end_byte,
+                    theme,
+                );
 
                 if show_visible_whitespace {
                     let whitespace_color = ui.visuals().weak_text_color();
@@ -727,7 +742,8 @@ pub fn show_editor(
 
             // Draw carets for all selections
             for (i, sel) in document.selections.iter().enumerate() {
-                let caret_pos = layout.caret_position(&document.rope, sel.head, rect.top());
+                let mut caret_pos = layout.caret_position(&document.rope, sel.head, rect.top());
+                caret_pos.x += rect.left();
                 let caret_rect =
                     egui::Rect::from_min_size(caret_pos, egui::vec2(1.0, layout.row_height));
 

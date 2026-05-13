@@ -121,8 +121,7 @@ impl Document {
             });
         }
 
-        let registry = crate::grammar_registry::GrammarRegistry::default();
-        Some(registry.detect_rope(&self.rope))
+        Some(crate::grammar_registry::GrammarRegistry::shared().detect_rope(&self.rope))
     }
 
     pub fn commit_undo_group(&mut self) {
