@@ -41,6 +41,8 @@ thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 regex = "1.11"
+muda = { version = "0.19.1", default-features = false, features = ["common-controls-v6"] }
+rfd = "0.16"
 
 [dev-dependencies]
 criterion = "0.5"
@@ -70,9 +72,6 @@ path = "tests/platform_menu_tests.rs"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
-
-muda = { version = "0.19.1", default-features = false, features = ["common-controls-v6"] }
-rfd = "0.16"
 
 [profile.release]
 codegen-units = 1

@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use crossbeam_channel::{Receiver, Sender, bounded};
 use eframe::egui;
+#[cfg(unix)]
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
+#[cfg(unix)]
 use signal_hook::flag;
 use tracing::{info, warn};
 
@@ -312,6 +314,14 @@ impl PileApp {
                 message: format!("Flush save failed: {}", err),
             });
         }
+    }
+
+    fn surface_file_error(&mut self, message: String) {
+        self.recovery_events.push(RecoveryEvent {
+            timestamp: std::time::SystemTime::now(),
+            kind: RecoveryEventKind::FileOperationFailed,
+            message,
+        });
     }
 
     fn refresh_active_document_detection(&mut self) {
@@ -1685,6 +1695,7 @@ impl PileApp {
             }
             Err(err) => {
                 tracing::error!(error = %err, path = %path.display(), "failed to import dropped file");
+                self.surface_file_error(format!("Could not import {}: {}", path.display(), err));
             }
         }
     }
@@ -1725,6 +1736,11 @@ impl PileApp {
                     }
                     Err(err) => {
                         tracing::error!(error = %err, path = %path.display(), "failed to export file");
+                        self.surface_file_error(format!(
+                            "Could not export {}: {}",
+                            path.display(),
+                            err
+                        ));
                     }
                 }
             }
@@ -2595,6 +2611,7 @@ impl eframe::App for PileApp {
                 for (idx, event) in self.recovery_events.iter().enumerate() {
                     let color = match event.kind {
                         RecoveryEventKind::SaveFailed
+                        | RecoveryEventKind::FileOperationFailed
                         | RecoveryEventKind::QuarantineFailed
                         | RecoveryEventKind::BackupFailed => egui::Color32::from_rgb(255, 120, 120),
                         RecoveryEventKind::SessionCorrupt => egui::Color32::from_rgb(255, 180, 50),

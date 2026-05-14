@@ -31,6 +31,45 @@ fn flush_writes_a_loadable_session_snapshot() {
 }
 
 #[test]
+fn save_worker_emits_live_failure_events() {
+    let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&dir).unwrap();
+
+    let (event_tx, event_rx) = bounded(8);
+    let worker = SaveWorker::spawn_with_events(dir.clone(), event_tx);
+    let (ack_tx, ack_rx) = bounded(1);
+    let snapshot = SessionSnapshot::from(&AppState::empty());
+
+    worker
+        .sender()
+        .send(SaveMsg::Flush(snapshot, ack_tx))
+        .unwrap();
+    let result = ack_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+
+    assert!(result.is_err());
+    let mut saw_save_failure = false;
+    for _ in 0..4 {
+        if matches!(
+            event_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            WorkerEvent::Recovery(RecoveryEvent {
+                kind: RecoveryEventKind::SaveFailed,
+                ..
+            })
+        ) {
+            saw_save_failure = true;
+            break;
+        }
+    }
+    assert!(
+        saw_save_failure,
+        "save failure should be surfaced before worker shutdown"
+    );
+
+    worker.shutdown();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn envelope_roundtrip_preserves_session() {
     let snapshot = SessionSnapshot::from(&AppState::empty());
     let envelope = SessionEnvelope::wrap(&snapshot).unwrap();

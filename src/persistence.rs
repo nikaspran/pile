@@ -68,6 +68,7 @@ pub enum RecoveryEventKind {
     BackupFailed,
     QuarantineFailed,
     SaveFailed,
+    FileOperationFailed,
     SaveSucceeded,
     DocumentsRecovered,
 }
@@ -370,7 +371,7 @@ impl SaveWorker {
             .name("pile-session-save".to_owned())
             .spawn(move || {
                 let mut telemetry = SaveTelemetry::default();
-                run_save_loop(rx, &session_path, &mut telemetry)
+                run_save_loop(rx, &session_path, &mut telemetry, None)
             })
             .expect("failed to spawn session save worker");
 
@@ -387,7 +388,7 @@ impl SaveWorker {
             .name("pile-session-save".to_owned())
             .spawn(move || {
                 let mut telemetry = SaveTelemetry::default();
-                run_save_loop(rx, &session_path, &mut telemetry);
+                run_save_loop(rx, &session_path, &mut telemetry, Some(&event_tx));
                 // Log latency statistics before sending telemetry
                 if let Some(median) = telemetry.median_save_duration_ms() {
                     info!(target: "pile::save_worker", median_ms = median, "save worker median latency");
@@ -561,7 +562,12 @@ pub fn load_session(
     }
 }
 
-fn run_save_loop(rx: Receiver<SaveMsg>, session_path: &PathBuf, telemetry: &mut SaveTelemetry) {
+fn run_save_loop(
+    rx: Receiver<SaveMsg>,
+    session_path: &PathBuf,
+    telemetry: &mut SaveTelemetry,
+    event_tx: Option<&Sender<WorkerEvent>>,
+) {
     while let Ok(message) = rx.recv() {
         // Log channel depth for monitoring queue health
         let queue_depth = rx.len();
@@ -577,15 +583,15 @@ fn run_save_loop(rx: Receiver<SaveMsg>, session_path: &PathBuf, telemetry: &mut 
                         Ok(SaveMsg::Changed(snapshot)) => latest = snapshot,
                         Ok(SaveMsg::Flush(snapshot, ack)) => {
                             latest = snapshot;
-                            save_and_ack(&session_path, &latest, Some(ack), telemetry);
+                            save_and_ack(&session_path, &latest, Some(ack), telemetry, event_tx);
                             break;
                         }
                         Ok(SaveMsg::Shutdown) => {
-                            save_snapshot(&session_path, &latest, telemetry);
+                            save_snapshot(&session_path, &latest, telemetry, event_tx);
                             return;
                         }
                         Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                            save_snapshot(&session_path, &latest, telemetry);
+                            save_snapshot(&session_path, &latest, telemetry, event_tx);
                             break;
                         }
                         Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
@@ -593,7 +599,7 @@ fn run_save_loop(rx: Receiver<SaveMsg>, session_path: &PathBuf, telemetry: &mut 
                 }
             }
             SaveMsg::Flush(snapshot, ack) => {
-                save_and_ack(&session_path, &snapshot, Some(ack), telemetry)
+                save_and_ack(&session_path, &snapshot, Some(ack), telemetry, event_tx)
             }
             SaveMsg::Shutdown => return,
         }
@@ -605,7 +611,10 @@ fn save_and_ack(
     snapshot: &SessionSnapshot,
     ack: Option<Sender<Result<(), String>>>,
     telemetry: &mut SaveTelemetry,
+    event_tx: Option<&Sender<WorkerEvent>>,
 ) {
+    let event_start = telemetry.recovery_events.len();
+
     // Check budget before attempting to save
     match check_snapshot_budget(snapshot) {
         BudgetCheck::TooLarge { size, max } => {
@@ -626,6 +635,7 @@ fn save_and_ack(
             if let Some(ack) = ack {
                 let _ = ack.send(Err(msg));
             }
+            emit_worker_events(event_tx, telemetry, event_start);
             return;
         }
         BudgetCheck::Ok => {}
@@ -664,9 +674,17 @@ fn save_and_ack(
     if let Some(ack) = ack {
         let _ = ack.send(result);
     }
+    emit_worker_events(event_tx, telemetry, event_start);
 }
 
-fn save_snapshot(path: &PathBuf, snapshot: &SessionSnapshot, telemetry: &mut SaveTelemetry) {
+fn save_snapshot(
+    path: &PathBuf,
+    snapshot: &SessionSnapshot,
+    telemetry: &mut SaveTelemetry,
+    event_tx: Option<&Sender<WorkerEvent>>,
+) {
+    let event_start = telemetry.recovery_events.len();
+
     // Check budget before attempting to save
     match check_snapshot_budget(snapshot) {
         BudgetCheck::TooLarge { size, max } => {
@@ -682,6 +700,7 @@ fn save_snapshot(path: &PathBuf, snapshot: &SessionSnapshot, telemetry: &mut Sav
                 kind: RecoveryEventKind::SaveFailed,
                 message: format!("Snapshot too large: {} bytes (max {} bytes)", size, max),
             });
+            emit_worker_events(event_tx, telemetry, event_start);
             return;
         }
         BudgetCheck::Ok => {}
@@ -710,6 +729,34 @@ fn save_snapshot(path: &PathBuf, snapshot: &SessionSnapshot, telemetry: &mut Sav
             });
         }
     }
+
+    emit_worker_events(event_tx, telemetry, event_start);
+}
+
+fn emit_worker_events(
+    event_tx: Option<&Sender<WorkerEvent>>,
+    telemetry: &SaveTelemetry,
+    event_start: usize,
+) {
+    let Some(event_tx) = event_tx else {
+        return;
+    };
+
+    for event in telemetry.recovery_events.iter().skip(event_start) {
+        match event.kind {
+            RecoveryEventKind::SaveFailed
+            | RecoveryEventKind::FileOperationFailed
+            | RecoveryEventKind::BackupFailed
+            | RecoveryEventKind::QuarantineFailed
+            | RecoveryEventKind::SessionCorrupt
+            | RecoveryEventKind::DocumentsRecovered => {
+                let _ = event_tx.send(WorkerEvent::Recovery(event.clone()));
+            }
+            RecoveryEventKind::BackupRestored | RecoveryEventKind::SaveSucceeded => {}
+        }
+    }
+
+    let _ = event_tx.send(WorkerEvent::Telemetry(telemetry.clone()));
 }
 
 fn write_snapshot(path: &PathBuf, snapshot: &SessionSnapshot) -> Result<()> {
