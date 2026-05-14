@@ -9,7 +9,9 @@ use std::sync::{Arc, OnceLock};
 use tree_sitter::Language;
 use tree_sitter_highlight::HighlightConfiguration;
 
-use crate::syntax::{DetectionRule, LanguageDetection, LanguageId, ScoredDetector};
+use crate::syntax::{
+    DetectionRule, LanguageDetection, LanguageId, ScoredDetector, has_javascript_function_signal,
+};
 
 /// Configuration for a language grammar.
 pub struct GrammarConfig {
@@ -567,7 +569,7 @@ fn register_builtin_grammars(registry: &mut GrammarRegistry) {
             DetectionRule {
                 weight: 0.25,
                 check: |text| {
-                    if text.contains("function ") || text.contains("=>") {
+                    if has_javascript_function_signal(text) || text.contains("=>") {
                         1.0
                     } else {
                         0.0

@@ -92,6 +92,57 @@ pub struct DetectionRule {
     pub check: fn(&str) -> f32,
 }
 
+pub(crate) fn has_javascript_function_signal(text: &str) -> bool {
+    for (start, _) in text.match_indices("function") {
+        let before = text[..start].chars().next_back();
+        if before.is_some_and(is_identifier_continue) {
+            continue;
+        }
+
+        let mut after = &text[start + "function".len()..];
+        if after.chars().next().is_some_and(is_identifier_continue) {
+            continue;
+        }
+
+        after = after.trim_start();
+        if let Some(rest) = after.strip_prefix('*') {
+            after = rest.trim_start();
+        }
+
+        if after.starts_with('(') {
+            return true;
+        }
+
+        let Some(first) = after.chars().next() else {
+            continue;
+        };
+        if !is_identifier_start(first) {
+            continue;
+        }
+
+        let name_len = after
+            .char_indices()
+            .take_while(|(_, ch)| is_identifier_continue(*ch))
+            .map(|(idx, ch)| idx + ch.len_utf8())
+            .last()
+            .unwrap_or(0);
+
+        if after[name_len..].trim_start().starts_with('(') {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn is_identifier_start(ch: char) -> bool {
+    ch == '_' || ch == '$' || ch.is_ascii_alphabetic()
+}
+
+fn is_identifier_continue(ch: char) -> bool {
+    is_identifier_start(ch) || ch.is_ascii_digit()
+}
+
 /// Scored content detector that evaluates all languages and returns the best match.
 pub struct ScoredDetector {
     rules: Vec<(LanguageId, Vec<DetectionRule>)>,
@@ -356,7 +407,7 @@ impl ScoredDetector {
                 DetectionRule {
                     weight: 0.25,
                     check: |text| {
-                        if text.contains("function ") || text.contains("=>") {
+                        if has_javascript_function_signal(text) || text.contains("=>") {
                             1.0
                         } else {
                             0.0
@@ -774,6 +825,23 @@ mod tests {
         let detection = registry.detect("console.log('hello')\n");
         assert_eq!(detection.language, LanguageId::JavaScript);
         assert!(detection.confidence > 0.2);
+    }
+
+    #[test]
+    fn detects_javascript_function_declaration() {
+        let registry = GrammarRegistry::default();
+        let detection = registry.detect("function drawSequenceDiagram(flow) {\n  return flow;\n}");
+        assert_eq!(detection.language, LanguageId::JavaScript);
+        assert!(detection.confidence > 0.2);
+    }
+
+    #[test]
+    fn detects_plain_text_when_prose_mentions_function() {
+        let registry = GrammarRegistry::default();
+        let detection = registry.detect(
+            "I want to investigate drawing a sequence diagram on demand for any kind of function - to show what flows this function is used in.",
+        );
+        assert_eq!(detection.language, LanguageId::PlainText);
     }
 
     #[test]
