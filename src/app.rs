@@ -1220,8 +1220,9 @@ impl PileApp {
             }
             AppCommand::ClearSecondaryCursors => {
                 if let Some(document) = self.state.active_document_mut() {
-                    crate::editor::clear_secondary_cursors(document);
-                    self.document_edited();
+                    if crate::editor::clear_secondary_cursors(document) {
+                        self.document_edited();
+                    }
                 }
             }
             AppCommand::Find => self.handle_command(crate::command::Command::Find),
@@ -1417,8 +1418,9 @@ impl PileApp {
             }
             ClearSecondaryCursors => {
                 if let Some(document) = self.state.active_document_mut() {
-                    crate::editor::clear_secondary_cursors(document);
-                    self.document_edited();
+                    if crate::editor::clear_secondary_cursors(document) {
+                        self.document_edited();
+                    }
                 }
             }
 

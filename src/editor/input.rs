@@ -142,8 +142,8 @@ fn dispatch_editor_key_command(
             (outdent_selection(document), false)
         }
         ClearSecondaryCursors => {
-            clear_secondary_cursors(document);
-            (true, false)
+            view_state.preferred_column = None;
+            (clear_secondary_cursors(document), false)
         }
         MoveLeft => {
             move_left(document, false);

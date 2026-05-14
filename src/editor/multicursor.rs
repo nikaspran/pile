@@ -205,14 +205,35 @@ pub fn select_all_occurrences(document: &mut Document) {
         }));
 }
 
-/// Clears all secondary cursors, keeping only the primary cursor.
-pub fn clear_secondary_cursors(document: &mut Document) {
+/// Clears selected text ranges before falling back to clearing secondary cursors.
+pub fn clear_secondary_cursors(document: &mut Document) -> bool {
+    if document
+        .selections
+        .iter()
+        .any(|selection| selection.anchor != selection.head)
+    {
+        for selection in &mut document.selections {
+            if selection.anchor != selection.head {
+                *selection = Selection::caret(selection.head);
+            }
+        }
+        document.occurrence_selections.clear();
+        document.multi_cursor_query = None;
+        return true;
+    }
+
+    let changed = document.selections.len() > 1
+        || !document.occurrence_selections.is_empty()
+        || document.multi_cursor_query.is_some();
+
     if document.selections.len() > 1 {
         let primary = document.selections[0];
         document.selections = vec![primary];
     }
     document.occurrence_selections.clear();
     document.multi_cursor_query = None;
+
+    changed
 }
 
 /// Applies a text replacement to all selections (for multi-cursor editing).

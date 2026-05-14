@@ -53,6 +53,49 @@ fn add_all_matches_does_not_duplicate_primary_occurrence() {
 }
 
 #[test]
+fn clear_secondary_cursors_first_collapses_selected_text() {
+    let mut document = document("alpha beta gamma");
+    document.selections = vec![
+        Selection { anchor: 0, head: 5 },
+        Selection {
+            anchor: 11,
+            head: 16,
+        },
+    ];
+    document.occurrence_selections = document.selections.clone();
+    document.multi_cursor_query = Some("alpha".to_string());
+
+    assert!(clear_secondary_cursors(&mut document));
+
+    assert_eq!(
+        document.selections,
+        vec![Selection::caret(5), Selection::caret(16)]
+    );
+    assert!(document.occurrence_selections.is_empty());
+    assert_eq!(document.multi_cursor_query, None);
+}
+
+#[test]
+fn clear_secondary_cursors_removes_secondary_carets_when_no_text_is_selected() {
+    let mut document = document("alpha beta gamma");
+    document.selections = vec![Selection::caret(5), Selection::caret(16)];
+
+    assert!(clear_secondary_cursors(&mut document));
+
+    assert_eq!(document.selections, vec![Selection::caret(5)]);
+}
+
+#[test]
+fn clear_secondary_cursors_noops_for_single_caret() {
+    let mut document = document("alpha beta gamma");
+    document.selections = vec![Selection::caret(5)];
+
+    assert!(!clear_secondary_cursors(&mut document));
+
+    assert_eq!(document.selections, vec![Selection::caret(5)]);
+}
+
+#[test]
 fn grapheme_movement_respects_clusters() {
     // "café" where 'é' is e + combining acute (1+2=3 bytes, 1 grapheme)
     let rope = Rope::from("café");

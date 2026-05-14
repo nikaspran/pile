@@ -391,7 +391,7 @@ pub fn show_editor(
                             tab: true,
                             horizontal_arrows: true,
                             vertical_arrows: true,
-                            escape: false,
+                            escape: true,
                         },
                     );
                 });

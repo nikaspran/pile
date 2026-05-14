@@ -1088,7 +1088,7 @@ pub fn all_commands() -> Vec<CommandMetadata> {
         CommandMetadata {
             command: ClearSecondaryCursors,
             name: "Clear Secondary Cursors",
-            description: "Remove all secondary cursors",
+            description: "Clear selected text or remove all secondary cursors",
             category: MultiCursor,
             shortcut: Some(KeyboardShortcut {
                 modifiers: Modifiers::NONE,
