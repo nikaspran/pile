@@ -1,3 +1,5 @@
+use crate::settings::{Settings, Theme};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum NativeMenuCommand {
     // App
@@ -82,16 +84,21 @@ pub enum NativeMenuCommand {
 pub struct NativeMenu {
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     _menu: muda::Menu,
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    view_items: ViewMenuItems,
 }
 
 impl NativeMenu {
-    pub fn install() -> Option<Self> {
+    pub fn install(settings: &Settings) -> Option<Self> {
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
-            match build_menu() {
+            match build_menu(settings) {
                 Ok(menu) => {
-                    install_menu(&menu);
-                    Some(Self { _menu: menu })
+                    install_menu(&menu.menu);
+                    Some(Self {
+                        _menu: menu.menu,
+                        view_items: menu.view_items,
+                    })
                 }
                 Err(err) => {
                     tracing::warn!(error = %err, "failed to install native menu");
@@ -102,6 +109,13 @@ impl NativeMenu {
         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
             None
+        }
+    }
+
+    pub fn sync_settings(&self, settings: &Settings) {
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+        {
+            self.view_items.sync(settings);
         }
     }
 
@@ -116,6 +130,62 @@ impl NativeMenu {
         }
         None
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+struct BuiltMenu {
+    menu: muda::Menu,
+    view_items: ViewMenuItems,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+struct ViewMenuItems {
+    toggle_wrap: muda::MenuItem,
+    toggle_whitespace: muda::CheckMenuItem,
+    toggle_indent: muda::CheckMenuItem,
+    toggle_minimap: muda::CheckMenuItem,
+    toggle_status_bar: muda::CheckMenuItem,
+    toggle_theme: muda::MenuItem,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+impl ViewMenuItems {
+    fn sync(&self, settings: &Settings) {
+        self.toggle_wrap.set_text(format!(
+            "Toggle Wrap Mode {}",
+            settings.wrap_mode.cycle().label()
+        ));
+        self.toggle_theme.set_text(match settings.theme {
+            Theme::Dark => "Toggle Theme LIGHT",
+            Theme::Light => "Toggle Theme DARK",
+        });
+        sync_boolean_toggle(
+            &self.toggle_whitespace,
+            "Toggle Visible Whitespace",
+            settings.show_visible_whitespace,
+        );
+        sync_boolean_toggle(
+            &self.toggle_indent,
+            "Toggle Indentation Guides",
+            settings.show_indentation_guides,
+        );
+        sync_boolean_toggle(
+            &self.toggle_minimap,
+            "Toggle Minimap",
+            settings.show_minimap,
+        );
+        sync_boolean_toggle(
+            &self.toggle_status_bar,
+            "Toggle Status Bar",
+            settings.show_status_bar,
+        );
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn sync_boolean_toggle(item: &muda::CheckMenuItem, label: &str, enabled: bool) {
+    item.set_checked(enabled);
+    item.set_text(format!("{label} {}", if enabled { "off" } else { "on" }));
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -226,7 +296,7 @@ fn parse_accel(s: &str) -> Result<muda::accelerator::Accelerator, muda::Accelera
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-fn build_menu() -> muda::Result<muda::Menu> {
+fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
     use muda::*;
 
     let menu = Menu::new();
@@ -635,22 +705,45 @@ fn build_menu() -> muda::Result<muda::Menu> {
         Some(parse_accel("cmdorctrl+g")?),
     );
     let toggle_wrap = MenuItem::with_id("pile.toggle_wrap", "Toggle Wrap Mode", true, None);
-    let toggle_whitespace = MenuItem::with_id(
+    let toggle_whitespace = CheckMenuItem::with_id(
         "pile.toggle_whitespace",
         "Toggle Visible Whitespace",
         true,
+        settings.show_visible_whitespace,
         None,
     );
-    let toggle_indent = MenuItem::with_id(
+    let toggle_indent = CheckMenuItem::with_id(
         "pile.toggle_indent",
         "Toggle Indentation Guides",
         true,
+        settings.show_indentation_guides,
         None,
     );
-    let toggle_minimap = MenuItem::with_id("pile.toggle_minimap", "Toggle Minimap", true, None);
-    let toggle_status_bar =
-        MenuItem::with_id("pile.toggle_status_bar", "Toggle Status Bar", true, None);
+    let toggle_minimap = CheckMenuItem::with_id(
+        "pile.toggle_minimap",
+        "Toggle Minimap",
+        true,
+        settings.show_minimap,
+        None,
+    );
+    let toggle_status_bar = CheckMenuItem::with_id(
+        "pile.toggle_status_bar",
+        "Toggle Status Bar",
+        true,
+        settings.show_status_bar,
+        None,
+    );
     let toggle_theme = MenuItem::with_id("pile.toggle_theme", "Toggle Theme", true, None);
+
+    let view_items = ViewMenuItems {
+        toggle_wrap: toggle_wrap.clone(),
+        toggle_whitespace: toggle_whitespace.clone(),
+        toggle_indent: toggle_indent.clone(),
+        toggle_minimap: toggle_minimap.clone(),
+        toggle_status_bar: toggle_status_bar.clone(),
+        toggle_theme: toggle_theme.clone(),
+    };
+    view_items.sync(settings);
 
     let view_menu = Submenu::with_items(
         "View",
@@ -762,5 +855,5 @@ fn build_menu() -> muda::Result<muda::Menu> {
     let window_menu = Submenu::with_items("Window", true, window_items)?;
     menu.append(&window_menu)?;
 
-    Ok(menu)
+    Ok(BuiltMenu { menu, view_items })
 }

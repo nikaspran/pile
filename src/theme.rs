@@ -89,12 +89,18 @@ impl Theme {
 
     /// Minimap viewport color (same in both themes).
     pub fn minimap_viewport(self) -> egui::Color32 {
-        egui::Color32::from_rgba_premultiplied(100, 100, 255, 40)
+        match self {
+            Theme::Dark => egui::Color32::from_rgba_unmultiplied(255, 255, 255, 10),
+            Theme::Light => egui::Color32::from_rgba_unmultiplied(0, 0, 0, 10),
+        }
     }
 
     /// Minimap viewport border color (same in both themes).
     pub fn minimap_viewport_border(self) -> egui::Color32 {
-        egui::Color32::from_rgba_premultiplied(150, 150, 255, 100)
+        match self {
+            Theme::Dark => egui::Color32::from_rgba_unmultiplied(255, 255, 255, 28),
+            Theme::Light => egui::Color32::from_rgba_unmultiplied(0, 0, 0, 28),
+        }
     }
 }
 

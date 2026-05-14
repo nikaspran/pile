@@ -79,6 +79,7 @@ struct TabDragState {
 
 const TAB_HEIGHT: f32 = 28.0;
 const TAB_STRIP_HEIGHT: f32 = 30.0;
+const EDITOR_MINIMAP_MIN_EDITOR_WIDTH: f32 = 320.0;
 
 impl EditorPane {
     fn new(document_id: DocumentId) -> Self {
@@ -227,6 +228,7 @@ impl PileApp {
 
         // Spawn the background parse worker
         let parse_worker = ParseWorker::spawn();
+        let native_menu = NativeMenu::install(&settings);
 
         let mut app = Self {
             ctx,
@@ -241,7 +243,7 @@ impl PileApp {
             rename_focus_pending: false,
             editor_focus_pending: true,
             clipboard_text: None,
-            native_menu: NativeMenu::install(),
+            native_menu,
             search: SearchState::default(),
             command_palette: CommandPalette::new(),
             tab_switcher: TabSwitcher::new(),
@@ -2328,21 +2330,35 @@ impl PileApp {
         };
 
         if show_minimap {
-            // Render editor and minimap side by side
-            ui.horizontal(|ui| {
-                // Editor takes most of the space
-                let config = MinimapConfig::default();
-                let editor_width = ui.available_width() - config.width - 4.0;
+            let config = MinimapConfig::new(self.settings.theme);
+            let gap = 4.0;
+            let available_rect = ui.available_rect_before_wrap();
+            let available_width = available_rect.width();
 
-                // Render editor
+            if available_width > config.width + gap + EDITOR_MINIMAP_MIN_EDITOR_WIDTH {
+                ui.allocate_rect(available_rect, egui::Sense::hover());
+
+                let editor_rect = egui::Rect::from_min_max(
+                    available_rect.min,
+                    egui::pos2(
+                        available_rect.right() - config.width - gap,
+                        available_rect.bottom(),
+                    ),
+                );
+                let minimap_rect = egui::Rect::from_min_max(
+                    egui::pos2(available_rect.right() - config.width, available_rect.top()),
+                    available_rect.max,
+                );
+
                 let editor_response = {
                     let document = self
                         .state
                         .document_mut(document_id)
                         .expect("document must exist");
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(editor_width, ui.available_height()),
-                        egui::Layout::top_down(egui::Align::LEFT),
+                    ui.scope_builder(
+                        egui::UiBuilder::new()
+                            .max_rect(editor_rect)
+                            .layout(egui::Layout::top_down(egui::Align::LEFT)),
                         |ui| {
                             show_editor(
                                 ui,
@@ -2365,44 +2381,45 @@ impl PileApp {
                     )
                 };
 
-                if editor_response.inner.changed {
+                let editor_metrics = editor_response.inner;
+
+                if editor_metrics.changed {
                     self.document_edited();
                 }
 
-                ui.separator();
-
-                // Render minimap
-                let (scroll_y, content_height) = {
+                let scroll_y = {
                     let doc = self
                         .state
                         .document(document_id)
                         .expect("document must exist");
-                    (
-                        doc.scroll.y,
-                        doc.rope.lines().count() as f32
-                            * ui.text_style_height(&egui::TextStyle::Monospace),
+                    doc.scroll.y
+                };
+
+                let minimap_response = {
+                    let doc = self
+                        .state
+                        .document(document_id)
+                        .expect("document must exist");
+                    ui.scope_builder(
+                        egui::UiBuilder::new()
+                            .max_rect(minimap_rect)
+                            .layout(egui::Layout::top_down(egui::Align::LEFT)),
+                        |ui| {
+                            minimap::show_minimap(
+                                ui,
+                                &doc.rope,
+                                scroll_y,
+                                editor_metrics.viewport_height,
+                                editor_metrics.content_height,
+                                editor_metrics.line_count,
+                                &config,
+                                self.settings.theme,
+                            )
+                        },
                     )
                 };
 
-                let config = MinimapConfig::new(self.settings.theme);
-                let viewport_height = ui.available_height();
-
-                let doc = self
-                    .state
-                    .document(document_id)
-                    .expect("document must exist");
-                let minimap_result = minimap::show_minimap(
-                    ui,
-                    &doc.rope,
-                    scroll_y,
-                    viewport_height,
-                    content_height,
-                    &config,
-                    self.settings.theme,
-                );
-                let _ = doc; // Drop immutable borrow
-
-                if let Some(target_scroll_y) = minimap_result.target_scroll_y {
+                if let Some(target_scroll_y) = minimap_response.inner.target_scroll_y {
                     let doc = self
                         .state
                         .document_mut(document_id)
@@ -2410,7 +2427,33 @@ impl PileApp {
                     doc.scroll.y = target_scroll_y;
                     ui.ctx().request_repaint();
                 }
-            });
+            } else {
+                let document = self
+                    .state
+                    .document_mut(document_id)
+                    .expect("document must exist");
+                let response = show_editor(
+                    ui,
+                    document,
+                    &mut view_state,
+                    &mut self.editor_focus_pending,
+                    reveal_selection,
+                    &search_highlights,
+                    &extra_selections,
+                    self.settings.wrap_mode,
+                    &self.settings.rulers,
+                    self.settings.show_visible_whitespace,
+                    self.settings.show_indentation_guides,
+                    self.settings.theme,
+                    &self.settings.font_family,
+                    self.settings.font_size,
+                    self.settings.line_height_scale,
+                );
+
+                if response.changed {
+                    self.document_edited();
+                }
+            }
         } else {
             let document = self
                 .state
@@ -2456,6 +2499,9 @@ impl eframe::App for PileApp {
         }
 
         self.handle_native_menu_commands();
+        if let Some(native_menu) = &self.native_menu {
+            native_menu.sync_settings(&self.settings);
+        }
         self.handle_clipboard_events(ctx);
         self.handle_keyboard_shortcuts(ctx);
         if self.handle_parse_events() {

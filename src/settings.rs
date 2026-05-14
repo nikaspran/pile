@@ -138,7 +138,7 @@ impl Default for Settings {
             rulers: vec![80],
             show_visible_whitespace: false,
             show_indentation_guides: true,
-            show_minimap: false,
+            show_minimap: true,
             show_status_bar: true,
             font_family: FontFamily::default(),
             font_size: 14.0,

@@ -105,6 +105,9 @@ pub struct EditorViewState {
 #[derive(Debug)]
 pub struct EditorResponse {
     pub changed: bool,
+    pub content_height: f32,
+    pub viewport_height: f32,
+    pub line_count: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -791,7 +794,12 @@ pub fn show_editor(
         document.scroll.y = output.state.offset.y;
     }
 
-    EditorResponse { changed }
+    EditorResponse {
+        changed,
+        content_height: layout.content_height,
+        viewport_height: available_height,
+        line_count: layout.line_count,
+    }
 }
 
 #[cfg(test)]
