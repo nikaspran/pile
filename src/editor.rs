@@ -29,8 +29,8 @@ pub use line_ops::{
 };
 pub use motion::*;
 pub use multicursor::{
-    add_all_matches, add_next_match, clear_secondary_cursors, delete_all, replace_selection_all,
-    split_selection_into_lines,
+    add_all_matches, add_cursor_vertical, add_next_match, clear_secondary_cursors, delete_all,
+    replace_selection_all, split_selection_into_lines,
 };
 use multicursor::{backspace_all, backspace_word_all, delete_word_all};
 use ops::*;
@@ -314,21 +314,15 @@ pub fn show_editor(
                             document, anchor_col, column, start_line, start_line,
                         );
                     } else if view_state.click_count == 3 {
-                        set_primary_selection(
-                            document,
-                            select_line_at_offset(&document.rope, offset),
-                        );
+                        document.selections = vec![select_line_at_offset(&document.rope, offset)];
                         view_state.column_selection = false;
                         view_state.column_selection_anchor_col = None;
                     } else if view_state.click_count == 2 {
-                        set_primary_selection(
-                            document,
-                            select_word_at_offset(&document.rope, offset),
-                        );
+                        document.selections = vec![select_word_at_offset(&document.rope, offset)];
                         view_state.column_selection = false;
                         view_state.column_selection_anchor_col = None;
                     } else {
-                        set_primary_selection(document, Selection::caret(offset));
+                        document.selections = vec![Selection::caret(offset)];
                         view_state.column_selection = false;
                         view_state.column_selection_anchor_col = None;
                     }

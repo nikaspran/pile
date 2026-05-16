@@ -96,6 +96,52 @@ fn clear_secondary_cursors_noops_for_single_caret() {
 }
 
 #[test]
+fn add_cursor_below_uses_same_column_and_extends_stack() {
+    let mut document = document("abc\nabcdef\nab");
+    set_primary_selection(&mut document, Selection::caret(1));
+
+    assert!(add_cursor_vertical(&mut document, 1));
+    assert!(add_cursor_vertical(&mut document, 1));
+
+    assert_eq!(
+        document.selections,
+        vec![
+            Selection::caret(1),
+            Selection::caret("abc\n".len() + 1),
+            Selection::caret("abc\nabcdef\n".len() + 1),
+        ]
+    );
+}
+
+#[test]
+fn add_cursor_above_clamps_to_shorter_line() {
+    let mut document = document("a\nabcdef");
+    set_primary_selection(&mut document, Selection::caret("a\nabcd".len()));
+
+    assert!(add_cursor_vertical(&mut document, -1));
+
+    assert_eq!(
+        document.selections,
+        vec![
+            Selection::caret("a".len()),
+            Selection::caret("a\nabcd".len()),
+        ]
+    );
+}
+
+#[test]
+fn add_cursor_vertical_noops_at_document_edges() {
+    let mut document = document("abc\ndef");
+
+    assert!(!add_cursor_vertical(&mut document, -1));
+    assert_eq!(document.selections, vec![Selection::caret(0)]);
+
+    set_primary_selection(&mut document, Selection::caret("abc\n".len()));
+    assert!(!add_cursor_vertical(&mut document, 1));
+    assert_eq!(document.selections, vec![Selection::caret("abc\n".len())]);
+}
+
+#[test]
 fn grapheme_movement_respects_clusters() {
     // "café" where 'é' is e + combining acute (1+2=3 bytes, 1 grapheme)
     let rope = Rope::from("café");

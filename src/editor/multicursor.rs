@@ -4,8 +4,9 @@ use crate::model::{Document, DocumentEdit, Selection};
 use crate::search;
 
 use super::{
-    byte_of_visual_line, line_index_of_byte, next_grapheme_boundary, next_word_boundary,
-    previous_grapheme_boundary, previous_word_boundary, primary_selection,
+    byte_for_line_column, byte_of_visual_line, column_of_byte, line_index_of_byte,
+    next_grapheme_boundary, next_word_boundary, previous_grapheme_boundary, previous_word_boundary,
+    primary_selection, visual_line_count,
 };
 
 /// Adds the next occurrence of the word under the primary cursor as a new selection.
@@ -162,6 +163,52 @@ pub fn split_selection_into_lines(document: &mut Document) {
     }
 }
 
+/// Adds a cursor on the adjacent line at the same visual column.
+pub fn add_cursor_vertical(document: &mut Document, delta: isize) -> bool {
+    if document.selections.is_empty() || delta == 0 {
+        return false;
+    }
+
+    let rope = &document.rope;
+    let line_count = visual_line_count(rope);
+    let edge_selection = document
+        .selections
+        .iter()
+        .copied()
+        .max_by_key(|selection| {
+            let line = line_index_of_byte(rope, selection.head);
+            if delta > 0 {
+                line
+            } else {
+                line_count.saturating_sub(line)
+            }
+        })
+        .unwrap_or_else(|| primary_selection(document));
+
+    let current_line = line_index_of_byte(rope, edge_selection.head);
+    let Some(target_line) = current_line.checked_add_signed(delta) else {
+        return false;
+    };
+    if target_line >= line_count {
+        return false;
+    }
+
+    let column = column_of_byte(rope, edge_selection.head);
+    let target = byte_for_line_column(rope, target_line, column);
+    let selection = Selection::caret(target);
+    if document.selections.contains(&selection) {
+        return false;
+    }
+
+    document.selections.push(selection);
+    document
+        .selections
+        .sort_by_key(|selection| (line_index_of_byte(rope, selection.head), selection.head));
+    document.occurrence_selections.clear();
+    document.multi_cursor_query = None;
+    true
+}
+
 /// Selects all occurrences of the word under the cursor for multi-cursor editing.
 #[allow(dead_code)]
 pub fn select_all_occurrences(document: &mut Document) {
@@ -242,6 +289,7 @@ pub fn replace_selection_all(document: &mut Document, text: &str) -> bool {
     if document.selections.is_empty() {
         return false;
     }
+    document.validate();
 
     let mut sorted_selections = document.selections.clone();
     sorted_selections.sort_by_key(|s| s.anchor.min(s.head));
@@ -280,6 +328,7 @@ pub fn backspace_all(document: &mut Document) -> bool {
     if document.selections.is_empty() {
         return false;
     }
+    document.validate();
 
     let mut sorted_selections = document.selections.clone();
     sorted_selections.sort_by_key(|s| s.anchor.min(s.head));
@@ -326,6 +375,7 @@ pub fn backspace_word_all(document: &mut Document) -> bool {
     if document.selections.is_empty() {
         return false;
     }
+    document.validate();
 
     let mut sorted_selections = document.selections.clone();
     sorted_selections.sort_by_key(|s| s.anchor.min(s.head));
@@ -370,6 +420,7 @@ pub fn delete_all(document: &mut Document) -> bool {
     if document.selections.is_empty() {
         return false;
     }
+    document.validate();
 
     // Process selections in order
     let mut sorted_selections = document.selections.clone();
@@ -417,6 +468,7 @@ pub fn delete_word_all(document: &mut Document) -> bool {
     if document.selections.is_empty() {
         return false;
     }
+    document.validate();
 
     let mut sorted_selections = document.selections.clone();
     sorted_selections.sort_by_key(|s| s.anchor.min(s.head));

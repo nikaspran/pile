@@ -177,8 +177,10 @@ impl Document {
             return;
         }
 
-        let mut edits = edits;
-        edits.sort_by_key(|edit| edit.range.start);
+        let edits = normalize_multi_edits(edits, &self.rope);
+        if edits.is_empty() {
+            return;
+        }
 
         let mut final_selections = Vec::new();
         let mut final_offset: isize = 0;
@@ -220,6 +222,7 @@ impl Document {
 
         self.undo.record_multi(transactions);
         self.selections = final_selections;
+        self.validate();
         self.revision += 1;
     }
 
@@ -327,6 +330,47 @@ fn shift_offset(offset: usize, shift: isize) -> usize {
     } else {
         offset.saturating_sub((-shift) as usize)
     }
+}
+
+fn normalize_multi_edits(mut edits: Vec<DocumentEdit>, rope: &Rope) -> Vec<DocumentEdit> {
+    let len = rope.byte_len();
+    edits.sort_by_key(|edit| edit.range.start);
+
+    let mut normalized = Vec::with_capacity(edits.len());
+    let mut covered_until = 0;
+
+    for mut edit in edits {
+        let mut start = clamp_offset_to_char_boundary(rope, edit.range.start.min(len));
+        let end = clamp_offset_to_char_boundary(rope, edit.range.end.min(len));
+
+        if end < start {
+            continue;
+        }
+
+        if start < covered_until {
+            if end <= covered_until {
+                continue;
+            }
+            start = covered_until;
+        }
+
+        if start == end && edit.inserted_text.is_empty() {
+            continue;
+        }
+
+        edit.range = start..end;
+        covered_until = covered_until.max(edit.range.end);
+        normalized.push(edit);
+    }
+
+    normalized
+}
+
+fn clamp_offset_to_char_boundary(rope: &Rope, mut offset: usize) -> usize {
+    while offset > 0 && !rope.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

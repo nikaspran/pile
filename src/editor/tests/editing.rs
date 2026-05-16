@@ -656,3 +656,36 @@ fn word_deletion_handles_multiple_cursors() {
         ]
     );
 }
+
+#[test]
+fn backspace_all_handles_overlapping_full_document_selection() {
+    let mut document = document("abc");
+    document.selections = vec![
+        Selection { anchor: 0, head: 3 },
+        Selection::caret(1),
+        Selection::caret(2),
+    ];
+
+    assert!(backspace_all(&mut document));
+
+    assert_eq!(document.text(), "");
+    assert_eq!(document.selections, vec![Selection::caret(0)]);
+
+    assert!(!backspace_all(&mut document));
+    assert_eq!(document.text(), "");
+    assert_eq!(document.selections, vec![Selection::caret(0)]);
+}
+
+#[test]
+fn backspace_all_ignores_stale_cursors_after_document_is_empty() {
+    let mut document = document("");
+    document.selections = vec![Selection::caret(1), Selection::caret(2)];
+
+    assert!(!backspace_all(&mut document));
+
+    assert_eq!(document.text(), "");
+    assert_eq!(
+        document.selections,
+        vec![Selection::caret(0), Selection::caret(0)]
+    );
+}

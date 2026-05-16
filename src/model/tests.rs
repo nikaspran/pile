@@ -511,6 +511,33 @@ fn multi_edit_with_overlapping_ranges_fails_gracefully() {
 }
 
 #[test]
+fn multi_edit_with_overlapping_full_deletion_does_not_panic() {
+    let mut document = Document::new_untitled(1, 4, true);
+    document.replace_text("abc");
+    document.revision = 0;
+
+    let edits = vec![
+        DocumentEdit {
+            range: 0..3,
+            inserted_text: String::new(),
+            selections_before: vec![Selection { anchor: 0, head: 3 }],
+            selections_after: vec![Selection::caret(0)],
+        },
+        DocumentEdit {
+            range: 0..1,
+            inserted_text: String::new(),
+            selections_before: vec![Selection::caret(1)],
+            selections_after: vec![Selection::caret(0)],
+        },
+    ];
+
+    document.apply_multi_edit(edits);
+
+    assert_eq!(document.text(), "");
+    assert_eq!(document.selections, vec![Selection::caret(0)]);
+}
+
+#[test]
 fn multi_edit_preserves_document_state_on_empty_edits() {
     let mut document = Document::new_untitled(1, 4, true);
     document.replace_text("hello");
@@ -1079,8 +1106,8 @@ fn multi_edit_with_empty_selections_after() {
     }];
 
     document.apply_multi_edit(edits);
-    // Should use last edit's selections_after
-    assert_eq!(document.selections, vec![]);
+    // Empty selection output is repaired to a valid caret.
+    assert_eq!(document.selections, vec![Selection::caret(2)]);
 }
 
 #[test]

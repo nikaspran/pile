@@ -98,6 +98,64 @@ fn shift_vertical_preserves_anchor_and_preferred_column() {
 }
 
 #[test]
+fn movement_updates_all_cursors() {
+    let mut document = document("abcd\nefgh\nijkl");
+    document.selections = vec![
+        Selection::caret(1),
+        Selection::caret("abcd\ne".len()),
+        Selection::caret("abcd\nefgh\ni".len()),
+    ];
+
+    move_right(&mut document, false);
+
+    assert_eq!(
+        document.selections,
+        vec![
+            Selection::caret(2),
+            Selection::caret("abcd\nef".len()),
+            Selection::caret("abcd\nefgh\nij".len()),
+        ]
+    );
+}
+
+#[test]
+fn vertical_movement_updates_all_cursors() {
+    let mut document = document("abcd\nef\nghij");
+    let mut view_state = EditorViewState::default();
+    document.selections = vec![Selection::caret(3), Selection::caret("abcd\ne".len())];
+
+    move_vertical(&mut document, &mut view_state, 1, false);
+
+    assert_eq!(
+        document.selections,
+        vec![
+            Selection::caret("abcd\nef".len()),
+            Selection::caret("abcd\nef\ng".len()),
+        ]
+    );
+    assert_eq!(view_state.preferred_column, None);
+}
+
+#[test]
+fn shift_movement_extends_all_cursors() {
+    let mut document = document("abcd\nefgh");
+    document.selections = vec![Selection::caret(1), Selection::caret("abcd\ne".len())];
+
+    move_right(&mut document, true);
+
+    assert_eq!(
+        document.selections,
+        vec![
+            Selection { anchor: 1, head: 2 },
+            Selection {
+                anchor: "abcd\ne".len(),
+                head: "abcd\nef".len(),
+            },
+        ]
+    );
+}
+
+#[test]
 fn move_word_right_skips_whitespace_then_word() {
     let mut document = document("  foo bar");
     set_primary_selection(&mut document, Selection::caret(0));

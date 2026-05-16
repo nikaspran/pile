@@ -1426,6 +1426,20 @@ impl PileApp {
                     self.document_edited();
                 }
             }
+            AddCursorAbove => {
+                if let Some(document) = self.state.active_document_mut() {
+                    if crate::editor::add_cursor_vertical(document, -1) {
+                        self.document_edited();
+                    }
+                }
+            }
+            AddCursorBelow => {
+                if let Some(document) = self.state.active_document_mut() {
+                    if crate::editor::add_cursor_vertical(document, 1) {
+                        self.document_edited();
+                    }
+                }
+            }
             ClearSecondaryCursors => {
                 if let Some(document) = self.state.active_document_mut() {
                     if crate::editor::clear_secondary_cursors(document) {

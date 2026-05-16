@@ -4,7 +4,7 @@ use crate::command::{Command, EDITOR_KEY_COMMANDS, command_for_key_event};
 use crate::model::Document;
 
 use super::{
-    CaseType, EditorViewState, add_all_matches, add_next_match, backspace_all,
+    CaseType, EditorViewState, add_all_matches, add_cursor_vertical, add_next_match, backspace_all,
     backspace_with_pair_deletion, backspace_word, backspace_word_all, clear_secondary_cursors,
     contract_selection_by_bracket_pair, contract_selection_by_indent_block,
     contract_selection_by_line, contract_selection_by_word, convert_case_all_selections,
@@ -363,6 +363,14 @@ fn dispatch_editor_key_command(
             split_selection_into_lines(document);
             view_state.preferred_column = None;
             (true, false)
+        }
+        AddCursorAbove => {
+            view_state.preferred_column = None;
+            (add_cursor_vertical(document, -1), false)
+        }
+        AddCursorBelow => {
+            view_state.preferred_column = None;
+            (add_cursor_vertical(document, 1), false)
         }
         ToggleComments => {
             let comment_prefix = document

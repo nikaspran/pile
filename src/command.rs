@@ -80,6 +80,8 @@ pub enum Command {
     AddNextMatch,
     AddAllMatches,
     SplitSelectionIntoLines,
+    AddCursorAbove,
+    AddCursorBelow,
     ClearSecondaryCursors,
 
     // Editor - editing
@@ -284,6 +286,16 @@ pub fn default_shortcuts() -> Vec<ShortcutBinding> {
             Modifiers::COMMAND | Modifiers::SHIFT,
             Key::L,
         ),
+        binding(
+            AddCursorAbove,
+            Modifiers::COMMAND | Modifiers::SHIFT | Modifiers::ALT,
+            Key::ArrowUp,
+        ),
+        binding(
+            AddCursorBelow,
+            Modifiers::COMMAND | Modifiers::SHIFT | Modifiers::ALT,
+            Key::ArrowDown,
+        ),
         binding(ClearSecondaryCursors, Modifiers::NONE, Key::Escape),
         binding(Backspace, Modifiers::NONE, Key::Backspace),
         binding(DeleteForward, Modifiers::NONE, Key::Delete),
@@ -444,6 +456,8 @@ pub const EDITOR_KEY_COMMANDS: &[Command] = &[
     Command::AddNextMatch,
     Command::AddAllMatches,
     Command::SplitSelectionIntoLines,
+    Command::AddCursorAbove,
+    Command::AddCursorBelow,
     Command::ClearSecondaryCursors,
     Command::Backspace,
     Command::DeleteForward,
@@ -1140,6 +1154,20 @@ pub fn all_commands() -> Vec<CommandMetadata> {
                 modifiers: Modifiers::COMMAND | Modifiers::SHIFT,
                 logical_key: Key::L,
             }),
+        },
+        CommandMetadata {
+            command: AddCursorAbove,
+            name: "Add Cursor Above",
+            description: "Add a cursor on the line above at the same column",
+            category: MultiCursor,
+            shortcut: primary_shortcut(AddCursorAbove),
+        },
+        CommandMetadata {
+            command: AddCursorBelow,
+            name: "Add Cursor Below",
+            description: "Add a cursor on the line below at the same column",
+            category: MultiCursor,
+            shortcut: primary_shortcut(AddCursorBelow),
         },
         CommandMetadata {
             command: ClearSecondaryCursors,

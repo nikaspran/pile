@@ -62,6 +62,20 @@ fn editor_core_standard_shortcuts_are_bound() {
             shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::L),
         ),
         (
+            AddCursorAbove,
+            shortcut(
+                Modifiers::COMMAND | Modifiers::SHIFT | Modifiers::ALT,
+                Key::ArrowUp,
+            ),
+        ),
+        (
+            AddCursorBelow,
+            shortcut(
+                Modifiers::COMMAND | Modifiers::SHIFT | Modifiers::ALT,
+                Key::ArrowDown,
+            ),
+        ),
+        (
             DuplicateLines,
             shortcut(Modifiers::COMMAND | Modifiers::SHIFT, Key::D),
         ),
@@ -191,6 +205,16 @@ fn editor_key_commands_resolve_through_default_shortcuts() {
         (Modifiers::SHIFT, Key::ArrowRight, SelectRight),
         (Modifiers::ALT, Key::W, ExpandWord),
         (Modifiers::SHIFT | Modifiers::ALT, Key::W, ContractWord),
+        (
+            Modifiers::COMMAND | Modifiers::SHIFT | Modifiers::ALT,
+            Key::ArrowUp,
+            AddCursorAbove,
+        ),
+        (
+            Modifiers::COMMAND | Modifiers::SHIFT | Modifiers::ALT,
+            Key::ArrowDown,
+            AddCursorBelow,
+        ),
         (Modifiers::NONE, Key::Enter, InsertNewline),
     ];
 
