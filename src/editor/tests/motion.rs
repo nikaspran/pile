@@ -34,6 +34,38 @@ fn vertical_and_line_boundary_movement_tracks_columns() {
 }
 
 #[test]
+fn down_from_final_line_moves_to_final_line_end() {
+    let mut document = document("alpha\nbeta");
+    let mut view_state = EditorViewState::default();
+    set_primary_selection(&mut document, Selection::caret("alpha\n".len()));
+
+    move_vertical(&mut document, &mut view_state, 1, false);
+
+    assert_eq!(
+        primary_selection(&document),
+        Selection::caret(document.rope.byte_len())
+    );
+}
+
+#[test]
+fn shift_down_from_final_line_extends_to_final_line_end() {
+    let mut document = document("alpha\nbeta");
+    let mut view_state = EditorViewState::default();
+    let start = "alpha\n".len();
+    set_primary_selection(&mut document, Selection::caret(start));
+
+    move_vertical(&mut document, &mut view_state, 1, true);
+
+    assert_eq!(
+        primary_selection(&document),
+        Selection {
+            anchor: start,
+            head: document.rope.byte_len()
+        }
+    );
+}
+
+#[test]
 fn shift_arrow_extends_selection() {
     let mut document = document("hello world");
     set_primary_selection(&mut document, Selection::caret(3));

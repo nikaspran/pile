@@ -77,14 +77,11 @@ pub fn move_vertical(
         clamp_primary_selection(document);
         let selection = primary_selection(document);
         let current_line = line_index_of_byte(&document.rope, selection.head);
-        let line_count = visual_line_count(&document.rope);
-        let target_line =
-            (current_line as isize + delta).clamp(0, line_count as isize - 1) as usize;
         let column = view_state
             .preferred_column
             .unwrap_or_else(|| column_of_byte(&document.rope, selection.head));
         view_state.preferred_column = Some(column);
-        let target = byte_for_line_column(&document.rope, target_line, column);
+        let target = vertical_motion_target(&document.rope, current_line, delta, column);
         apply_motion(document, target, extend);
         return;
     }
@@ -92,12 +89,21 @@ pub fn move_vertical(
     view_state.preferred_column = None;
     apply_motion_to_all(document, extend, |rope, selection| {
         let current_line = line_index_of_byte(rope, selection.head);
-        let line_count = visual_line_count(rope);
-        let target_line =
-            (current_line as isize + delta).clamp(0, line_count as isize - 1) as usize;
         let column = column_of_byte(rope, selection.head);
-        byte_for_line_column(rope, target_line, column)
+        vertical_motion_target(rope, current_line, delta, column)
     });
+}
+
+fn vertical_motion_target(rope: &Rope, current_line: usize, delta: isize, column: usize) -> usize {
+    let line_count = visual_line_count(rope);
+    let unclamped_target = current_line as isize + delta;
+    if delta > 0 && unclamped_target >= line_count as isize {
+        let final_line = line_count.saturating_sub(1);
+        return visual_line_bounds(rope, final_line).1;
+    }
+
+    let target_line = unclamped_target.clamp(0, line_count as isize - 1) as usize;
+    byte_for_line_column(rope, target_line, column)
 }
 
 pub fn move_document_start(document: &mut Document, extend: bool) {
