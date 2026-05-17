@@ -48,6 +48,17 @@ fn down_from_final_line_moves_to_final_line_end() {
 }
 
 #[test]
+fn up_from_first_line_moves_to_first_line_start() {
+    let mut document = document("alpha\nbeta");
+    let mut view_state = EditorViewState::default();
+    set_primary_selection(&mut document, Selection::caret("alp".len()));
+
+    move_vertical(&mut document, &mut view_state, -1, false);
+
+    assert_eq!(primary_selection(&document), Selection::caret(0));
+}
+
+#[test]
 fn shift_down_from_final_line_extends_to_final_line_end() {
     let mut document = document("alpha\nbeta");
     let mut view_state = EditorViewState::default();
@@ -61,6 +72,24 @@ fn shift_down_from_final_line_extends_to_final_line_end() {
         Selection {
             anchor: start,
             head: document.rope.byte_len()
+        }
+    );
+}
+
+#[test]
+fn shift_up_from_first_line_extends_to_first_line_start() {
+    let mut document = document("alpha\nbeta");
+    let mut view_state = EditorViewState::default();
+    let start = "alp".len();
+    set_primary_selection(&mut document, Selection::caret(start));
+
+    move_vertical(&mut document, &mut view_state, -1, true);
+
+    assert_eq!(
+        primary_selection(&document),
+        Selection {
+            anchor: start,
+            head: 0
         }
     );
 }

@@ -97,6 +97,10 @@ pub fn move_vertical(
 fn vertical_motion_target(rope: &Rope, current_line: usize, delta: isize, column: usize) -> usize {
     let line_count = visual_line_count(rope);
     let unclamped_target = current_line as isize + delta;
+    if delta < 0 && unclamped_target < 0 {
+        return visual_line_bounds(rope, 0).0;
+    }
+
     if delta > 0 && unclamped_target >= line_count as isize {
         let final_line = line_count.saturating_sub(1);
         return visual_line_bounds(rope, final_line).1;
