@@ -68,6 +68,48 @@ fn newline_replaces_selection_and_uses_selection_start_indent() {
 }
 
 #[test]
+fn paired_opener_inserts_closer_and_keeps_caret_between() {
+    let mut document = document("");
+
+    assert!(insert_char_with_pairing(&mut document, '('));
+
+    assert_eq!(document.text(), "()");
+    assert_eq!(primary_selection(&document), Selection::caret(1));
+}
+
+#[test]
+fn backspace_after_auto_inserted_opener_removes_closer() {
+    let mut document = document("");
+    assert!(insert_char_with_pairing(&mut document, '"'));
+
+    assert!(backspace_with_pair_deletion(&mut document));
+
+    assert_eq!(document.text(), "");
+    assert_eq!(primary_selection(&document), Selection::caret(0));
+}
+
+#[test]
+fn single_quote_inserts_without_auto_pairing() {
+    let mut document = document("");
+
+    assert!(insert_char_with_pairing(&mut document, '\''));
+
+    assert_eq!(document.text(), "'");
+    assert_eq!(primary_selection(&document), Selection::caret(1));
+}
+
+#[test]
+fn typing_closer_over_existing_closer_skips_over_it() {
+    let mut document = document("");
+    assert!(insert_char_with_pairing(&mut document, '"'));
+
+    assert!(insert_char_with_pairing(&mut document, '"'));
+
+    assert_eq!(document.text(), "\"\"");
+    assert_eq!(primary_selection(&document), Selection::caret(2));
+}
+
+#[test]
 fn indent_at_caret_indents_current_line() {
     let mut document = document("alpha\nbeta");
     set_primary_selection(&mut document, Selection::caret("alpha\nbe".len()));

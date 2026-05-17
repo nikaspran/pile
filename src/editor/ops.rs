@@ -228,12 +228,24 @@ fn title_case(text: &str) -> String {
 }
 
 pub fn insert_char_with_pairing(document: &mut Document, ch: char) -> bool {
+    if is_closing_bracket(ch) {
+        let selection = primary_selection(document);
+        let (start, end) = selection_range(selection);
+        if start == end && start < document.rope.byte_len() {
+            let next_char = document.rope.byte_slice(start..).chars().next();
+            if next_char == Some(ch) {
+                let new_pos = start + ch.len_utf8();
+                set_primary_selection(document, Selection::caret(new_pos));
+                return true;
+            }
+        }
+    }
+
     let pairing = match ch {
         '(' => Some(')'),
         '[' => Some(']'),
         '{' => Some('}'),
         '"' => Some('"'),
-        '\'' => Some('\''),
         '<' => Some('>'),
         _ => None,
     };
@@ -266,20 +278,6 @@ pub fn insert_char_with_pairing(document: &mut Document, ch: char) -> bool {
         };
         document.apply_continuing_edit(edit);
         true
-    } else if is_closing_bracket(ch) {
-        // Skip-over: if next char is the same closing bracket, just move past it
-        let selection = primary_selection(document);
-        let (start, _) = selection_range(selection);
-        if start < document.rope.byte_len() {
-            let next_char = document.rope.byte_slice(start..).chars().next();
-            if next_char == Some(ch) {
-                let new_pos = start + ch.len_utf8();
-                set_primary_selection(document, Selection::caret(new_pos));
-                return true;
-            }
-        }
-        // Otherwise insert normally
-        replace_selection_with(document, &ch.to_string())
     } else {
         replace_selection_with(document, &ch.to_string())
     }
@@ -317,7 +315,6 @@ pub fn backspace_with_pair_deletion(document: &mut Document) -> bool {
             '[' => Some(']'),
             '{' => Some('}'),
             '"' => Some('"'),
-            '\'' => Some('\''),
             '<' => Some('>'),
             _ => None,
         };
@@ -326,12 +323,14 @@ pub fn backspace_with_pair_deletion(document: &mut Document) -> bool {
             // Check if the next char after the opening is the matching closing
             let close_len = close.len_utf8();
             let ch_len = ch.len_utf8();
-            if start + ch_len < document.rope.byte_len() {
-                let next_char = document.rope.byte_slice((start + ch_len)..).chars().next();
+            if start + close_len <= document.rope.byte_len() {
+                let next_char = document.rope.byte_slice(start..).chars().next();
                 if next_char == Some(close) {
                     // Delete both the opening and closing brackets
-                    let delete_end = start + ch_len + close_len;
-                    let edit = DocumentEdit::replace_selection(selection, start..delete_end, "");
+                    let delete_start = start - ch_len;
+                    let delete_end = start + close_len;
+                    let edit =
+                        DocumentEdit::replace_selection(selection, delete_start..delete_end, "");
                     document.apply_continuing_edit(edit);
                     return true;
                 }
@@ -344,5 +343,5 @@ pub fn backspace_with_pair_deletion(document: &mut Document) -> bool {
 }
 
 fn is_closing_bracket(ch: char) -> bool {
-    ch == ')' || ch == ']' || ch == '}' || ch == '"' || ch == '\'' || ch == '>'
+    ch == ')' || ch == ']' || ch == '}' || ch == '"' || ch == '>'
 }
