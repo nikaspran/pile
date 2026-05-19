@@ -277,6 +277,22 @@ fn font_fallback_renders_mixed_scripts() {
 }
 
 #[test]
+fn string_boundary_helpers_handle_lithuanian_multibyte_characters() {
+    let text = "- Sąskaitos išrašas 6 mė";
+    let inside_e_dot = text.find('ė').unwrap() + 1;
+
+    assert!(!text.is_char_boundary(inside_e_dot));
+    assert_eq!(
+        floor_str_char_boundary(text, inside_e_dot),
+        text.find('ė').unwrap()
+    );
+    assert_eq!(
+        ceil_str_char_boundary(text, inside_e_dot),
+        text.find('ė').unwrap() + 'ė'.len_utf8()
+    );
+}
+
+#[test]
 fn font_fallback_test_char_width_consistency() {
     // Characters from different scripts should use the same char_width in our layout
     // This test ensures our fixed-width assumption is documented

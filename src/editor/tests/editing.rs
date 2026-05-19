@@ -616,6 +616,23 @@ fn backspace_and_delete_handle_boundaries_and_lines() {
 }
 
 #[test]
+fn backspace_handles_multibyte_character_when_window_start_is_inside_utf8() {
+    let text = "Refinansavimas\n\n- 2024 m dekl\n- 2025 m dekl\n- Wise išrašas už 12 mėn.\n- Nuomos sutartis\n- Sąskaitos išrašas š";
+    let mut document = document(text);
+    let caret = document.rope.byte_len();
+
+    assert!(!document.rope.is_char_boundary(caret - 64));
+    set_primary_selection(&mut document, Selection::caret(caret));
+
+    assert!(backspace(&mut document));
+    assert_eq!(document.text(), &text[..caret - 'š'.len_utf8()]);
+    assert_eq!(
+        primary_selection(&document),
+        Selection::caret(caret - 'š'.len_utf8())
+    );
+}
+
+#[test]
 fn word_backspace_deletes_to_previous_word_boundary() {
     let mut document = document("alpha beta  gamma");
     set_primary_selection(&mut document, Selection::caret("alpha beta  gam".len()));

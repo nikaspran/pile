@@ -181,6 +181,22 @@ fn highlight_spans_for_line(
         .collect()
 }
 
+fn floor_str_char_boundary(text: &str, mut offset: usize) -> usize {
+    offset = offset.min(text.len());
+    while offset > 0 && !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
+}
+
+fn ceil_str_char_boundary(text: &str, mut offset: usize) -> usize {
+    offset = offset.min(text.len());
+    while offset < text.len() && !text.is_char_boundary(offset) {
+        offset += 1;
+    }
+    offset
+}
+
 pub fn show_editor(
     ui: &mut egui::Ui,
     document: &mut Document,
@@ -672,8 +688,9 @@ pub fn show_editor(
                         for (span_start, span_end, color) in sorted_spans {
                             // Render unhighlighted text before this span
                             if span_start > last_byte {
-                                let text_segment =
-                                    &line_text_str[last_byte..span_start.min(line_text_str.len())];
+                                let segment_end =
+                                    floor_str_char_boundary(&line_text_str, span_start);
+                                let text_segment = &line_text_str[last_byte..segment_end];
                                 if !text_segment.is_empty() {
                                     painter.text(
                                         text_pos + egui::vec2(x_offset, 0.0),
@@ -688,8 +705,9 @@ pub fn show_editor(
                             }
 
                             // Render highlighted text
-                            let segment_start = span_start.min(line_text_str.len());
-                            let segment_end = span_end.min(line_text_str.len());
+                            let segment_start =
+                                floor_str_char_boundary(&line_text_str, span_start).max(last_byte);
+                            let segment_end = ceil_str_char_boundary(&line_text_str, span_end);
                             if segment_start < segment_end {
                                 let text_segment = &line_text_str[segment_start..segment_end];
                                 if !text_segment.is_empty() {

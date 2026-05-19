@@ -125,9 +125,9 @@ pub(super) fn previous_grapheme_boundary(rope: &Rope, offset: usize) -> usize {
     if offset == 0 {
         return 0;
     }
-    let offset = offset.min(rope.byte_len());
+    let offset = clamp_to_char_boundary(rope, offset.min(rope.byte_len()));
     // Only examine a bounded window before the offset (64 bytes is more than enough for any grapheme cluster)
-    let search_start = offset.saturating_sub(64);
+    let search_start = clamp_to_char_boundary(rope, offset.saturating_sub(64));
     let window = rope.byte_slice(search_start..offset).to_string();
     window
         .graphemes(true)
@@ -136,12 +136,12 @@ pub(super) fn previous_grapheme_boundary(rope: &Rope, offset: usize) -> usize {
 }
 
 pub(super) fn next_grapheme_boundary(rope: &Rope, offset: usize) -> usize {
-    let offset = offset.min(rope.byte_len());
+    let offset = clamp_to_char_boundary(rope, offset.min(rope.byte_len()));
     if offset >= rope.byte_len() {
         return rope.byte_len();
     }
     // Only examine a bounded window after the offset
-    let search_end = (offset + 64).min(rope.byte_len());
+    let search_end = clamp_to_char_boundary(rope, (offset + 64).min(rope.byte_len()));
     let window = rope.byte_slice(offset..search_end).to_string();
     window
         .graphemes(true)
@@ -520,4 +520,29 @@ pub(super) fn highlight_columns_for_line(
         start_column: rope.byte_slice(line_start..start).chars().count(),
         end_column: rope.byte_slice(line_start..end).chars().count(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grapheme_boundaries_round_bounded_windows_to_char_boundaries() {
+        let text = "Refinansavimas\n\n- 2024 m dekl\n- 2025 m dekl\n- Wise išrašas už 12 mėn.\n- Nuomos sutartis\n- Sąskaitos išrašas š";
+        let rope = Rope::from(text);
+        let caret = text.len();
+        let search_start = caret - 64;
+
+        assert!(!rope.is_char_boundary(search_start));
+
+        assert_eq!(previous_grapheme_boundary(&rope, caret), caret - 'š'.len_utf8());
+    }
+
+    #[test]
+    fn grapheme_boundary_window_end_can_land_inside_multibyte_char() {
+        let text = format!("{}š tail", "a".repeat(63));
+        let rope = Rope::from(text.as_str());
+
+        assert_eq!(next_grapheme_boundary(&rope, 0), 1);
+    }
 }
