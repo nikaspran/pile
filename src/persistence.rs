@@ -455,6 +455,51 @@ pub fn save_settings(path: &PathBuf, settings: &Settings) {
     }
 }
 
+/// Decode a session snapshot from bytes without performing filesystem recovery.
+///
+/// This is intended for read-only inspection paths such as CLI retrieval. The
+/// GUI load path should use `load_session`, which also handles quarantine,
+/// backup restore, and orphan recovery.
+pub fn decode_session_snapshot(bytes: &[u8]) -> Result<SessionSnapshot> {
+    match SessionEnvelope::from_bytes(bytes) {
+        Ok(envelope) => SessionEnvelope::open(envelope),
+        Err(_) => match bincode::deserialize::<SessionSnapshot>(bytes) {
+            Ok(snapshot) => {
+                if snapshot.schema_version == 1 {
+                    return Ok(SessionSnapshot {
+                        schema_version: 2,
+                        state: snapshot.state,
+                        panes: vec![],
+                        active_pane: 0,
+                    });
+                }
+
+                if snapshot.schema_version != 2 {
+                    anyhow::bail!("unsupported session schema {}", snapshot.schema_version);
+                }
+
+                Ok(snapshot)
+            }
+            Err(_) => {
+                #[derive(Serialize, Deserialize)]
+                struct OldSessionV1 {
+                    pub schema_version: u32,
+                    pub state: crate::model::AppState,
+                }
+
+                let old: OldSessionV1 =
+                    bincode::deserialize(bytes).with_context(|| "failed to deserialize session")?;
+                Ok(SessionSnapshot {
+                    schema_version: 2,
+                    state: old.state,
+                    panes: vec![],
+                    active_pane: 0,
+                })
+            }
+        },
+    }
+}
+
 pub fn load_session(
     path: &PathBuf,
     telemetry: &mut SaveTelemetry,

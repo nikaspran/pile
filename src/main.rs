@@ -1,4 +1,5 @@
 mod app;
+mod cli;
 mod command;
 mod command_palette;
 mod editor;
@@ -21,6 +22,10 @@ use anyhow::Result;
 use eframe::egui;
 
 fn main() -> Result<()> {
+    if std::env::args_os().len() > 1 {
+        return cli::run_from_env();
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

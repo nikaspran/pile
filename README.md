@@ -70,6 +70,32 @@ cargo clippy --locked --all-targets
 cargo test --locked
 ```
 
+## CLI Retrieval
+
+Running `pile` without arguments starts the native app. Read-only CLI commands
+are available for tools and agents that need to inspect the last persisted
+session snapshot:
+
+```sh
+pile list
+pile search "query"
+pile get <document-id>
+```
+
+CLI output defaults to JSON for machine use. Pass `--format human` for compact
+terminal output. Each command reads the platform default session file unless
+`--session <path>` is provided.
+
+Useful options:
+
+- `pile list --closed` includes recently closed scratch buffers.
+- `pile search "query" --closed --case-sensitive --whole-word --regex`
+  searches open buffers and, when requested, closed buffers.
+- `pile search "query" --limit 20 --context 120` bounds returned matches and
+  surrounding context.
+- `pile get <document-id> --closed --lines 10:25` retrieves a 1-based inclusive
+  line range.
+
 ## Data and Recovery
 
 `pile` stores scratch buffers in an automatic session file under the

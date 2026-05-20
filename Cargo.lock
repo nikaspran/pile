@@ -2632,6 +2632,7 @@ dependencies = [
  "anyhow",
  "atomic-write-file",
  "bincode",
+ "clap",
  "content_inspector",
  "criterion",
  "crop",
