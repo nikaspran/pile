@@ -230,6 +230,19 @@ impl TextLayoutPipeline {
             line_start + byte_offset_within_line
         }
     }
+
+    /// Return the 1-based document line number to render in the gutter.
+    ///
+    /// Continuation rows produced by wrapping intentionally have no gutter
+    /// number; they are visual rows, not new document lines.
+    pub fn gutter_line_number(&self, wrapped_line_index: usize) -> Option<usize> {
+        if self.wrap_mode == WrapMode::NoWrap {
+            return Some(wrapped_line_index + 1);
+        }
+
+        let &(doc_line, start_col, _) = self.visual_line_map.get(wrapped_line_index)?;
+        (start_col == 0).then_some(doc_line + 1)
+    }
 }
 
 fn build_wrap_map(
@@ -288,14 +301,20 @@ fn wrapped_line_and_column(
 ) -> (usize, usize) {
     let doc_line = line_index_of_byte(rope, offset);
     let doc_col = column_of_byte(rope, offset);
+    let mut line_fallback = None;
 
-    for (i, &(line, start_col, _)) in visual_line_map.iter().enumerate() {
-        if line == doc_line && doc_col >= start_col {
+    for (i, &(line, start_col, end_col)) in visual_line_map.iter().enumerate() {
+        if line == doc_line && doc_col >= start_col && doc_col <= end_col {
             return (i, doc_col - start_col);
+        }
+
+        if line == doc_line {
+            let clamped_col = doc_col.clamp(start_col, end_col);
+            line_fallback = Some((i, clamped_col - start_col));
         }
     }
 
-    (visual_line_map.len().saturating_sub(1), 0)
+    line_fallback.unwrap_or_else(|| (visual_line_map.len().saturating_sub(1), 0))
 }
 
 fn byte_for_wrapped_line_column(
@@ -330,3 +349,79 @@ use super::{
     byte_for_line_column, byte_of_visual_line, char_index_to_byte_offset, column_of_byte,
     decimal_digits, line_index_of_byte, monospace_char_width, visual_line_count, visual_line_text,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wrapped_layout(map: Vec<(usize, usize, usize)>) -> TextLayoutPipeline {
+        let line_count = map.len();
+        TextLayoutPipeline {
+            row_height: 16.0,
+            char_width: 8.0,
+            font_id: egui::FontId::monospace(14.0),
+            gutter_width: 44.0,
+            text_origin_x: 54.0,
+            content_width: 800.0,
+            content_height: 600.0,
+            line_count,
+            wrap_mode: WrapMode::ViewportWrap,
+            wrap_width_chars: 10,
+            visual_line_map: map,
+        }
+    }
+
+    #[test]
+    fn gutter_line_number_skips_wrapped_continuations() {
+        let layout = wrapped_layout(vec![
+            (0, 0, 10),
+            (0, 10, 20),
+            (0, 20, 22),
+            (1, 0, 5),
+            (2, 0, 10),
+            (2, 10, 12),
+        ]);
+
+        assert_eq!(layout.gutter_line_number(0), Some(1));
+        assert_eq!(layout.gutter_line_number(1), None);
+        assert_eq!(layout.gutter_line_number(2), None);
+        assert_eq!(layout.gutter_line_number(3), Some(2));
+        assert_eq!(layout.gutter_line_number(4), Some(3));
+        assert_eq!(layout.gutter_line_number(5), None);
+    }
+
+    #[test]
+    fn caret_position_uses_matching_wrapped_segment() {
+        let rope = Rope::from("abcdefghijklmnopqrstuv");
+        let layout = wrapped_layout(vec![(0, 0, 10), (0, 10, 20), (0, 20, 22)]);
+
+        let first_segment = layout.caret_position(&rope, 5, 0.0);
+        assert_eq!(first_segment.y, 0.0);
+        assert_eq!(
+            first_segment.x,
+            layout.text_origin_x + 5.0 * layout.char_width
+        );
+
+        let second_segment = layout.caret_position(&rope, 15, 0.0);
+        assert_eq!(second_segment.y, layout.row_height);
+        assert_eq!(
+            second_segment.x,
+            layout.text_origin_x + 5.0 * layout.char_width
+        );
+
+        let third_segment = layout.caret_position(&rope, 21, 0.0);
+        assert_eq!(third_segment.y, layout.row_height * 2.0);
+        assert_eq!(third_segment.x, layout.text_origin_x + layout.char_width);
+    }
+
+    #[test]
+    fn caret_position_clamps_to_same_line_when_wrap_map_is_stale() {
+        let rope = Rope::from("abcdefghijk\nlast line");
+        let layout = wrapped_layout(vec![(0, 0, 10), (1, 0, 9)]);
+
+        let pos = layout.caret_position(&rope, 11, 0.0);
+
+        assert_eq!(pos.y, 0.0);
+        assert_eq!(pos.x, layout.text_origin_x + 10.0 * layout.char_width);
+    }
+}

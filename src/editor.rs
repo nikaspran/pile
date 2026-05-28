@@ -503,14 +503,16 @@ pub fn show_editor(
                     );
                 }
 
-                let line_number_pos = egui::pos2(rect.left() + LINE_GUTTER_PADDING, y);
-                painter.text(
-                    line_number_pos,
-                    egui::Align2::LEFT_TOP,
-                    (line_index + 1).to_string(),
-                    layout.font_id.clone(),
-                    ui.visuals().weak_text_color(),
-                );
+                if let Some(line_number) = layout.gutter_line_number(line_index) {
+                    let line_number_pos = egui::pos2(rect.left() + LINE_GUTTER_PADDING, y);
+                    painter.text(
+                        line_number_pos,
+                        egui::Align2::LEFT_TOP,
+                        line_number.to_string(),
+                        layout.font_id.clone(),
+                        ui.visuals().weak_text_color(),
+                    );
+                }
 
                 // Draw indentation guides (skip for large files)
                 if !is_large_file && show_indentation_guides {
@@ -529,6 +531,9 @@ pub fn show_editor(
                 }
 
                 let text_pos = egui::pos2(rect.left() + layout.text_origin_x, y);
+                let line_text = layout.wrapped_line_text(&document.rope, line_index);
+                let line_start_byte = layout.wrapped_line_byte_start(&document.rope, line_index);
+                let line_end_byte = line_start_byte + line_text.byte_len();
 
                 // Draw search highlights first (behind selections)
                 paint_search_highlights_for_line(
@@ -553,9 +558,10 @@ pub fn show_editor(
                     };
                     paint_selection_for_line(
                         &painter,
-                        document,
+                        &document.rope,
                         *sel,
-                        line_index,
+                        line_start_byte,
+                        line_end_byte,
                         text_pos,
                         layout.row_height,
                         layout.char_width,
@@ -567,9 +573,10 @@ pub fn show_editor(
                 for sel in extra_selections {
                     paint_selection_for_line(
                         &painter,
-                        document,
+                        &document.rope,
                         *sel,
-                        line_index,
+                        line_start_byte,
+                        line_end_byte,
                         text_pos,
                         layout.row_height,
                         layout.char_width,
@@ -590,11 +597,7 @@ pub fn show_editor(
                     ui.visuals(),
                 );
 
-                let line_text = layout.wrapped_line_text(&document.rope, line_index);
-                let line_start_byte = layout.wrapped_line_byte_start(&document.rope, line_index);
-
                 // Get syntax highlight spans for this line
-                let line_end_byte = line_start_byte + line_text.byte_len();
                 let highlight_spans = highlight_spans_for_line(
                     &visible_highlight_spans,
                     visible_start,

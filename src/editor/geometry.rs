@@ -318,28 +318,20 @@ pub(super) fn monospace_char_width(ui: &egui::Ui, font_id: egui::FontId) -> f32 
 
 pub(super) fn paint_selection_for_line(
     painter: &egui::Painter,
-    document: &Document,
+    rope: &Rope,
     selection: Selection,
-    line_index: usize,
+    line_start: usize,
+    line_end: usize,
     text_pos: egui::Pos2,
     row_height: f32,
     char_width: f32,
     color: egui::Color32,
 ) {
-    let (selection_start, selection_end) = selection_range(selection);
-    if selection_start == selection_end {
+    let Some((start_column, end_column)) =
+        selection_columns_for_byte_range(rope, selection, line_start, line_end)
+    else {
         return;
-    }
-
-    let (line_start, line_end) = visual_line_bounds(&document.rope, line_index);
-    let start = selection_start.max(line_start);
-    let end = selection_end.min(line_end);
-    if start >= end {
-        return;
-    }
-
-    let start_column = document.rope.byte_slice(line_start..start).chars().count();
-    let end_column = document.rope.byte_slice(line_start..end).chars().count();
+    };
     let min = egui::pos2(text_pos.x + start_column as f32 * char_width, text_pos.y);
     let max = egui::pos2(
         text_pos.x + end_column as f32 * char_width,
@@ -354,6 +346,54 @@ pub(super) fn paint_selection_for_line(
         egui::Stroke::new(1.0, color.gamma_multiply(1.3)),
         egui::StrokeKind::Inside,
     );
+}
+
+pub(super) fn selection_columns_for_byte_range(
+    rope: &Rope,
+    selection: Selection,
+    line_start: usize,
+    line_end: usize,
+) -> Option<(usize, usize)> {
+    let (selection_start, selection_end) = selection_range(selection);
+    if selection_start == selection_end {
+        return None;
+    }
+    let line_break_selected = selection_start <= line_end
+        && selection_end > line_end
+        && rope
+            .byte_slice(line_end..)
+            .chars()
+            .next()
+            .is_some_and(|ch| ch == '\n' || ch == '\r');
+
+    if line_start == line_end {
+        if line_break_selected
+            || (line_end == rope.byte_len()
+                && selection_start <= line_start
+                && selection_end >= line_end)
+        {
+            return Some((0, 1));
+        }
+        return None;
+    }
+
+    let start = selection_start.max(line_start);
+    let end = selection_end.min(line_end);
+    if start < end {
+        let start_column = rope.byte_slice(line_start..start).chars().count();
+        let mut end_column = rope.byte_slice(line_start..end).chars().count();
+        if line_break_selected {
+            end_column += 1;
+        }
+        return Some((start_column, end_column.max(start_column + 1)));
+    }
+
+    if line_break_selected {
+        let column = rope.byte_slice(line_start..line_end).chars().count();
+        return Some((column, column + 1));
+    }
+
+    None
 }
 
 pub fn select_word_at_offset(rope: &Rope, offset: usize) -> Selection {
@@ -535,7 +575,10 @@ mod tests {
 
         assert!(!rope.is_char_boundary(search_start));
 
-        assert_eq!(previous_grapheme_boundary(&rope, caret), caret - 'š'.len_utf8());
+        assert_eq!(
+            previous_grapheme_boundary(&rope, caret),
+            caret - 'š'.len_utf8()
+        );
     }
 
     #[test]
@@ -544,5 +587,88 @@ mod tests {
         let rope = Rope::from(text.as_str());
 
         assert_eq!(next_grapheme_boundary(&rope, 0), 1);
+    }
+
+    #[test]
+    fn selection_columns_use_wrapped_byte_range() {
+        let rope = Rope::from("abcdefghijklmnopqrstuv");
+        let selection = Selection {
+            anchor: 0,
+            head: rope.byte_len(),
+        };
+
+        assert_eq!(
+            selection_columns_for_byte_range(&rope, selection, 0, 10),
+            Some((0, 10))
+        );
+        assert_eq!(
+            selection_columns_for_byte_range(&rope, selection, 10, 20),
+            Some((0, 10))
+        );
+        assert_eq!(
+            selection_columns_for_byte_range(&rope, selection, 20, 22),
+            Some((0, 2))
+        );
+    }
+
+    #[test]
+    fn selection_columns_show_newline_width_for_empty_lines() {
+        let rope = Rope::from("a\n\nb");
+        let line_start = byte_of_visual_line(&rope, 1);
+        let (_, line_end) = visual_line_bounds(&rope, 1);
+
+        assert_eq!(line_start, line_end);
+        assert_eq!(
+            selection_columns_for_byte_range(
+                &rope,
+                Selection {
+                    anchor: line_start,
+                    head: line_end + 1,
+                },
+                line_start,
+                line_end,
+            ),
+            Some((0, 1))
+        );
+    }
+
+    #[test]
+    fn selection_columns_show_newline_marker_after_selected_text() {
+        let rope = Rope::from("abc\ndef");
+        let (line_start, line_end) = visual_line_bounds(&rope, 0);
+
+        assert_eq!(
+            selection_columns_for_byte_range(
+                &rope,
+                Selection {
+                    anchor: line_start,
+                    head: line_end + 1,
+                },
+                line_start,
+                line_end,
+            ),
+            Some((0, 4))
+        );
+    }
+
+    #[test]
+    fn selection_columns_show_marker_for_selected_final_empty_line() {
+        let rope = Rope::from("a\n");
+        let line_start = byte_of_visual_line(&rope, 1);
+        let (_, line_end) = visual_line_bounds(&rope, 1);
+
+        assert_eq!(line_start, line_end);
+        assert_eq!(
+            selection_columns_for_byte_range(
+                &rope,
+                Selection {
+                    anchor: 0,
+                    head: line_start,
+                },
+                line_start,
+                line_end,
+            ),
+            Some((0, 1))
+        );
     }
 }
