@@ -22,7 +22,7 @@ const SESSION_FILE: &str = ".session.bin";
 const BACKUP_ROTATION_COUNT: usize = 5;
 
 /// Current envelope version. Increment this when the session format changes.
-const ENVELOPE_VERSION: u32 = 4;
+const ENVELOPE_VERSION: u32 = 5;
 
 /// Maximum allowed serialized snapshot size in bytes (50 MB).
 /// If the snapshot exceeds this, the save is skipped to prevent stalling the UI.
@@ -230,6 +230,9 @@ fn migrate_session(mut envelope: SessionEnvelope) -> Result<SessionSnapshot> {
     if envelope.envelope_version == 3 {
         envelope = migrate_v3_to_v4(envelope)?;
     }
+    if envelope.envelope_version == 4 {
+        envelope = migrate_v4_to_v5(envelope)?;
+    }
 
     // Now at current version, deserialize
     if envelope.payload_type != "SessionSnapshot" {
@@ -340,6 +343,200 @@ fn migrate_v3_to_v4(envelope: SessionEnvelope) -> Result<SessionEnvelope> {
         min_compatible_version: 4,
         payload_bytes,
         payload_type: "SessionSnapshot".to_owned(),
+    })
+}
+
+mod session_v4 {
+    use std::collections::BTreeSet;
+
+    use crop::Rope;
+    use serde::{Deserialize, Serialize};
+
+    use crate::model::{
+        AppState, ClosedDocument, Document, DocumentId, PaneSnapshot, PersistedUndoStacks,
+        ScrollState, Selection, SessionSnapshot, deserialize_recent_order,
+    };
+    use crate::syntax::LanguageId;
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub struct DocumentLegacy {
+        pub id: DocumentId,
+        pub title_hint: String,
+        pub rope: String,
+        pub revision: u64,
+        pub selections: Vec<Selection>,
+        pub scroll: ScrollState,
+        pub tab_width: usize,
+        pub use_soft_tabs: bool,
+        pub pinned: bool,
+        #[serde(default)]
+        pub syntax_override: Option<LanguageId>,
+        #[serde(default)]
+        pub bookmarks: BTreeSet<usize>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct ClosedDocumentLegacy {
+        document: DocumentLegacy,
+        order: u64,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct AppStateLegacy {
+        documents: Vec<DocumentLegacy>,
+        tab_order: Vec<DocumentId>,
+        active_document: DocumentId,
+        next_untitled_index: u64,
+        #[serde(deserialize_with = "deserialize_recent_order")]
+        recent_order: Vec<DocumentId>,
+        #[serde(default)]
+        closed_documents: Vec<ClosedDocumentLegacy>,
+        #[serde(default)]
+        next_closed_order: u64,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    pub struct SessionSnapshotLegacy {
+        pub schema_version: u32,
+        state: AppStateLegacy,
+        panes: Vec<PaneSnapshot>,
+        active_pane: usize,
+    }
+
+    #[cfg(test)]
+    pub fn legacy_snapshot_from_state(state: &AppState) -> SessionSnapshotLegacy {
+        let documents = state
+            .documents
+            .iter()
+            .map(|doc| DocumentLegacy {
+                id: doc.id,
+                title_hint: doc.title_hint.clone(),
+                rope: doc.rope.to_string(),
+                revision: doc.revision,
+                selections: doc.selections.clone(),
+                scroll: doc.scroll,
+                tab_width: doc.tab_width,
+                use_soft_tabs: doc.use_soft_tabs,
+                pinned: doc.pinned,
+                syntax_override: doc.syntax_override,
+                bookmarks: doc.bookmarks.clone(),
+            })
+            .collect();
+        let closed_documents = state
+            .closed_documents
+            .iter()
+            .map(|closed| ClosedDocumentLegacy {
+                document: DocumentLegacy {
+                    id: closed.document.id,
+                    title_hint: closed.document.title_hint.clone(),
+                    rope: closed.document.rope.to_string(),
+                    revision: closed.document.revision,
+                    selections: closed.document.selections.clone(),
+                    scroll: closed.document.scroll,
+                    tab_width: closed.document.tab_width,
+                    use_soft_tabs: closed.document.use_soft_tabs,
+                    pinned: closed.document.pinned,
+                    syntax_override: closed.document.syntax_override,
+                    bookmarks: closed.document.bookmarks.clone(),
+                },
+                order: closed.order,
+            })
+            .collect();
+
+        SessionSnapshotLegacy {
+            schema_version: 4,
+            state: AppStateLegacy {
+                documents,
+                tab_order: state.tab_order.clone(),
+                active_document: state.active_document,
+                next_untitled_index: state.next_untitled_index,
+                recent_order: state.recent_order.clone(),
+                closed_documents,
+                next_closed_order: state.next_closed_order,
+            },
+            panes: Vec::new(),
+            active_pane: 0,
+        }
+    }
+
+    pub fn document_from_legacy(legacy: DocumentLegacy) -> Document {
+        Document::from_stored(
+            legacy.id,
+            legacy.title_hint,
+            Rope::from(legacy.rope),
+            legacy.revision,
+            legacy.selections,
+            legacy.scroll,
+            legacy.tab_width,
+            legacy.use_soft_tabs,
+            legacy.pinned,
+            legacy.syntax_override,
+            legacy.bookmarks,
+            PersistedUndoStacks::default(),
+        )
+    }
+
+    pub fn snapshot_from_legacy(legacy: SessionSnapshotLegacy) -> SessionSnapshot {
+        let documents = legacy
+            .state
+            .documents
+            .into_iter()
+            .map(document_from_legacy)
+            .collect();
+        let closed_documents = legacy
+            .state
+            .closed_documents
+            .into_iter()
+            .map(|closed| ClosedDocument {
+                document: document_from_legacy(closed.document),
+                order: closed.order,
+            })
+            .collect();
+
+        SessionSnapshot {
+            schema_version: 5,
+            state: AppState {
+                documents,
+                tab_order: legacy.state.tab_order,
+                active_document: legacy.state.active_document,
+                next_untitled_index: legacy.state.next_untitled_index,
+                recent_order: legacy.state.recent_order,
+                closed_documents,
+                next_closed_order: legacy.state.next_closed_order,
+            },
+            panes: legacy.panes,
+            active_pane: legacy.active_pane,
+        }
+    }
+}
+
+/// Migration from envelope v4 to v5.
+/// v4 stored `Document` without the trailing `persisted_undo` field. Bincode cannot
+/// apply serde defaults for missing trailing fields, so those sessions must be
+/// decoded with an explicit legacy layout before re-serializing.
+fn migrate_v4_to_v5(envelope: SessionEnvelope) -> Result<SessionEnvelope> {
+    let payload_type = envelope.payload_type.clone();
+    if let Ok(mut snapshot) = bincode::deserialize::<SessionSnapshot>(&envelope.payload_bytes) {
+        snapshot.schema_version = ENVELOPE_VERSION;
+        let payload_bytes = bincode::serialize(&snapshot)?;
+        return Ok(SessionEnvelope {
+            envelope_version: 5,
+            min_compatible_version: 4,
+            payload_bytes,
+            payload_type,
+        });
+    }
+
+    let legacy: session_v4::SessionSnapshotLegacy = bincode::deserialize(&envelope.payload_bytes)
+        .with_context(|| "failed to deserialize legacy v4 session")?;
+    let snapshot = session_v4::snapshot_from_legacy(legacy);
+    let payload_bytes = bincode::serialize(&snapshot)?;
+
+    Ok(SessionEnvelope {
+        envelope_version: 5,
+        min_compatible_version: 4,
+        payload_bytes,
+        payload_type,
     })
 }
 
@@ -510,21 +707,38 @@ pub fn load_session(
 
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
 
+    match load_snapshot_from_bytes(path, &bytes, telemetry) {
+        Ok(snapshot) => Ok(Some(snapshot)),
+        Err(main_err) => {
+            warn!(
+                error = %main_err,
+                path = %path.display(),
+                "main session unloadable, trying backups"
+            );
+            restore_from_backup_or_fail(path, telemetry, main_err)
+        }
+    }
+}
+
+fn load_snapshot_from_bytes(
+    path: &PathBuf,
+    bytes: &[u8],
+    telemetry: &mut SaveTelemetry,
+) -> Result<SessionSnapshot> {
     // Try to deserialize as new envelope format first
-    match SessionEnvelope::from_bytes(&bytes) {
+    match SessionEnvelope::from_bytes(bytes) {
         Ok(envelope) => {
             let original_version = envelope.envelope_version;
             let mut snapshot = SessionEnvelope::open(envelope)?;
             if original_version < 4 {
                 recover_orphan_documents(path, &mut snapshot, telemetry);
             }
-            Ok(Some(snapshot))
+            Ok(snapshot)
         }
-        Err(_) => {
+        Err(envelope_err) => {
             // Fallback: try to deserialize as legacy SessionSnapshot (v1/v2)
-            match bincode::deserialize::<SessionSnapshot>(&bytes) {
+            match bincode::deserialize::<SessionSnapshot>(bytes) {
                 Ok(snapshot) => {
-                    // Support schema v1 by migrating to v2
                     if snapshot.schema_version == 1 {
                         let mut migrated = SessionSnapshot {
                             schema_version: 2,
@@ -533,7 +747,7 @@ pub fn load_session(
                             active_pane: 0,
                         };
                         recover_orphan_documents(path, &mut migrated, telemetry);
-                        return Ok(Some(migrated));
+                        return Ok(migrated);
                     }
 
                     if snapshot.schema_version != 2 {
@@ -542,19 +756,17 @@ pub fn load_session(
 
                     let mut snapshot = snapshot;
                     recover_orphan_documents(path, &mut snapshot, telemetry);
-                    Ok(Some(snapshot))
+                    Ok(snapshot)
                 }
                 Err(_) => {
-                    // Try truly old v1 format (different struct without panes)
                     #[derive(Serialize, Deserialize)]
                     struct OldSessionV1 {
                         pub schema_version: u32,
                         pub state: crate::model::AppState,
                     }
 
-                    match bincode::deserialize::<OldSessionV1>(&bytes) {
+                    match bincode::deserialize::<OldSessionV1>(bytes) {
                         Ok(old) => {
-                            // Migrate v1 to current format
                             let mut migrated = SessionSnapshot {
                                 schema_version: 2,
                                 state: old.state,
@@ -562,48 +774,54 @@ pub fn load_session(
                                 active_pane: 0,
                             };
                             recover_orphan_documents(path, &mut migrated, telemetry);
-                            return Ok(Some(migrated));
+                            Ok(migrated)
                         }
-                        Err(_) => {
-                            // Main session is corrupt, quarantine it and try backups
-                            warn!(
-                                path = %path.display(),
-                                "main session corrupt, trying backups"
-                            );
-                            quarantine_corrupt_session(path, telemetry);
-
-                            match load_session_from_backup(path, telemetry) {
-                                Ok(Some((snapshot, backup_path))) => {
-                                    // Restore from backup
-                                    let _ = fs::copy(&backup_path, path);
-                                    info!(
-                                        backup_path = %backup_path.display(),
-                                        "restored session from backup"
-                                    );
-                                    telemetry.recovery_events.push(RecoveryEvent {
-                                        timestamp: std::time::SystemTime::now(),
-                                        kind: RecoveryEventKind::BackupRestored,
-                                        message: format!(
-                                            "Restored session from backup {}",
-                                            backup_path.display()
-                                        ),
-                                    });
-                                    Ok(Some(snapshot))
-                                }
-                                Ok(None) => {
-                                    warn!("no loadable backups found");
-                                    Ok(None)
-                                }
-                                Err(err) => {
-                                    warn!(error = %err, "failed to load from backup");
-                                    Ok(None)
-                                }
-                            }
-                        }
+                        Err(legacy_err) => Err(envelope_err)
+                            .context("failed to decode session envelope")
+                            .context(format!("legacy session decode failed: {legacy_err}")),
                     }
                 }
             }
         }
+    }
+}
+
+fn restore_from_backup_or_fail(
+    path: &PathBuf,
+    telemetry: &mut SaveTelemetry,
+    main_err: anyhow::Error,
+) -> Result<Option<SessionSnapshot>> {
+    match load_session_from_backup(path, telemetry) {
+        Ok(Some((snapshot, backup_path))) => {
+            if let Err(err) = fs::copy(&backup_path, path) {
+                warn!(
+                    error = %err,
+                    path = %path.display(),
+                    backup_path = %backup_path.display(),
+                    "failed to overwrite main session from backup"
+                );
+            } else {
+                info!(
+                    backup_path = %backup_path.display(),
+                    "restored session from backup"
+                );
+            }
+            telemetry.recovery_events.push(RecoveryEvent {
+                timestamp: std::time::SystemTime::now(),
+                kind: RecoveryEventKind::BackupRestored,
+                message: format!(
+                    "Restored session from backup {}",
+                    backup_path.display()
+                ),
+            });
+            Ok(Some(snapshot))
+        }
+        Ok(None) => Err(main_err.context(
+            "session file exists but could not be loaded from main file or any backup",
+        )),
+        Err(backup_err) => Err(main_err
+            .context("session file exists but could not be loaded from main file")
+            .context(format!("backup recovery also failed: {backup_err}"))),
     }
 }
 
@@ -824,6 +1042,7 @@ fn write_snapshot(path: &PathBuf, snapshot: &SessionSnapshot) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 pub fn quarantine_corrupt_session(path: &PathBuf, telemetry: &mut SaveTelemetry) {
     let bad_path = path.with_extension("bin.bad");
     if let Err(err) = fs::rename(path, &bad_path) {

@@ -100,7 +100,7 @@ Persistence runs on a background thread via `SaveWorker`. The UI thread never bl
 
 Sessions are stored in a versioned envelope (`SessionEnvelope`):
 
-- `schema_version`: Current version is 4
+- `schema_version`: Current version is 5 (envelope v5 adds persisted undo history per document)
 - `payload_type`: Always "SessionSnapshot"
 - `payload_bytes`: Bincode-serialized `SessionSnapshot`
 
@@ -115,20 +115,27 @@ On startup, if the main session file is corrupt:
 2. Backup files (`.session.bin.1`, `.session.bin.2`, etc.) are tried in order
 3. The most recent valid backup is restored
 4. A recovery event is logged with the telemetry system
-5. If all backups are corrupt, a fresh session is created
+5. If all backups are corrupt, startup fails with a fatal error — the app exits and **does not** overwrite or quarantine the session file
 
 ### Data Integrity
 
-- Session files are written atomically (write to temp, then rename)
-- Snapshot budget checks prevent huge sessions from stalling the UI
+- Session files are written atomically (write to temp, then rename); a failed save leaves the previous session file on disk untouched
+- If the snapshot is too large to save (50 MB budget), the save is skipped and the last successful session file remains
+- If a session file exists but cannot be loaded from the main file or any backup, the app exits immediately rather than starting with an empty session
 - The `validate()` method repairs stale tab_order, invalid active_document, and out-of-bounds selections on restore
 - Crash recovery is tested via `stress_tests::tests::crash_restart_*`
 
+### What is Saved (Session)
+
+- Document text, selections, scroll, tab metadata, bookmarks
+- Undo/redo history: last 10 undo groups per document (one Cmd+Z step each), plus any redo stack; capped at 512 KB of transaction text per document to protect session size
+- Closed tab buffers (including their undo history)
+
 ### What is NOT Saved
 
-- Undo/redo history (intentional - preserves privacy and reduces session size)
 - Clipboard contents
 - Transient UI state (command palette visibility, search bar state)
+- In-flight typing groups (committed to undo on snapshot export)
 
 ## Near-Term Direction
 

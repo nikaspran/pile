@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::syntax::{LanguageDetection, LanguageId};
 use crate::syntax_highlighting::DocumentSyntaxState;
 
-use super::{DocumentId, EditTransaction, ScrollState, Selection, UndoState};
+use super::{DocumentId, EditTransaction, PersistedUndoStacks, ScrollState, Selection, UndoState};
 
 const FALLBACK_TITLE: &str = "Untitled";
 const MAX_AUTO_TITLE_CHARS: usize = 48;
@@ -38,6 +38,9 @@ pub struct Document {
     pub syntax_override: Option<LanguageId>,
     /// Bookmarks stored as byte offsets (0-based) for consistency with selections
     pub bookmarks: BTreeSet<usize>,
+    /// Undo/redo stacks restored across sessions (written on snapshot export).
+    #[serde(default)]
+    pub(crate) persisted_undo: PersistedUndoStacks,
     /// Per-document tree-sitter syntax state (parse tree + highlight cache)
     #[serde(skip)]
     pub syntax_state: DocumentSyntaxState,
@@ -63,6 +66,41 @@ mod rope_serde {
 }
 
 impl Document {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_stored(
+        id: DocumentId,
+        title_hint: String,
+        rope: Rope,
+        revision: u64,
+        selections: Vec<Selection>,
+        scroll: ScrollState,
+        tab_width: usize,
+        use_soft_tabs: bool,
+        pinned: bool,
+        syntax_override: Option<LanguageId>,
+        bookmarks: BTreeSet<usize>,
+        persisted_undo: PersistedUndoStacks,
+    ) -> Self {
+        Self {
+            id,
+            title_hint,
+            rope,
+            revision,
+            selections,
+            scroll,
+            occurrence_selections: Vec::new(),
+            multi_cursor_query: None,
+            undo: UndoState::default(),
+            tab_width,
+            use_soft_tabs,
+            pinned,
+            syntax_override,
+            bookmarks,
+            persisted_undo,
+            syntax_state: DocumentSyntaxState::new(),
+        }
+    }
+
     pub fn new_untitled(_index: u64, default_tab_width: usize, default_soft_tabs: bool) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -79,6 +117,7 @@ impl Document {
             pinned: false,
             syntax_override: None,
             bookmarks: BTreeSet::new(),
+            persisted_undo: PersistedUndoStacks::default(),
             syntax_state: DocumentSyntaxState::new(),
         }
     }
@@ -91,6 +130,7 @@ impl Document {
         self.rope = Rope::from(text);
         self.revision += 1;
         self.undo.clear();
+        self.persisted_undo = PersistedUndoStacks::default();
     }
 
     pub fn display_title(&self) -> String {
@@ -295,6 +335,23 @@ impl Document {
             selections_before: vec![selection_before],
         });
         self.undo.commit_group();
+    }
+
+    /// Copy live undo stacks into the wire-format field for session export.
+    pub fn export_persisted_undo(&mut self) {
+        self.persisted_undo = self.undo.export_persisted();
+    }
+
+    /// Restore undo stacks from the wire-format field after session load.
+    pub fn import_persisted_undo(&mut self) {
+        if self.persisted_undo.is_empty() {
+            return;
+        }
+        let persisted = std::mem::take(&mut self.persisted_undo);
+        let document_len = self.rope.byte_len();
+        if !self.undo.import_persisted(persisted, document_len) {
+            self.undo.clear();
+        }
     }
 
     /// Clamp selections to valid byte offsets and fix scroll values.

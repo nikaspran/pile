@@ -1,5 +1,8 @@
 use super::*;
-use crate::model::AppState;
+use crate::model::{
+    AppState, Document, DocumentEdit, EditTransaction, PersistedUndoStacks, Selection,
+    SessionSnapshot,
+};
 
 #[test]
 fn flush_writes_a_loadable_session_snapshot() {
@@ -22,7 +25,7 @@ fn flush_writes_a_loadable_session_snapshot() {
         .unwrap();
 
     let loaded = load_session(&path, &mut telemetry).unwrap().unwrap();
-    assert_eq!(loaded.schema_version, 4); // Now using envelope v4
+    assert_eq!(loaded.schema_version, 5);
     assert_eq!(loaded.state.documents.len(), 1);
 
     worker.shutdown();
@@ -75,7 +78,7 @@ fn envelope_roundtrip_preserves_session() {
     let envelope = SessionEnvelope::wrap(&snapshot).unwrap();
     let loaded = SessionEnvelope::open(envelope).unwrap();
 
-    assert_eq!(loaded.schema_version, 4);
+    assert_eq!(loaded.schema_version, 5);
     assert_eq!(loaded.state.documents.len(), 1);
 }
 
@@ -106,7 +109,7 @@ fn migration_v1_to_v2_then_v3() {
     // This should migrate through v1->v2->v3
     let migrated = SessionEnvelope::open(v1_envelope).unwrap();
 
-    assert_eq!(migrated.schema_version, 4);
+    assert_eq!(migrated.schema_version, 5);
     assert_eq!(migrated.state.documents.len(), 1);
 }
 
@@ -218,27 +221,19 @@ fn load_session_from_backup_when_main_corrupt() {
 
     // Verify main session exists and is valid
     let loaded = load_session(&path, &mut telemetry).unwrap().unwrap();
-    assert_eq!(loaded.schema_version, 4);
+    assert_eq!(loaded.schema_version, 5);
 
     // Now corrupt the main session file
     fs::write(&path, "corrupted data").unwrap();
 
-    // Main session should fail to load now
-    let result = load_session(&path, &mut telemetry);
-    assert!(result.is_err() || result.unwrap().is_none());
-
-    // But we should have a backup (created before the corrupt write)
-    // Actually, let's manually create a backup for this test
+    // Write a valid session to backup; load_session should recover without quarantine
     let backup_path = path.with_extension("bin.1");
-    // Write a valid session to backup
     write_snapshot(&backup_path, &SessionSnapshot::from(&AppState::empty())).unwrap();
 
-    // Quarantine the corrupt main session
-    quarantine_corrupt_session(&path, &mut telemetry);
-
-    // Try to load from backup
-    let backup_result = load_session_from_backup(&path, &mut telemetry).unwrap();
-    assert!(backup_result.is_some());
+    let restored = load_session(&path, &mut telemetry).unwrap().unwrap();
+    assert_eq!(restored.schema_version, 5);
+    assert!(path.exists());
+    assert!(!path.with_extension("bin.bad").exists());
 
     worker.shutdown();
 
@@ -321,7 +316,7 @@ fn migration_v2_to_v3_preserves_state() {
     // Migrate to v3
     let migrated = SessionEnvelope::open(v2_envelope).unwrap();
 
-    assert_eq!(migrated.schema_version, 4);
+    assert_eq!(migrated.schema_version, 5);
     assert_eq!(migrated.state.documents.len(), state.documents.len());
 }
 
@@ -361,7 +356,7 @@ fn migration_from_v1_with_documents() {
 
     let migrated = SessionEnvelope::open(v1_envelope).unwrap();
 
-    assert_eq!(migrated.schema_version, 4);
+    assert_eq!(migrated.schema_version, 5);
     assert_eq!(migrated.state.documents.len(), 3); // 2 + 1 default
     assert!(migrated.panes.is_empty());
 }
@@ -378,15 +373,11 @@ fn corrupt_session_truncated_data() {
     // Write truncated data (just 4 bytes)
     fs::write(&path, vec![1, 2, 3, 4]).unwrap();
 
-    // Try to load - should fail gracefully
+    // Try to load - should fail without moving the session file
     let result = load_session(&path, &mut telemetry);
-    assert!(result.is_err() || result.unwrap().is_none());
-
-    // Verify quarantine was called (file should be moved to .bad)
-    assert!(path.with_extension("bin.bad").exists());
-
-    // Cleanup
-    let _ = fs::remove_file(path.with_extension("bin.bad"));
+    assert!(result.is_err());
+    assert!(path.exists());
+    assert!(!path.with_extension("bin.bad").exists());
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -401,12 +392,10 @@ fn corrupt_session_invalid_bincode() {
     let corrupt_data: Vec<u8> = (0..100).map(|i| (i * 7) as u8).collect();
     fs::write(&path, corrupt_data).unwrap();
 
-    // Try to load - should fail
+    // Try to load - should fail without moving the session file
     let result = load_session(&path, &mut telemetry);
-    assert!(result.is_err() || result.unwrap().is_none());
-
-    // Cleanup
-    let _ = fs::remove_file(&path);
+    assert!(result.is_err());
+    assert!(path.exists());
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -432,7 +421,7 @@ fn corrupt_session_quarantine_and_backup_restore() {
     match result {
         Ok(Some(snapshot)) => {
             // Successfully restored from backup
-            assert_eq!(snapshot.schema_version, 4);
+            assert_eq!(snapshot.schema_version, 5);
         }
         Ok(None) => {
             // No backup available or backup also corrupt
@@ -467,14 +456,9 @@ fn corrupt_session_with_all_backups_corrupt() {
         fs::write(&backup_path, format!("corrupt backup {}", i)).unwrap();
     }
 
-    // Try to load - should fail
-    let result = load_session(&path, &mut telemetry);
-
-    // Should not be able to load
-    assert!(result.is_err() || result.unwrap().is_none());
-
-    // Cleanup
-    let _ = fs::remove_file(&path);
+    // Should not be able to load; session files are left untouched
+    assert!(load_session(&path, &mut telemetry).is_err());
+    assert!(path.exists());
     for i in 1..=BACKUP_ROTATION_COUNT {
         let _ = fs::remove_file(path.with_extension(format!("bin.{}", i)));
     }
@@ -574,7 +558,7 @@ fn load_session_from_multiple_backups() {
     assert!(loaded.is_some());
 
     let (snapshot, backup_path) = loaded.unwrap();
-    assert_eq!(snapshot.schema_version, 4);
+    assert_eq!(snapshot.schema_version, 5);
     assert_eq!(backup_path, path.with_extension("bin.2"));
 
     // Cleanup
@@ -735,4 +719,165 @@ fn recover_orphan_documents_skips_already_closed() {
     // Cleanup
     let _ = fs::remove_file(&backup_path);
     let _ = fs::remove_dir_all(&dir);
+}
+
+fn document_with_edits(text: &str, edit_count: usize) -> AppState {
+    let mut state = AppState::empty();
+    let doc = state.active_document_mut().unwrap();
+    doc.replace_text(text);
+    for i in 0..edit_count {
+        let pos = doc.rope.byte_len();
+        let inserted = format!("{i}");
+        let after = pos + inserted.len();
+        doc.apply_grouped_edit(DocumentEdit {
+            range: pos..pos,
+            inserted_text: inserted,
+            selections_before: vec![Selection::caret(pos)],
+            selections_after: vec![Selection::caret(after)],
+        });
+    }
+    state
+}
+
+#[test]
+fn persisted_undo_survives_session_roundtrip() {
+    let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(".session.bin");
+
+    let state = document_with_edits("hello", 3);
+    let mut snapshot = SessionSnapshot::from(&state);
+    snapshot.state.prepare_for_snapshot();
+
+    let worker = SaveWorker::spawn(path.clone());
+    let (ack_tx, ack_rx) = bounded(1);
+    worker
+        .sender()
+        .send(SaveMsg::Flush(snapshot, ack_tx))
+        .unwrap();
+    ack_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap()
+        .unwrap();
+
+    let mut telemetry = SaveTelemetry::default();
+    let mut loaded = load_session(&path, &mut telemetry).unwrap().unwrap();
+    loaded.state.validate();
+
+    let mut doc = loaded.state.documents[0].clone();
+    assert_eq!(doc.text(), "hello012");
+    assert!(doc.undo());
+    assert_eq!(doc.text(), "hello01");
+    assert!(doc.undo());
+    assert_eq!(doc.text(), "hello0");
+    assert!(doc.undo());
+    assert_eq!(doc.text(), "hello");
+
+    worker.shutdown();
+    let _ = fs::remove_file(path);
+    let _ = fs::remove_dir(dir);
+}
+
+#[test]
+fn persisted_redo_survives_session_roundtrip() {
+    let dir = std::env::temp_dir().join(format!("pile-test-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(".session.bin");
+
+    let mut state = document_with_edits("base", 1);
+    {
+        let doc = state.active_document_mut().unwrap();
+        doc.undo();
+        assert_eq!(doc.text(), "base");
+    }
+
+    let mut snapshot = SessionSnapshot::from(&state);
+    snapshot.state.prepare_for_snapshot();
+
+    let worker = SaveWorker::spawn(path.clone());
+    let (ack_tx, ack_rx) = bounded(1);
+    worker
+        .sender()
+        .send(SaveMsg::Flush(snapshot, ack_tx))
+        .unwrap();
+    ack_rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap()
+        .unwrap();
+
+    let mut telemetry = SaveTelemetry::default();
+    let mut loaded = load_session(&path, &mut telemetry).unwrap().unwrap();
+    loaded.state.validate();
+
+    let mut doc = loaded.state.documents[0].clone();
+    assert_eq!(doc.text(), "base");
+    assert!(doc.redo());
+    assert_eq!(doc.text(), "base0");
+
+    worker.shutdown();
+    let _ = fs::remove_file(path);
+    let _ = fs::remove_dir(dir);
+}
+
+#[test]
+fn persisted_undo_caps_at_ten_groups() {
+    let mut state = document_with_edits("", 11);
+    state.prepare_for_snapshot();
+
+    let mut snapshot = SessionSnapshot::from(&state);
+    snapshot.state.prepare_for_snapshot();
+    let loaded = SessionEnvelope::open(SessionEnvelope::wrap(&snapshot).unwrap()).unwrap();
+    let mut loaded_state = loaded.state;
+    loaded_state.validate();
+
+    let mut doc = loaded_state.documents[0].clone();
+    assert_eq!(doc.text(), "012345678910");
+    for _ in 0..10 {
+        assert!(doc.undo());
+    }
+    assert_eq!(doc.text(), "0");
+    assert!(!doc.undo());
+}
+
+#[test]
+fn persisted_undo_old_session_without_field_loads_empty_history() {
+    let mut state = AppState::empty();
+    let doc = state.active_document_mut().unwrap();
+    doc.replace_text("legacy");
+
+    let legacy = session_v4::legacy_snapshot_from_state(&state);
+    let payload_bytes = bincode::serialize(&legacy).unwrap();
+    let envelope = SessionEnvelope {
+        envelope_version: 4,
+        min_compatible_version: 4,
+        payload_bytes,
+        payload_type: "SessionSnapshot".to_owned(),
+    };
+
+    let mut loaded = SessionEnvelope::open(envelope).unwrap();
+    loaded.state.validate();
+
+    let doc = loaded.state.documents[0].clone();
+    assert_eq!(doc.text(), "legacy");
+    assert_eq!(loaded.schema_version, 5);
+    assert!(!doc.can_undo());
+}
+
+#[test]
+fn persisted_undo_discards_invalid_history_on_import() {
+    let mut doc = Document::new_untitled(1, 4, true);
+    doc.replace_text("short");
+    doc.persisted_undo = PersistedUndoStacks {
+        undo_stack: vec![vec![EditTransaction {
+            start: 100,
+            end: 100,
+            deleted_text: String::new(),
+            inserted_text: "x".to_owned(),
+            selections_before: vec![Selection::caret(100)],
+        }]],
+        redo_stack: Vec::new(),
+    };
+
+    doc.import_persisted_undo();
+    assert!(!doc.can_undo());
 }

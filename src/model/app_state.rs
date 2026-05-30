@@ -81,6 +81,7 @@ impl AppState {
         // Validate per-document fields
         for document in &mut self.documents {
             document.validate();
+            document.import_persisted_undo();
         }
 
         // Validate closed documents
@@ -88,6 +89,16 @@ impl AppState {
             .retain(|cd| !valid_ids.contains(&cd.document.id));
         for cd in &mut self.closed_documents {
             cd.document.validate();
+            cd.document.import_persisted_undo();
+        }
+    }
+
+    pub fn prepare_for_snapshot(&mut self) {
+        for document in &mut self.documents {
+            document.export_persisted_undo();
+        }
+        for cd in &mut self.closed_documents {
+            cd.document.export_persisted_undo();
         }
     }
 

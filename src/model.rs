@@ -12,7 +12,7 @@ pub(crate) use app_state::deserialize_recent_order;
 pub use app_state::{AppState, ClosedDocument};
 pub use document::{Document, DocumentEdit};
 pub use session::{PaneSnapshot, SessionSnapshot};
-pub use undo::{EditTransaction, UndoState};
+pub use undo::{EditTransaction, PersistedUndoStacks, UndoState};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Selection {

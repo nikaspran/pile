@@ -8,7 +8,7 @@ use eframe::egui;
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
 #[cfg(unix)]
 use signal_hook::flag;
-use tracing::{info, warn};
+use tracing::{error, info};
 
 use crate::{
     command::Command,
@@ -25,7 +25,7 @@ use crate::{
     persistence::{
         RecoveryEvent, RecoveryEventKind, SaveMsg, SaveTelemetry, SaveWorker, WorkerEvent,
         default_session_path, default_settings_path, load_session, load_settings,
-        quarantine_corrupt_session, save_settings,
+        save_settings,
     },
     preferences::PreferencesState,
     search::{SearchMatch, SearchState},
@@ -154,9 +154,12 @@ impl PileApp {
             }
             Ok(None) => (AppState::empty(), None),
             Err(err) => {
-                warn!(error = %err, path = %session_path.display(), "failed to restore session");
-                quarantine_corrupt_session(&session_path, &mut telemetry);
-                (AppState::empty(), None)
+                error!(error = %err, path = %session_path.display(), "failed to restore session");
+                eprintln!(
+                    "pile: fatal: could not load session at {}: {err:#}",
+                    session_path.display()
+                );
+                std::process::exit(1);
             }
         };
 
@@ -2881,9 +2884,11 @@ impl eframe::App for PileApp {
 }
 
 fn create_snapshot(state: &AppState, panes: &[EditorPane], active_pane: usize) -> SessionSnapshot {
+    let mut state = state.clone();
+    state.prepare_for_snapshot();
     SessionSnapshot {
         schema_version: 3,
-        state: state.clone(),
+        state,
         panes: panes
             .iter()
             .map(|pane| PaneSnapshot {
