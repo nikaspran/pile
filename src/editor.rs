@@ -303,20 +303,26 @@ pub fn show_editor(
             if click || drag_started {
                 response.request_focus();
                 if let Some(pointer_position) = response.interact_pointer_pos() {
+                    let is_alt = ui.input(|i| i.modifiers.alt);
+                    let is_shift = ui.input(|i| i.modifiers.shift);
                     let now = Instant::now();
-                    let is_multi = view_state.last_click_time.is_some_and(|t| {
-                        now.duration_since(t).as_secs_f32() < TRIPLE_CLICK_DURATION
-                    });
-                    view_state.last_click_time = Some(now);
-                    if is_multi {
-                        view_state.click_count = (view_state.click_count % 3) + 1;
-                    } else {
+                    if is_alt || is_shift {
+                        view_state.last_click_time = None;
                         view_state.click_count = 1;
+                    } else {
+                        let is_multi = view_state.last_click_time.is_some_and(|t| {
+                            now.duration_since(t).as_secs_f32() < TRIPLE_CLICK_DURATION
+                        });
+                        view_state.last_click_time = Some(now);
+                        if is_multi {
+                            view_state.click_count = (view_state.click_count % 3) + 1;
+                        } else {
+                            view_state.click_count = 1;
+                        }
                     }
 
                     let offset = layout.offset_at_pointer(&document.rope, pointer_position, rect);
                     let column = column_of_byte(&document.rope, offset);
-                    let is_alt = ui.input(|i| i.modifiers.alt);
 
                     if is_alt {
                         // Column (rectangular) selection
@@ -329,6 +335,10 @@ pub fn show_editor(
                         create_column_selection(
                             document, anchor_col, column, start_line, start_line,
                         );
+                    } else if is_shift {
+                        select_to_offset_from_primary_anchor(document, offset);
+                        view_state.column_selection = false;
+                        view_state.column_selection_anchor_col = None;
                     } else if view_state.click_count == 3 {
                         document.selections = vec![select_line_at_offset(&document.rope, offset)];
                         view_state.column_selection = false;
@@ -815,6 +825,18 @@ pub fn show_editor(
         viewport_height: available_height,
         line_count: layout.line_count,
     }
+}
+
+fn select_to_offset_from_primary_anchor(document: &mut Document, offset: usize) {
+    let selection = primary_selection(document);
+    let selection = clamp_selection_to_rope(
+        &document.rope,
+        Selection {
+            anchor: selection.anchor,
+            head: offset,
+        },
+    );
+    document.selections = vec![selection];
 }
 
 #[cfg(test)]

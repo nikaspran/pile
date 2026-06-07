@@ -33,6 +33,36 @@ fn word_at_selection_handles_non_alphanumeric_word() {
 }
 
 #[test]
+fn shift_click_selection_extends_from_primary_anchor_forward() {
+    let mut document = document("hello world");
+    set_primary_selection(&mut document, Selection::caret(3));
+
+    select_to_offset_from_primary_anchor(&mut document, 8);
+
+    assert_eq!(document.selections, vec![Selection { anchor: 3, head: 8 }]);
+}
+
+#[test]
+fn shift_click_selection_extends_from_primary_anchor_backward() {
+    let mut document = document("hello world");
+    set_primary_selection(&mut document, Selection::caret(8));
+
+    select_to_offset_from_primary_anchor(&mut document, 3);
+
+    assert_eq!(document.selections, vec![Selection { anchor: 8, head: 3 }]);
+}
+
+#[test]
+fn shift_click_selection_replaces_secondary_cursors() {
+    let mut document = document("hello world");
+    document.selections = vec![Selection::caret(2), Selection::caret(6)];
+
+    select_to_offset_from_primary_anchor(&mut document, 9);
+
+    assert_eq!(document.selections, vec![Selection { anchor: 2, head: 9 }]);
+}
+
+#[test]
 fn add_all_matches_does_not_duplicate_primary_occurrence() {
     let mut document = document("foo foo");
     set_primary_selection(&mut document, Selection::caret(0));
