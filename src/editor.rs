@@ -1,8 +1,9 @@
-use crop::Rope;
+use crop::{Rope, RopeSlice};
 use eframe::egui;
 use std::time::{Duration, Instant};
 
 use crate::model::{Document, Selection};
+use crate::settings::VisibleWhitespaceMode;
 use crate::syntax_highlighting::{HighlightSpan, highlight_color, highlight_name};
 
 pub mod geometry;
@@ -226,6 +227,57 @@ fn ceil_str_char_boundary(text: &str, mut offset: usize) -> usize {
     offset
 }
 
+fn visible_whitespace_ranges(line_text: &RopeSlice<'_>) -> (usize, usize) {
+    let mut byte_pos = 0;
+    let mut leading_end = None;
+    let mut trailing_start = 0;
+
+    for ch in line_text.chars() {
+        let next_byte = byte_pos + ch.len_utf8();
+        if ch != ' ' && ch != '\t' {
+            if leading_end.is_none() {
+                leading_end = Some(byte_pos);
+            }
+            trailing_start = next_byte;
+        }
+        byte_pos = next_byte;
+    }
+
+    match leading_end {
+        Some(leading_end) => (leading_end, trailing_start),
+        None => (byte_pos, 0),
+    }
+}
+
+fn should_show_whitespace_marker(
+    mode: VisibleWhitespaceMode,
+    ch: char,
+    byte_pos: usize,
+    leading_end: usize,
+    trailing_start: usize,
+) -> bool {
+    if ch != ' ' && ch != '\t' {
+        return false;
+    }
+
+    match mode {
+        VisibleWhitespaceMode::Off => false,
+        VisibleWhitespaceMode::LeadingTrailing => {
+            byte_pos < leading_end || byte_pos >= trailing_start
+        }
+        VisibleWhitespaceMode::All => true,
+    }
+}
+
+fn lower_alpha(color: egui::Color32, factor: f32) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(
+        color.r(),
+        color.g(),
+        color.b(),
+        ((color.a() as f32) * factor).round() as u8,
+    )
+}
+
 pub fn show_editor(
     ui: &mut egui::Ui,
     document: &mut Document,
@@ -236,7 +288,7 @@ pub fn show_editor(
     extra_selections: &[Selection],
     wrap_mode: crate::settings::WrapMode,
     rulers: &[usize],
-    show_visible_whitespace: bool,
+    visible_whitespace: VisibleWhitespaceMode,
     show_indentation_guides: bool,
     theme: crate::settings::Theme,
     font_family: &crate::settings::FontFamily,
@@ -563,9 +615,10 @@ pub fn show_editor(
                     let indent_level = line_indent_level(&document.rope, line_index);
                     if indent_level > 0 {
                         let guide_color = theme.indent_guide();
-                        for col in
-                            indentation_guide_columns_for_line(indent_level, &visible_indent_columns)
-                        {
+                        for col in indentation_guide_columns_for_line(
+                            indent_level,
+                            &visible_indent_columns,
+                        ) {
                             let x = indentation_guide_x(&layout, col, rect.left());
                             painter.line_segment(
                                 [egui::pos2(x, y), egui::pos2(x, y + layout.row_height)],
@@ -651,16 +704,30 @@ pub fn show_editor(
                     theme,
                 );
 
-                if show_visible_whitespace {
-                    let whitespace_color = ui.visuals().weak_text_color();
+                if visible_whitespace != VisibleWhitespaceMode::Off {
+                    let whitespace_color = lower_alpha(ui.visuals().weak_text_color(), 0.65);
+                    let (leading_end, trailing_start) =
+                        if visible_whitespace == VisibleWhitespaceMode::LeadingTrailing {
+                            visible_whitespace_ranges(&line_text)
+                        } else {
+                            (0, 0)
+                        };
                     let mut x_offset = 0.0;
                     let mut span_idx = 0;
                     let mut byte_pos = 0;
 
                     for ch in line_text.chars() {
-                        let (display_ch, mut color) = match ch {
-                            ' ' => ('·', whitespace_color),
-                            '\t' => ('→', whitespace_color),
+                        let show_marker = should_show_whitespace_marker(
+                            visible_whitespace,
+                            ch,
+                            byte_pos,
+                            leading_end,
+                            trailing_start,
+                        );
+                        let (display_ch, mut color) = match (ch, show_marker) {
+                            (' ', true) => ('·', whitespace_color),
+                            ('\t', true) => ('→', whitespace_color),
+                            (' ' | '\t', false) => (' ', ui.visuals().text_color()),
                             _ => (ch, ui.visuals().text_color()),
                         };
 
@@ -674,14 +741,14 @@ pub fn show_editor(
                             && byte_pos >= highlight_spans[span_idx].0
                             && byte_pos < highlight_spans[span_idx].1
                         {
-                            if ch != ' ' && ch != '\t' {
+                            if !show_marker && ch != ' ' && ch != '\t' {
                                 color = highlight_spans[span_idx].2;
                             }
                         }
 
                         // Render the character - use a small buffer for whitespace display chars
                         let mut ch_buf = [0u8; 4];
-                        let display_str = if ch == ' ' || ch == '\t' {
+                        let display_str = if show_marker || ch == ' ' || ch == '\t' {
                             display_ch.encode_utf8(&mut ch_buf);
                             // SAFETY: ch_buf lives until end of this iteration
                             // We need to use a reference that lasts for this iteration only

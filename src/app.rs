@@ -24,8 +24,7 @@ use crate::{
     parse_worker::{ParseEvent, ParseWorker},
     persistence::{
         RecoveryEvent, RecoveryEventKind, SaveMsg, SaveTelemetry, SaveWorker, WorkerEvent,
-        default_session_path, default_settings_path, load_session, load_settings,
-        save_settings,
+        default_session_path, default_settings_path, load_session, load_settings, save_settings,
     },
     preferences::PreferencesState,
     search::{SearchMatch, SearchState},
@@ -1253,6 +1252,11 @@ impl PileApp {
             AppCommand::ToggleVisibleWhitespace => {
                 self.handle_command(crate::command::Command::ToggleVisibleWhitespace)
             }
+            AppCommand::SetVisibleWhitespace(mode) => {
+                self.settings.visible_whitespace = mode;
+                let settings_path = default_settings_path();
+                save_settings(&settings_path, &self.settings);
+            }
             AppCommand::ToggleIndentGuides => {
                 self.handle_command(crate::command::Command::ToggleIndentGuides)
             }
@@ -1537,7 +1541,7 @@ impl PileApp {
                 save_settings(&settings_path, &self.settings);
             }
             ToggleVisibleWhitespace => {
-                self.settings.show_visible_whitespace = !self.settings.show_visible_whitespace;
+                self.settings.visible_whitespace = self.settings.visible_whitespace.cycle();
                 let settings_path = default_settings_path();
                 save_settings(&settings_path, &self.settings);
             }
@@ -2405,7 +2409,7 @@ impl PileApp {
                                 &extra_selections,
                                 self.settings.wrap_mode,
                                 &self.settings.rulers,
-                                self.settings.show_visible_whitespace,
+                                self.settings.visible_whitespace,
                                 self.settings.show_indentation_guides,
                                 self.settings.theme,
                                 &self.settings.font_family,
@@ -2477,7 +2481,7 @@ impl PileApp {
                     &extra_selections,
                     self.settings.wrap_mode,
                     &self.settings.rulers,
-                    self.settings.show_visible_whitespace,
+                    self.settings.visible_whitespace,
                     self.settings.show_indentation_guides,
                     self.settings.theme,
                     &self.settings.font_family,
@@ -2504,7 +2508,7 @@ impl PileApp {
                 &extra_selections,
                 self.settings.wrap_mode,
                 &self.settings.rulers,
-                self.settings.show_visible_whitespace,
+                self.settings.visible_whitespace,
                 self.settings.show_indentation_guides,
                 self.settings.theme,
                 &self.settings.font_family,

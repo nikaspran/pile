@@ -1,5 +1,5 @@
 use crate::persistence::{default_settings_path, save_settings};
-use crate::settings::{FontFamily, Settings, Theme, WrapMode};
+use crate::settings::{FontFamily, Settings, Theme, VisibleWhitespaceMode, WrapMode};
 use crate::theme::apply_theme;
 use eframe::egui;
 
@@ -213,15 +213,28 @@ impl PreferencesState {
 
                 ui.separator();
 
-                // Toggle options
-                let mut show_whitespace = settings.show_visible_whitespace;
-                if ui
-                    .checkbox(&mut show_whitespace, "Show visible whitespace")
-                    .clicked()
-                {
-                    settings.show_visible_whitespace = show_whitespace;
-                    self.save(settings);
-                }
+                ui.horizontal(|ui| {
+                    ui.label("Visible whitespace:");
+                    let old_mode = settings.visible_whitespace;
+                    ui.radio_value(
+                        &mut settings.visible_whitespace,
+                        VisibleWhitespaceMode::Off,
+                        "Off",
+                    );
+                    ui.radio_value(
+                        &mut settings.visible_whitespace,
+                        VisibleWhitespaceMode::LeadingTrailing,
+                        "Leading + Trailing",
+                    );
+                    ui.radio_value(
+                        &mut settings.visible_whitespace,
+                        VisibleWhitespaceMode::All,
+                        "All",
+                    );
+                    if settings.visible_whitespace != old_mode {
+                        self.save(settings);
+                    }
+                });
 
                 let mut show_indent = settings.show_indentation_guides;
                 if ui

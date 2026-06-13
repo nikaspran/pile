@@ -20,6 +20,54 @@ fn editor_carets_are_hidden_when_editor_is_unfocused() {
 }
 
 #[test]
+fn visible_whitespace_ranges_cover_leading_and_trailing_spaces() {
+    let rope = Rope::from("  a b \t");
+    let line = rope.byte_slice(..);
+    let (leading_end, trailing_start) = visible_whitespace_ranges(&line);
+
+    assert_eq!(leading_end, 2);
+    assert_eq!(trailing_start, 5);
+    assert!(should_show_whitespace_marker(
+        VisibleWhitespaceMode::LeadingTrailing,
+        ' ',
+        0,
+        leading_end,
+        trailing_start,
+    ));
+    assert!(!should_show_whitespace_marker(
+        VisibleWhitespaceMode::LeadingTrailing,
+        ' ',
+        3,
+        leading_end,
+        trailing_start,
+    ));
+    assert!(should_show_whitespace_marker(
+        VisibleWhitespaceMode::LeadingTrailing,
+        '\t',
+        6,
+        leading_end,
+        trailing_start,
+    ));
+}
+
+#[test]
+fn visible_whitespace_ranges_treat_all_whitespace_lines_as_visible() {
+    let rope = Rope::from(" \t ");
+    let line = rope.byte_slice(..);
+    let (leading_end, trailing_start) = visible_whitespace_ranges(&line);
+
+    assert_eq!(leading_end, rope.byte_len());
+    assert_eq!(trailing_start, 0);
+    assert!(should_show_whitespace_marker(
+        VisibleWhitespaceMode::LeadingTrailing,
+        ' ',
+        2,
+        leading_end,
+        trailing_start,
+    ));
+}
+
+#[test]
 fn indentation_guides_align_with_text_columns() {
     let layout = TextLayoutPipeline::for_test(
         20.0,
@@ -32,14 +80,20 @@ fn indentation_guides_align_with_text_columns() {
         1,
     );
 
-    assert_eq!(indentation_guide_x(&layout, 4, 10.0), 10.0 + 54.0 + 4.0 * 8.0);
+    assert_eq!(
+        indentation_guide_x(&layout, 4, 10.0),
+        10.0 + 54.0 + 4.0 * 8.0
+    );
 }
 
 #[test]
 fn indentation_guides_follow_observed_indent_columns() {
     let rope = Rope::from("  one\n  two\n      child\nplain\n");
     assert_eq!(visible_indent_guide_columns(&rope, 0, 4), vec![2, 6]);
-    assert_eq!(indentation_guide_columns_for_line(0, &[2, 6]), Vec::<usize>::new());
+    assert_eq!(
+        indentation_guide_columns_for_line(0, &[2, 6]),
+        Vec::<usize>::new()
+    );
     assert_eq!(indentation_guide_columns_for_line(2, &[2, 6]), vec![2]);
     assert_eq!(indentation_guide_columns_for_line(6, &[2, 6]), vec![2, 6]);
 }

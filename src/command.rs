@@ -1332,7 +1332,7 @@ pub fn all_commands() -> Vec<CommandMetadata> {
         CommandMetadata {
             command: ToggleVisibleWhitespace,
             name: "Toggle Visible Whitespace",
-            description: "Toggle visible rendering of spaces and tabs",
+            description: "Cycle visible whitespace modes",
             category: View,
             shortcut: None,
         },

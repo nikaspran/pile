@@ -1,4 +1,4 @@
-use crate::{command::Command, native_menu::NativeMenuCommand};
+use crate::{command::Command, native_menu::NativeMenuCommand, settings::VisibleWhitespaceMode};
 
 pub(super) enum AppCommand {
     NewScratch,
@@ -47,6 +47,7 @@ pub(super) enum AppCommand {
     CommandPalette,
     ToggleWrapMode,
     ToggleVisibleWhitespace,
+    SetVisibleWhitespace(VisibleWhitespaceMode),
     ToggleIndentGuides,
     ToggleMinimap,
     ToggleStatusBar,
@@ -113,6 +114,15 @@ impl From<NativeMenuCommand> for AppCommand {
             NativeMenuCommand::CommandPalette => Self::CommandPalette,
             NativeMenuCommand::ToggleWrapMode => Self::ToggleWrapMode,
             NativeMenuCommand::ToggleVisibleWhitespace => Self::ToggleVisibleWhitespace,
+            NativeMenuCommand::SetVisibleWhitespaceOff => {
+                Self::SetVisibleWhitespace(VisibleWhitespaceMode::Off)
+            }
+            NativeMenuCommand::SetVisibleWhitespaceLeadingTrailing => {
+                Self::SetVisibleWhitespace(VisibleWhitespaceMode::LeadingTrailing)
+            }
+            NativeMenuCommand::SetVisibleWhitespaceAll => {
+                Self::SetVisibleWhitespace(VisibleWhitespaceMode::All)
+            }
             NativeMenuCommand::ToggleIndentGuides => Self::ToggleIndentGuides,
             NativeMenuCommand::ToggleMinimap => Self::ToggleMinimap,
             NativeMenuCommand::ToggleStatusBar => Self::ToggleStatusBar,

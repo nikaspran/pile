@@ -1,4 +1,4 @@
-use crate::settings::{Settings, Theme};
+use crate::settings::{Settings, Theme, VisibleWhitespaceMode};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum NativeMenuCommand {
@@ -61,6 +61,9 @@ pub enum NativeMenuCommand {
     CommandPalette,
     ToggleWrapMode,
     ToggleVisibleWhitespace,
+    SetVisibleWhitespaceOff,
+    SetVisibleWhitespaceLeadingTrailing,
+    SetVisibleWhitespaceAll,
     ToggleIndentGuides,
     ToggleMinimap,
     ToggleStatusBar,
@@ -141,7 +144,9 @@ struct BuiltMenu {
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 struct ViewMenuItems {
     toggle_wrap: muda::MenuItem,
-    toggle_whitespace: muda::CheckMenuItem,
+    visible_whitespace_off: muda::CheckMenuItem,
+    visible_whitespace_leading_trailing: muda::CheckMenuItem,
+    visible_whitespace_all: muda::CheckMenuItem,
     toggle_indent: muda::CheckMenuItem,
     toggle_minimap: muda::CheckMenuItem,
     toggle_status_bar: muda::CheckMenuItem,
@@ -159,11 +164,12 @@ impl ViewMenuItems {
             Theme::Dark => "Toggle Theme LIGHT",
             Theme::Light => "Toggle Theme DARK",
         });
-        sync_boolean_toggle(
-            &self.toggle_whitespace,
-            "Toggle Visible Whitespace",
-            settings.show_visible_whitespace,
-        );
+        self.visible_whitespace_off
+            .set_checked(settings.visible_whitespace == VisibleWhitespaceMode::Off);
+        self.visible_whitespace_leading_trailing
+            .set_checked(settings.visible_whitespace == VisibleWhitespaceMode::LeadingTrailing);
+        self.visible_whitespace_all
+            .set_checked(settings.visible_whitespace == VisibleWhitespaceMode::All);
         sync_boolean_toggle(
             &self.toggle_indent,
             "Toggle Indentation Guides",
@@ -267,6 +273,9 @@ fn command_from_id(id: &str) -> Option<NativeMenuCommand> {
         "pile.command_palette" => Some(CommandPalette),
         "pile.toggle_wrap" => Some(ToggleWrapMode),
         "pile.toggle_whitespace" => Some(ToggleVisibleWhitespace),
+        "pile.visible_whitespace_off" => Some(SetVisibleWhitespaceOff),
+        "pile.visible_whitespace_leading_trailing" => Some(SetVisibleWhitespaceLeadingTrailing),
+        "pile.visible_whitespace_all" => Some(SetVisibleWhitespaceAll),
         "pile.toggle_indent" => Some(ToggleIndentGuides),
         "pile.toggle_minimap" => Some(ToggleMinimap),
         "pile.toggle_status_bar" => Some(ToggleStatusBar),
@@ -705,13 +714,36 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
         Some(parse_accel("cmdorctrl+g")?),
     );
     let toggle_wrap = MenuItem::with_id("pile.toggle_wrap", "Toggle Wrap Mode", true, None);
-    let toggle_whitespace = CheckMenuItem::with_id(
-        "pile.toggle_whitespace",
-        "Toggle Visible Whitespace",
+    let visible_whitespace_off = CheckMenuItem::with_id(
+        "pile.visible_whitespace_off",
+        "Off",
         true,
-        settings.show_visible_whitespace,
+        settings.visible_whitespace == VisibleWhitespaceMode::Off,
         None,
     );
+    let visible_whitespace_leading_trailing = CheckMenuItem::with_id(
+        "pile.visible_whitespace_leading_trailing",
+        "Leading + Trailing",
+        true,
+        settings.visible_whitespace == VisibleWhitespaceMode::LeadingTrailing,
+        None,
+    );
+    let visible_whitespace_all = CheckMenuItem::with_id(
+        "pile.visible_whitespace_all",
+        "All",
+        true,
+        settings.visible_whitespace == VisibleWhitespaceMode::All,
+        None,
+    );
+    let visible_whitespace_menu = Submenu::with_items(
+        "Visible Whitespace",
+        true,
+        &[
+            &visible_whitespace_off,
+            &visible_whitespace_leading_trailing,
+            &visible_whitespace_all,
+        ],
+    )?;
     let toggle_indent = CheckMenuItem::with_id(
         "pile.toggle_indent",
         "Toggle Indentation Guides",
@@ -737,7 +769,9 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
 
     let view_items = ViewMenuItems {
         toggle_wrap: toggle_wrap.clone(),
-        toggle_whitespace: toggle_whitespace.clone(),
+        visible_whitespace_off: visible_whitespace_off.clone(),
+        visible_whitespace_leading_trailing: visible_whitespace_leading_trailing.clone(),
+        visible_whitespace_all: visible_whitespace_all.clone(),
         toggle_indent: toggle_indent.clone(),
         toggle_minimap: toggle_minimap.clone(),
         toggle_status_bar: toggle_status_bar.clone(),
@@ -753,7 +787,7 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
             &go_to_line,
             &PredefinedMenuItem::separator(),
             &toggle_wrap,
-            &toggle_whitespace,
+            &visible_whitespace_menu,
             &toggle_indent,
             &toggle_minimap,
             &toggle_status_bar,

@@ -1,4 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::de::{self, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
+use std::fmt;
 
 pub use crate::theme::Theme;
 
@@ -32,6 +34,76 @@ impl WrapMode {
             WrapMode::RulerWrap => "Ruler Wrap",
         }
     }
+}
+
+/// Which whitespace characters should be rendered visibly in the editor.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VisibleWhitespaceMode {
+    /// Do not render visible whitespace markers.
+    #[default]
+    Off,
+    /// Render indentation and line-end whitespace markers.
+    LeadingTrailing,
+    /// Render all space and tab markers.
+    All,
+}
+
+impl VisibleWhitespaceMode {
+    pub fn cycle(self) -> Self {
+        match self {
+            VisibleWhitespaceMode::Off => VisibleWhitespaceMode::LeadingTrailing,
+            VisibleWhitespaceMode::LeadingTrailing => VisibleWhitespaceMode::All,
+            VisibleWhitespaceMode::All => VisibleWhitespaceMode::Off,
+        }
+    }
+}
+
+fn deserialize_visible_whitespace_mode<'de, D>(
+    deserializer: D,
+) -> Result<VisibleWhitespaceMode, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct ModeVisitor;
+
+    impl Visitor<'_> for ModeVisitor {
+        type Value = VisibleWhitespaceMode;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a visible whitespace mode or legacy boolean")
+        }
+
+        fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(if value {
+                VisibleWhitespaceMode::All
+            } else {
+                VisibleWhitespaceMode::Off
+            })
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            match value {
+                "off" | "Off" | "false" => Ok(VisibleWhitespaceMode::Off),
+                "leading_trailing" | "LeadingTrailing" | "Leading + Trailing" => {
+                    Ok(VisibleWhitespaceMode::LeadingTrailing)
+                }
+                "all" | "All" | "true" => Ok(VisibleWhitespaceMode::All),
+                other => Err(E::unknown_variant(
+                    other,
+                    &["off", "leading_trailing", "all"],
+                )),
+            }
+        }
+    }
+
+    deserializer.deserialize_any(ModeVisitor)
 }
 
 /// Window state for persistence across sessions.
@@ -99,6 +171,7 @@ pub fn apply_font_settings(
 
 /// Application-wide settings that persist separately from session state.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     /// Active theme.
     pub theme: Theme,
@@ -106,8 +179,13 @@ pub struct Settings {
     pub wrap_mode: WrapMode,
     /// Ruler column positions for ruler wrap and visual indicators.
     pub rulers: Vec<usize>,
-    /// Show visible whitespace characters (spaces as middle dots, tabs as arrows).
-    pub show_visible_whitespace: bool,
+    /// Which whitespace characters to show visibly (spaces as middle dots, tabs as arrows).
+    #[serde(
+        alias = "show_visible_whitespace",
+        default,
+        deserialize_with = "deserialize_visible_whitespace_mode"
+    )]
+    pub visible_whitespace: VisibleWhitespaceMode,
     /// Show indentation guides at multiples of tab width.
     pub show_indentation_guides: bool,
     /// Show minimap with viewport indicator.
@@ -136,7 +214,7 @@ impl Default for Settings {
             theme: Theme::default(),
             wrap_mode: WrapMode::default(),
             rulers: vec![80],
-            show_visible_whitespace: false,
+            visible_whitespace: VisibleWhitespaceMode::Off,
             show_indentation_guides: true,
             show_minimap: true,
             show_status_bar: true,
@@ -148,5 +226,29 @@ impl Default for Settings {
             ignored_languages: Vec::new(),
             window_state: WindowState::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Settings, VisibleWhitespaceMode};
+
+    #[test]
+    fn visible_whitespace_deserializes_legacy_boolean() {
+        let settings: Settings =
+            serde_json::from_str(r#"{"show_visible_whitespace": true}"#).unwrap();
+
+        assert_eq!(settings.visible_whitespace, VisibleWhitespaceMode::All);
+    }
+
+    #[test]
+    fn visible_whitespace_deserializes_mode() {
+        let settings: Settings =
+            serde_json::from_str(r#"{"visible_whitespace": "leading_trailing"}"#).unwrap();
+
+        assert_eq!(
+            settings.visible_whitespace,
+            VisibleWhitespaceMode::LeadingTrailing
+        );
     }
 }
