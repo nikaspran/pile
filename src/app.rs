@@ -201,6 +201,7 @@ impl PileApp {
                             column_selection_anchor_col: pane_snap.column_selection_anchor_col,
                             scroll_animation: None,
                             cached_layout: None,
+                            pointer_drag: None,
                         },
                     })
                     .collect();

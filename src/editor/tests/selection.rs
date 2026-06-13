@@ -63,6 +63,115 @@ fn shift_click_selection_replaces_secondary_cursors() {
 }
 
 #[test]
+fn moving_selected_text_after_selection_preserves_moved_selection() {
+    let mut document = document("abc DEF ghi");
+    let selection = Selection { anchor: 4, head: 7 };
+    set_primary_selection(&mut document, selection);
+
+    assert!(move_selected_text(
+        &mut document,
+        selection,
+        4,
+        7,
+        "DEF".to_owned(),
+        11
+    ));
+
+    assert_eq!(document.text(), "abc  ghiDEF");
+    assert_eq!(
+        document.selections,
+        vec![Selection {
+            anchor: 8,
+            head: 11
+        }]
+    );
+}
+
+#[test]
+fn moving_selected_text_before_selection_preserves_moved_selection() {
+    let mut document = document("abc DEF ghi");
+    let selection = Selection { anchor: 4, head: 7 };
+    set_primary_selection(&mut document, selection);
+
+    assert!(move_selected_text(
+        &mut document,
+        selection,
+        4,
+        7,
+        "DEF".to_owned(),
+        0
+    ));
+
+    assert_eq!(document.text(), "DEFabc  ghi");
+    assert_eq!(document.selections, vec![Selection { anchor: 0, head: 3 }]);
+}
+
+#[test]
+fn moving_selected_text_inside_selection_noops() {
+    let mut document = document("abc DEF ghi");
+    let selection = Selection { anchor: 4, head: 7 };
+    set_primary_selection(&mut document, selection);
+
+    assert!(!move_selected_text(
+        &mut document,
+        selection,
+        4,
+        7,
+        "DEF".to_owned(),
+        5
+    ));
+
+    assert_eq!(document.text(), "abc DEF ghi");
+    assert_eq!(document.selections, vec![selection]);
+}
+
+#[test]
+fn moving_selected_text_undo_restores_original_selection() {
+    let mut document = document("abc DEF ghi");
+    let selection = Selection { anchor: 4, head: 7 };
+    set_primary_selection(&mut document, selection);
+
+    assert!(move_selected_text(
+        &mut document,
+        selection,
+        4,
+        7,
+        "DEF".to_owned(),
+        11
+    ));
+
+    assert!(document.undo());
+    assert_eq!(document.text(), "abc DEF ghi");
+    assert_eq!(document.selections, vec![selection]);
+}
+
+#[test]
+fn text_drag_placeholder_only_shows_for_valid_drop_offsets() {
+    let selection = Selection { anchor: 4, head: 7 };
+    let mut view_state = EditorViewState {
+        pointer_drag: Some(PointerDragState::MovingSelection {
+            selection,
+            start: 4,
+            end: 7,
+            text: "DEF".to_owned(),
+            drop_offset: 0,
+        }),
+        ..Default::default()
+    };
+
+    assert_eq!(text_drag_drop_placeholder_offset(&view_state), Some(0));
+
+    view_state.pointer_drag = Some(PointerDragState::MovingSelection {
+        selection,
+        start: 4,
+        end: 7,
+        text: "DEF".to_owned(),
+        drop_offset: 5,
+    });
+    assert_eq!(text_drag_drop_placeholder_offset(&view_state), None);
+}
+
+#[test]
 fn add_all_matches_does_not_duplicate_primary_occurrence() {
     let mut document = document("foo foo");
     set_primary_selection(&mut document, Selection::caret(0));
@@ -370,7 +479,7 @@ fn test_expand_selection_by_indent_block_basic() {
 
     let sel = primary_selection(&document);
     let expected_start = "no indent\n".len(); // 10
-    // The indent block ends at position 63 (the '\n' after "indented line 3")
+                                              // The indent block ends at position 63 (the '\n' after "indented line 3")
     let expected_end =
         "no indent\n  indented line 1\n  indented line 2\n  indented line 3\n".len() - 1; // 63
     assert_eq!(sel.anchor, expected_start);

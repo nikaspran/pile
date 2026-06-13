@@ -2,9 +2,9 @@ use crop::{Rope, RopeSlice};
 use eframe::egui;
 use std::time::{Duration, Instant};
 
-use crate::model::{Document, Selection};
+use crate::model::{Document, DocumentEdit, Selection};
 use crate::settings::VisibleWhitespaceMode;
-use crate::syntax_highlighting::{HighlightSpan, highlight_color, highlight_name};
+use crate::syntax_highlighting::{highlight_color, highlight_name, HighlightSpan};
 
 pub mod geometry;
 mod input;
@@ -35,7 +35,7 @@ pub use multicursor::{
 };
 use multicursor::{backspace_all, backspace_word_all, delete_word_all};
 use ops::*;
-pub use ops::{CaseType, convert_case_all_selections, convert_case_selection};
+pub use ops::{convert_case_all_selections, convert_case_selection, CaseType};
 pub use replace::{replace_all_matches, replace_match};
 
 const LINE_GUTTER_MIN_WIDTH: f32 = 44.0;
@@ -101,6 +101,21 @@ pub struct EditorViewState {
         Vec<usize>,
         TextLayoutPipeline,
     )>,
+    pub(crate) pointer_drag: Option<PointerDragState>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum PointerDragState {
+    Selecting {
+        anchor: usize,
+    },
+    MovingSelection {
+        selection: Selection,
+        start: usize,
+        end: usize,
+        text: String,
+        drop_offset: usize,
+    },
 }
 
 #[derive(Debug)]
@@ -380,69 +395,120 @@ pub fn show_editor(
                 *focus_pending = false;
             }
             let click = response.clicked();
-            let drag_started = response.drag_started();
+            let drag_started = response.drag_started_by(egui::PointerButton::Primary);
             if click || drag_started {
                 response.request_focus();
                 if let Some(pointer_position) = response.interact_pointer_pos() {
                     let is_alt = ui.input(|i| i.modifiers.alt);
                     let is_shift = ui.input(|i| i.modifiers.shift);
-                    let now = Instant::now();
-                    if is_alt || is_shift {
-                        view_state.last_click_time = None;
-                        view_state.click_count = 1;
+                    let press_position = if drag_started {
+                        ui.input(|i| i.pointer.press_origin())
+                            .unwrap_or(pointer_position)
                     } else {
-                        let is_multi = view_state.last_click_time.is_some_and(|t| {
-                            now.duration_since(t).as_secs_f32() < TRIPLE_CLICK_DURATION
-                        });
-                        view_state.last_click_time = Some(now);
-                        if is_multi {
-                            view_state.click_count = (view_state.click_count % 3) + 1;
-                        } else {
-                            view_state.click_count = 1;
-                        }
-                    }
+                        pointer_position
+                    };
+                    let press_offset =
+                        layout.offset_at_pointer(&document.rope, press_position, rect);
+                    let pointer_offset =
+                        layout.offset_at_pointer(&document.rope, pointer_position, rect);
 
-                    let offset = layout.offset_at_pointer(&document.rope, pointer_position, rect);
-                    let column = column_of_byte(&document.rope, offset);
-
-                    if is_alt {
-                        // Column (rectangular) selection
-                        if view_state.column_selection_anchor_col.is_none() {
-                            view_state.column_selection_anchor_col = Some(column);
-                        }
-                        view_state.column_selection = true;
-                        let anchor_col = view_state.column_selection_anchor_col.unwrap_or(column);
-                        let start_line = line_index_of_byte(&document.rope, offset);
-                        create_column_selection(
-                            document, anchor_col, column, start_line, start_line,
+                    let started_text_move = drag_started
+                        && !is_alt
+                        && !is_shift
+                        && start_selected_text_drag(
+                            document,
+                            press_offset,
+                            pointer_offset,
+                            view_state,
                         );
-                    } else if is_shift {
-                        select_to_offset_from_primary_anchor(document, offset);
-                        view_state.column_selection = false;
-                        view_state.column_selection_anchor_col = None;
-                    } else if view_state.click_count == 3 {
-                        document.selections = vec![select_line_at_offset(&document.rope, offset)];
-                        view_state.column_selection = false;
-                        view_state.column_selection_anchor_col = None;
-                    } else if view_state.click_count == 2 {
-                        document.selections = vec![select_word_at_offset(&document.rope, offset)];
+
+                    if started_text_move {
+                        view_state.preferred_column = None;
                         view_state.column_selection = false;
                         view_state.column_selection_anchor_col = None;
                     } else {
-                        document.selections = vec![Selection::caret(offset)];
-                        view_state.column_selection = false;
-                        view_state.column_selection_anchor_col = None;
+                        let now = Instant::now();
+                        if is_alt || is_shift {
+                            view_state.last_click_time = None;
+                            view_state.click_count = 1;
+                        } else {
+                            let is_multi = view_state.last_click_time.is_some_and(|t| {
+                                now.duration_since(t).as_secs_f32() < TRIPLE_CLICK_DURATION
+                            });
+                            view_state.last_click_time = Some(now);
+                            if is_multi {
+                                view_state.click_count = (view_state.click_count % 3) + 1;
+                            } else {
+                                view_state.click_count = 1;
+                            }
+                        }
+
+                        let offset = press_offset;
+                        let column = column_of_byte(&document.rope, offset);
+
+                        if is_alt {
+                            // Column (rectangular) selection
+                            if view_state.column_selection_anchor_col.is_none() {
+                                view_state.column_selection_anchor_col = Some(column);
+                            }
+                            view_state.column_selection = true;
+                            let anchor_col =
+                                view_state.column_selection_anchor_col.unwrap_or(column);
+                            let start_line = line_index_of_byte(&document.rope, offset);
+                            let pointer_column = column_of_byte(&document.rope, pointer_offset);
+                            let pointer_line = line_index_of_byte(&document.rope, pointer_offset);
+                            create_column_selection(
+                                document,
+                                anchor_col,
+                                pointer_column,
+                                start_line,
+                                pointer_line,
+                            );
+                        } else if is_shift {
+                            select_to_offset_from_primary_anchor(document, pointer_offset);
+                            view_state.column_selection = false;
+                            view_state.column_selection_anchor_col = None;
+                        } else if view_state.click_count == 3 {
+                            document.selections =
+                                vec![select_line_at_offset(&document.rope, offset)];
+                            view_state.column_selection = false;
+                            view_state.column_selection_anchor_col = None;
+                        } else if view_state.click_count == 2 {
+                            document.selections =
+                                vec![select_word_at_offset(&document.rope, offset)];
+                            view_state.column_selection = false;
+                            view_state.column_selection_anchor_col = None;
+                        } else {
+                            document.selections = if drag_started {
+                                view_state.pointer_drag =
+                                    Some(PointerDragState::Selecting { anchor: offset });
+                                vec![Selection {
+                                    anchor: offset,
+                                    head: pointer_offset,
+                                }]
+                            } else {
+                                view_state.pointer_drag = None;
+                                vec![Selection::caret(offset)]
+                            };
+                            view_state.column_selection = false;
+                            view_state.column_selection_anchor_col = None;
+                        }
+                        view_state.preferred_column = None;
                     }
-                    view_state.preferred_column = None;
                 }
-            } else if response.dragged() {
+            } else if response.dragged_by(egui::PointerButton::Primary) {
                 if let Some(pointer_position) = response.interact_pointer_pos() {
                     let offset = layout.offset_at_pointer(&document.rope, pointer_position, rect);
                     let column = column_of_byte(&document.rope, offset);
                     let line = line_index_of_byte(&document.rope, offset);
                     let is_alt = ui.input(|i| i.modifiers.alt);
 
-                    if is_alt || view_state.column_selection {
+                    if let Some(PointerDragState::MovingSelection { drop_offset, .. }) =
+                        &mut view_state.pointer_drag
+                    {
+                        *drop_offset = offset;
+                        // The selection is moved on mouse release; keep it visible while dragging.
+                    } else if is_alt || view_state.column_selection {
                         // Column (rectangular) selection
                         if view_state.column_selection_anchor_col.is_none() {
                             let anchor = primary_selection(document).anchor;
@@ -454,6 +520,17 @@ pub fn show_editor(
                         let anchor_line =
                             line_index_of_byte(&document.rope, primary_selection(document).anchor);
                         create_column_selection(document, anchor_col, column, anchor_line, line);
+                        view_state.pointer_drag = None;
+                    } else if let Some(PointerDragState::Selecting { anchor }) =
+                        view_state.pointer_drag
+                    {
+                        set_primary_selection(
+                            document,
+                            Selection {
+                                anchor,
+                                head: offset,
+                            },
+                        );
                     } else {
                         let mut selection = primary_selection(document);
                         if selection.anchor == selection.head {
@@ -478,6 +555,26 @@ pub fn show_editor(
                         );
                         ui.scroll_to_rect(scroll_rect, None);
                     }
+                }
+            }
+
+            if response.drag_stopped_by(egui::PointerButton::Primary) {
+                if let Some(PointerDragState::MovingSelection {
+                    selection,
+                    start,
+                    end,
+                    text,
+                    drop_offset,
+                }) = view_state.pointer_drag.take()
+                {
+                    let drop_position = ui.input(|i| i.pointer.latest_pos());
+                    let drop_offset = drop_position.map_or(drop_offset, |drop_position| {
+                        layout.offset_at_pointer(&document.rope, drop_position, rect)
+                    });
+                    changed |=
+                        move_selected_text(document, selection, start, end, text, drop_offset);
+                } else {
+                    view_state.pointer_drag = None;
                 }
             }
 
@@ -899,6 +996,17 @@ pub fn show_editor(
                     );
                 }
             }
+
+            if let Some(drop_offset) = text_drag_drop_placeholder_offset(view_state) {
+                let mut caret_pos = layout.caret_position(&document.rope, drop_offset, rect.top());
+                caret_pos.x += rect.left();
+                let placeholder_rect =
+                    egui::Rect::from_min_size(caret_pos, egui::vec2(1.0, layout.row_height));
+                painter.line_segment(
+                    [placeholder_rect.left_top(), placeholder_rect.left_bottom()],
+                    egui::Stroke::new(2.0, ui.visuals().selection.stroke.color),
+                );
+            }
         });
 
     // Smooth scroll: advance animation and save animated value
@@ -935,6 +1043,75 @@ fn select_to_offset_from_primary_anchor(document: &mut Document, offset: usize) 
         },
     );
     document.selections = vec![selection];
+}
+
+fn start_selected_text_drag(
+    document: &Document,
+    offset: usize,
+    drop_offset: usize,
+    view_state: &mut EditorViewState,
+) -> bool {
+    let selection = primary_selection(document);
+    let (start, end) = selection_range(selection);
+    if start == end || offset < start || offset >= end {
+        return false;
+    }
+
+    view_state.pointer_drag = Some(PointerDragState::MovingSelection {
+        selection,
+        start,
+        end,
+        text: document.rope.byte_slice(start..end).to_string(),
+        drop_offset,
+    });
+    true
+}
+
+fn text_drag_drop_placeholder_offset(view_state: &EditorViewState) -> Option<usize> {
+    match view_state.pointer_drag {
+        Some(PointerDragState::MovingSelection {
+            start,
+            end,
+            drop_offset,
+            ..
+        }) if drop_offset < start || drop_offset > end => Some(drop_offset),
+        _ => None,
+    }
+}
+
+fn move_selected_text(
+    document: &mut Document,
+    selection_before: Selection,
+    start: usize,
+    end: usize,
+    text: String,
+    drop_offset: usize,
+) -> bool {
+    if start >= end || text.is_empty() || drop_offset >= start && drop_offset <= end {
+        return false;
+    }
+
+    let text_len = text.len();
+    let selection_after_insert = Selection {
+        anchor: drop_offset,
+        head: drop_offset + text_len,
+    };
+
+    document.apply_multi_edit(vec![
+        DocumentEdit {
+            range: start..end,
+            inserted_text: String::new(),
+            selections_before: vec![selection_before],
+            selections_after: Vec::new(),
+        },
+        DocumentEdit {
+            range: drop_offset..drop_offset,
+            inserted_text: text,
+            selections_before: vec![selection_before],
+            selections_after: vec![selection_after_insert],
+        },
+    ]);
+    true
 }
 
 #[cfg(test)]
