@@ -37,8 +37,8 @@ impl Theme {
     /// Bracket highlight color for this theme.
     pub fn bracket_highlight(self) -> egui::Color32 {
         match self {
-            Theme::Dark => egui::Color32::from_rgba_premultiplied(255, 255, 255, 60),
-            Theme::Light => egui::Color32::from_rgba_premultiplied(0, 0, 0, 60),
+            Theme::Dark => egui::Color32::from_rgba_unmultiplied(255, 255, 255, 60),
+            Theme::Light => egui::Color32::from_rgba_unmultiplied(0, 0, 0, 60),
         }
     }
 
@@ -53,8 +53,8 @@ impl Theme {
     /// Indentation guide color for this theme.
     pub fn indent_guide(self) -> egui::Color32 {
         match self {
-            Theme::Dark => egui::Color32::from_rgba_premultiplied(255, 255, 255, 20),
-            Theme::Light => egui::Color32::from_rgba_premultiplied(0, 0, 0, 20),
+            Theme::Dark => egui::Color32::from_rgba_unmultiplied(255, 255, 255, 20),
+            Theme::Light => egui::Color32::from_rgba_unmultiplied(0, 0, 0, 20),
         }
     }
 
@@ -66,24 +66,24 @@ impl Theme {
     /// Minimap text color for this theme.
     pub fn minimap_text(self) -> egui::Color32 {
         match self {
-            Theme::Dark => egui::Color32::from_rgba_premultiplied(180, 180, 180, 30),
-            Theme::Light => egui::Color32::from_rgba_premultiplied(100, 100, 100, 30),
+            Theme::Dark => egui::Color32::from_rgba_unmultiplied(180, 180, 180, 30),
+            Theme::Light => egui::Color32::from_rgba_unmultiplied(100, 100, 100, 30),
         }
     }
 
     /// Minimap comment color for this theme.
     pub fn minimap_comment(self) -> egui::Color32 {
         match self {
-            Theme::Dark => egui::Color32::from_rgba_premultiplied(100, 100, 100, 40),
-            Theme::Light => egui::Color32::from_rgba_premultiplied(150, 150, 150, 40),
+            Theme::Dark => egui::Color32::from_rgba_unmultiplied(100, 100, 100, 40),
+            Theme::Light => egui::Color32::from_rgba_unmultiplied(150, 150, 150, 40),
         }
     }
 
     /// Minimap keyword color for this theme.
     pub fn minimap_keyword(self) -> egui::Color32 {
         match self {
-            Theme::Dark => egui::Color32::from_rgba_premultiplied(150, 200, 255, 60),
-            Theme::Light => egui::Color32::from_rgba_premultiplied(100, 150, 200, 60),
+            Theme::Dark => egui::Color32::from_rgba_unmultiplied(150, 200, 255, 60),
+            Theme::Light => egui::Color32::from_rgba_unmultiplied(100, 150, 200, 60),
         }
     }
 
@@ -127,7 +127,7 @@ fn light_visuals() -> egui::Visuals {
     visuals.widgets.active.bg_fill = egui::Color32::from_rgb(215, 215, 215);
     visuals.window_fill = egui::Color32::from_rgb(245, 245, 245);
     visuals.panel_fill = egui::Color32::from_rgb(240, 240, 240);
-    visuals.selection.bg_fill = egui::Color32::from_rgba_premultiplied(100, 150, 255, 100);
+    visuals.selection.bg_fill = egui::Color32::from_rgba_unmultiplied(100, 150, 255, 100);
     visuals.selection.stroke.color = egui::Color32::from_rgb(0, 0, 0);
     visuals.override_text_color = Some(egui::Color32::from_rgb(30, 30, 30));
     visuals.warn_fg_color = egui::Color32::from_rgb(200, 150, 0);
@@ -137,4 +137,33 @@ fn light_visuals() -> egui::Visuals {
 /// Apply the given theme to the egui context.
 pub fn apply_theme(ctx: &egui::Context, theme: Theme) {
     ctx.set_style(theme.egui_style());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn indentation_guides_use_low_alpha_unmultiplied_colors() {
+        assert_eq!(
+            Theme::Dark.indent_guide(),
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 20)
+        );
+        assert_eq!(
+            Theme::Light.indent_guide(),
+            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 20)
+        );
+    }
+
+    #[test]
+    fn translucent_editor_overlays_use_unmultiplied_colors() {
+        assert_eq!(
+            Theme::Dark.bracket_highlight(),
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 60)
+        );
+        assert_eq!(
+            Theme::Dark.minimap_keyword(),
+            egui::Color32::from_rgba_unmultiplied(150, 200, 255, 60)
+        );
+    }
 }

@@ -117,6 +117,35 @@ pub struct SearchHighlight {
     pub is_current: bool,
 }
 
+fn should_paint_editor_carets(editor_has_focus: bool) -> bool {
+    editor_has_focus
+}
+
+fn indentation_guide_x(layout: &TextLayoutPipeline, col: usize, content_left: f32) -> f32 {
+    content_left + layout.column_x(col)
+}
+
+fn visible_indent_guide_columns(rope: &Rope, first_line: usize, last_line: usize) -> Vec<usize> {
+    let mut columns: Vec<usize> = (first_line..last_line)
+        .map(|line_index| line_indent_level(rope, line_index))
+        .filter(|indent| *indent > 0)
+        .collect();
+    columns.sort_unstable();
+    columns.dedup();
+    columns
+}
+
+fn indentation_guide_columns_for_line(
+    indent_level: usize,
+    visible_indent_columns: &[usize],
+) -> Vec<usize> {
+    visible_indent_columns
+        .iter()
+        .copied()
+        .filter(|column| *column <= indent_level)
+        .collect()
+}
+
 /// Renders bracket matching highlights for the given line.
 /// Highlights both the bracket at `bracket_offset` and its matching pair at `match_offset`.
 fn paint_bracket_highlight_for_line(
@@ -471,6 +500,11 @@ pub fn show_editor(
                 None
             };
             let bracket_highlight_color = theme.bracket_highlight();
+            let visible_indent_columns = if !is_large_file && show_indentation_guides {
+                visible_indent_guide_columns(&document.rope, first_line, last_line)
+            } else {
+                Vec::new()
+            };
 
             for line_index in first_line..last_line {
                 let y = layout.line_y(line_index, rect.top());
@@ -525,13 +559,14 @@ pub fn show_editor(
                 }
 
                 // Draw indentation guides (skip for large files)
-                if !is_large_file && show_indentation_guides {
+                if !is_large_file && !visible_indent_columns.is_empty() {
                     let indent_level = line_indent_level(&document.rope, line_index);
                     if indent_level > 0 {
                         let guide_color = theme.indent_guide();
-                        let tab_width = document.tab_width;
-                        for col in (tab_width..=indent_level).step_by(tab_width) {
-                            let x = rect.left() + layout.text_origin_x + layout.column_x(col);
+                        for col in
+                            indentation_guide_columns_for_line(indent_level, &visible_indent_columns)
+                        {
+                            let x = indentation_guide_x(&layout, col, rect.left());
                             painter.line_segment(
                                 [egui::pos2(x, y), egui::pos2(x, y + layout.row_height)],
                                 egui::Stroke::new(1.0, guide_color),
@@ -777,11 +812,7 @@ pub fn show_editor(
 
                 let is_primary = i == 0;
                 let stroke_width = if is_primary { 1.5 } else { 1.0 };
-                let color = if response.has_focus() {
-                    ui.visuals().text_color()
-                } else {
-                    ui.visuals().text_color().gamma_multiply(0.5)
-                };
+                let color = ui.visuals().text_color();
 
                 if is_primary && reveal_selection.is_some() {
                     // Smooth scroll is handled above via animation
@@ -794,7 +825,7 @@ pub fn show_editor(
                     );
                 }
 
-                if response.has_focus() || !is_primary {
+                if should_paint_editor_carets(response.has_focus()) {
                     painter.line_segment(
                         [caret_rect.left_top(), caret_rect.left_bottom()],
                         egui::Stroke::new(stroke_width, color),
