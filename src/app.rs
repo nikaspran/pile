@@ -201,6 +201,7 @@ impl PileApp {
                             column_selection_anchor_col: pane_snap.column_selection_anchor_col,
                             scroll_animation: None,
                             cached_layout: None,
+                            visible_byte_range: None,
                             pointer_drag: None,
                         },
                     })
@@ -382,11 +383,24 @@ impl PileApp {
 
     /// Request a background parse for the active document if needed.
     fn request_background_parse_for_active(&mut self) {
+        let document_id = self.state.active_document;
+        let visible_range = self
+            .panes
+            .get(self.active_pane)
+            .and_then(|pane| pane.view_state.visible_byte_range);
+        self.request_background_parse_for_document(document_id, visible_range);
+    }
+
+    fn request_background_parse_for_document(
+        &mut self,
+        document_id: DocumentId,
+        visible_range: Option<(usize, usize)>,
+    ) {
         let Some(worker) = self.parse_worker.as_ref() else {
             return;
         };
 
-        let Some(document) = self.state.active_document() else {
+        let Some(document) = self.state.document(document_id) else {
             return;
         };
 
@@ -394,23 +408,21 @@ impl PileApp {
             return;
         };
 
+        let (visible_start, visible_end) =
+            normalized_visible_range(&document.rope, visible_range);
+
         // Check if we need to parse
         if !document
             .syntax_state
-            .needs_parse(detection.language, document.revision)
+            .needs_parse_for_range(
+                detection.language,
+                document.revision,
+                visible_start,
+                visible_end,
+            )
         {
             return;
         }
-
-        // Get visible range from the active pane
-        let (visible_start, visible_end) = self
-            .panes
-            .get(self.active_pane)
-            .map(|_pane| {
-                // Use a reasonable default visible range if not available
-                (0, document.rope.byte_len().min(4096))
-            })
-            .unwrap_or((0, 0));
 
         let request = crate::parse_worker::ParseRequest {
             document_id: document.id,
@@ -2426,6 +2438,10 @@ impl PileApp {
                 if editor_metrics.changed {
                     self.document_edited();
                 }
+                self.request_background_parse_for_document(
+                    document_id,
+                    Some(editor_metrics.visible_byte_range),
+                );
 
                 let scroll_y = {
                     let doc = self
@@ -2493,6 +2509,10 @@ impl PileApp {
                 if response.changed {
                     self.document_edited();
                 }
+                self.request_background_parse_for_document(
+                    document_id,
+                    Some(response.visible_byte_range),
+                );
             }
         } else {
             let document = self
@@ -2520,6 +2540,10 @@ impl PileApp {
             if response.changed {
                 self.document_edited();
             }
+            self.request_background_parse_for_document(
+                document_id,
+                Some(response.visible_byte_range),
+            );
         }
 
         // Save back the view state
@@ -2915,6 +2939,27 @@ fn should_accept_parse_result(
     document.revision == result.revision
 }
 
+fn normalized_visible_range(
+    rope: &crop::Rope,
+    visible_range: Option<(usize, usize)>,
+) -> (usize, usize) {
+    let len = rope.byte_len();
+    let (start, end) = visible_range.unwrap_or((0, len.min(4096)));
+    let start = floor_rope_char_boundary(rope, start.min(len));
+    let mut end = floor_rope_char_boundary(rope, end.min(len));
+    if end < start {
+        end = start;
+    }
+    (start, end)
+}
+
+fn floor_rope_char_boundary(rope: &crop::Rope, mut offset: usize) -> usize {
+    while offset > 0 && !rope.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
+}
+
 fn ignored_language_name(language: LanguageId) -> &'static str {
     match language {
         LanguageId::PlainText => "PlainText",
@@ -2970,5 +3015,13 @@ mod tests {
         };
 
         assert!(!should_accept_parse_result(&document, &result));
+    }
+
+    #[test]
+    fn normalized_visible_range_clamps_to_char_boundaries() {
+        let rope = crop::Rope::from("abcédef");
+
+        assert_eq!(normalized_visible_range(&rope, Some((0, 4))), (0, 3));
+        assert_eq!(normalized_visible_range(&rope, Some((4, 2))), (3, 3));
     }
 }

@@ -69,17 +69,27 @@ impl DocumentSyntaxState {
         language: LanguageId,
         _revision: u64,
         visible_start: usize,
-        _visible_end: usize,
+        visible_end: usize,
     ) -> Vec<HighlightSpan> {
-        // Return cached result if revision and visible range haven't changed.
-        // If the revision changed but the language and visible start did not,
-        // return stale spans while the background worker produces fresh ones.
-        // The visible end often changes while typing near the bottom of the
-        // viewport, so requiring an exact range match causes color flicker.
-        // The caller separately requests a reparse through `needs_parse`.
-        if let Some((_cached_rev, cached_start, _cached_end, spans)) = &self.cached_spans {
-            if self.parsed_as == Some(language) && *cached_start == visible_start {
-                return spans.clone();
+        if let Some((_cached_rev, cached_start, cached_end, spans)) = &self.cached_spans {
+            if self.parsed_as == Some(language)
+                && visible_start < *cached_end
+                && visible_end > *cached_start
+            {
+                return spans
+                    .iter()
+                    .filter_map(|span| {
+                        let abs_start = span.start + cached_start;
+                        let abs_end = span.end + cached_start;
+                        let start = abs_start.max(visible_start);
+                        let end = abs_end.min(visible_end);
+                        (start < end).then(|| HighlightSpan {
+                            start: start - visible_start,
+                            end: end - visible_start,
+                            highlight: span.highlight,
+                        })
+                    })
+                    .collect();
             }
         }
 
@@ -108,6 +118,27 @@ impl DocumentSyntaxState {
     /// Returns true if the document revision is newer than what we have parsed.
     pub fn needs_parse(&self, language: LanguageId, revision: u64) -> bool {
         self.parsed_as != Some(language) || self.parsed_revision < revision
+    }
+
+    /// Check if the cached parse/highlight data covers the visible byte range.
+    pub fn needs_parse_for_range(
+        &self,
+        language: LanguageId,
+        revision: u64,
+        visible_start: usize,
+        visible_end: usize,
+    ) -> bool {
+        if self.needs_parse(language, revision) {
+            return true;
+        }
+
+        !matches!(
+            &self.cached_spans,
+            Some((_cached_rev, cached_start, cached_end, _))
+                if self.parsed_as == Some(language)
+                    && *cached_start <= visible_start
+                    && *cached_end >= visible_end
+        )
     }
 
     /// Generate highlight spans from text using tree-sitter-highlight.
@@ -619,7 +650,7 @@ fn fenced_code_block_language(registry: &GrammarRegistry, info: &str, code: &str
 ///
 /// `highlight` is an index into the language's highlight names array
 /// (as configured in `HighlightConfiguration::configure`).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HighlightSpan {
     pub start: usize,
     pub end: usize,
@@ -910,6 +941,66 @@ mod tests {
             spans.len()
         );
         assert!(state.needs_parse(LanguageId::Rust, 2));
+    }
+
+    #[test]
+    fn highlight_translates_cached_spans_for_scrolled_visible_range() {
+        let mut state = DocumentSyntaxState::new();
+        let spans = vec![HighlightSpan {
+            start: 100,
+            end: 110,
+            highlight: highlight_index("keyword"),
+        }];
+        state.update_from_parse_result(None, spans, LanguageId::Rust, 1, 0, 200);
+
+        let scrolled_spans = state.highlight(LanguageId::Rust, 1, 90, 160);
+
+        assert_eq!(
+            scrolled_spans,
+            vec![HighlightSpan {
+                start: 10,
+                end: 20,
+                highlight: highlight_index("keyword"),
+            }]
+        );
+    }
+
+    #[test]
+    fn highlight_ignores_cached_spans_before_scrolled_visible_range() {
+        let mut state = DocumentSyntaxState::new();
+        let spans = vec![
+            HighlightSpan {
+                start: 10,
+                end: 20,
+                highlight: highlight_index("keyword"),
+            },
+            HighlightSpan {
+                start: 100,
+                end: 110,
+                highlight: highlight_index("function"),
+            },
+        ];
+        state.update_from_parse_result(None, spans, LanguageId::Rust, 1, 0, 200);
+
+        let scrolled_spans = state.highlight(LanguageId::Rust, 1, 90, 160);
+
+        assert_eq!(
+            scrolled_spans,
+            vec![HighlightSpan {
+                start: 10,
+                end: 20,
+                highlight: highlight_index("function"),
+            }]
+        );
+    }
+
+    #[test]
+    fn range_outside_cached_highlights_needs_parse() {
+        let mut state = DocumentSyntaxState::new();
+        state.update_from_parse_result(None, Vec::new(), LanguageId::Rust, 1, 0, 200);
+
+        assert!(!state.needs_parse_for_range(LanguageId::Rust, 1, 10, 120));
+        assert!(state.needs_parse_for_range(LanguageId::Rust, 1, 150, 260));
     }
 
     #[test]

@@ -101,6 +101,7 @@ pub struct EditorViewState {
         Vec<usize>,
         TextLayoutPipeline,
     )>,
+    pub visible_byte_range: Option<(usize, usize)>,
     pub(crate) pointer_drag: Option<PointerDragState>,
 }
 
@@ -124,6 +125,7 @@ pub struct EditorResponse {
     pub content_height: f32,
     pub viewport_height: f32,
     pub line_count: usize,
+    pub visible_byte_range: (usize, usize),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -611,6 +613,7 @@ pub fn show_editor(
             } else {
                 document.rope.byte_len()
             };
+            view_state.visible_byte_range = Some((visible_start, visible_end));
 
             // Detect large files for performance guards
             let is_large_file = layout.line_count > LARGE_FILE_LINE_COUNT
@@ -1030,6 +1033,9 @@ pub fn show_editor(
         content_height: layout.content_height,
         viewport_height: available_height,
         line_count: layout.line_count,
+        visible_byte_range: view_state
+            .visible_byte_range
+            .unwrap_or((0, document.rope.byte_len().min(4096))),
     }
 }
 

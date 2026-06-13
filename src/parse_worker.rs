@@ -124,7 +124,7 @@ fn parse_worker_loop(request_rx: Receiver<ParseRequest>, event_tx: Sender<ParseE
                 // and keep only the latest revision
                 while let Ok(next) = request_rx.try_recv() {
                     if next.document_id == request.document_id {
-                        if next.revision > request.revision {
+                        if next.revision >= request.revision {
                             request = next;
                         }
                     } else {
@@ -250,6 +250,41 @@ mod tests {
                 .iter()
                 .all(|span| span.end <= result.visible_end - result.visible_start)
         );
+    }
+
+    #[test]
+    fn worker_keeps_latest_same_revision_viewport_request() {
+        let (request_tx, request_rx) = bounded(4);
+        let (event_tx, event_rx) = bounded(4);
+        let document_id = uuid::Uuid::new_v4();
+        let first = ParseRequest {
+            document_id,
+            revision: 1,
+            language: LanguageId::Rust,
+            force_language: true,
+            text: "fn first() {}".to_owned(),
+            visible_start: 0,
+            visible_end: 12,
+        };
+        let second = ParseRequest {
+            document_id,
+            revision: 1,
+            language: LanguageId::Rust,
+            force_language: true,
+            text: "fn second() {}".to_owned(),
+            visible_start: 1024,
+            visible_end: 1038,
+        };
+
+        request_tx.send(first).unwrap();
+        request_tx.send(second).unwrap();
+        drop(request_tx);
+
+        parse_worker_loop(request_rx, event_tx);
+
+        let ParseEvent::Result(result) = event_rx.try_recv().unwrap();
+        assert_eq!(result.visible_start, 1024);
+        assert!(event_rx.try_recv().is_err());
     }
 
     #[test]
