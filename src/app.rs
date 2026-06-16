@@ -81,6 +81,9 @@ struct TabDragState {
 const TAB_HEIGHT: f32 = 28.0;
 const TAB_STRIP_HEIGHT: f32 = 30.0;
 const EDITOR_MINIMAP_MIN_EDITOR_WIDTH: f32 = 320.0;
+const INITIAL_HIGHLIGHT_PARSE_BYTES: usize = 4 * 1024;
+const HIGHLIGHT_PARSE_WINDOW_BYTES: usize = 128 * 1024;
+const HIGHLIGHT_PARSE_WINDOW_STEP_BYTES: usize = 32 * 1024;
 
 impl EditorPane {
     fn new(document_id: DocumentId) -> Self {
@@ -2944,12 +2947,51 @@ fn normalized_visible_range(
     visible_range: Option<(usize, usize)>,
 ) -> (usize, usize) {
     let len = rope.byte_len();
-    let (start, end) = visible_range.unwrap_or((0, len.min(4096)));
+    let Some((start, end)) = visible_range else {
+        let end = floor_rope_char_boundary(rope, len.min(INITIAL_HIGHLIGHT_PARSE_BYTES));
+        return (0, end);
+    };
+
     let start = floor_rope_char_boundary(rope, start.min(len));
     let mut end = floor_rope_char_boundary(rope, end.min(len));
     if end < start {
         end = start;
     }
+
+    expanded_highlight_parse_range(rope, start, end)
+}
+
+fn expanded_highlight_parse_range(
+    rope: &crop::Rope,
+    visible_start: usize,
+    visible_end: usize,
+) -> (usize, usize) {
+    let len = rope.byte_len();
+    if len <= HIGHLIGHT_PARSE_WINDOW_BYTES {
+        return (0, len);
+    }
+
+    let visible_len = visible_end.saturating_sub(visible_start);
+    if visible_len >= HIGHLIGHT_PARSE_WINDOW_BYTES {
+        return (visible_start, visible_end);
+    }
+
+    let center = visible_start.saturating_add(visible_len / 2);
+    let ideal_start = center.saturating_sub(HIGHLIGHT_PARSE_WINDOW_BYTES / 2);
+    let mut start =
+        (ideal_start / HIGHLIGHT_PARSE_WINDOW_STEP_BYTES) * HIGHLIGHT_PARSE_WINDOW_STEP_BYTES;
+
+    if start + HIGHLIGHT_PARSE_WINDOW_BYTES > len {
+        start = len.saturating_sub(HIGHLIGHT_PARSE_WINDOW_BYTES);
+    }
+
+    let mut end = (start + HIGHLIGHT_PARSE_WINDOW_BYTES).min(len);
+    if end < visible_end {
+        end = visible_end;
+    }
+
+    let start = floor_rope_char_boundary(rope, start.min(visible_start));
+    let end = floor_rope_char_boundary(rope, end.min(len));
     (start, end)
 }
 
@@ -3019,9 +3061,41 @@ mod tests {
 
     #[test]
     fn normalized_visible_range_clamps_to_char_boundaries() {
-        let rope = crop::Rope::from("abcédef");
+        let text = format!(
+            "{}é{}",
+            "a".repeat(HIGHLIGHT_PARSE_WINDOW_BYTES),
+            "b".repeat(HIGHLIGHT_PARSE_WINDOW_BYTES)
+        );
+        let rope = crop::Rope::from(text);
+        let inside_e_acute = HIGHLIGHT_PARSE_WINDOW_BYTES + 1;
+        let end = inside_e_acute + HIGHLIGHT_PARSE_WINDOW_BYTES + 1;
 
-        assert_eq!(normalized_visible_range(&rope, Some((0, 4))), (0, 3));
-        assert_eq!(normalized_visible_range(&rope, Some((4, 2))), (3, 3));
+        assert_eq!(
+            normalized_visible_range(&rope, Some((inside_e_acute, end))).0,
+            HIGHLIGHT_PARSE_WINDOW_BYTES
+        );
+    }
+
+    #[test]
+    fn normalized_visible_range_keeps_initial_parse_small() {
+        let rope = crop::Rope::from("a".repeat(HIGHLIGHT_PARSE_WINDOW_BYTES * 2));
+
+        assert_eq!(
+            normalized_visible_range(&rope, None),
+            (0, INITIAL_HIGHLIGHT_PARSE_BYTES)
+        );
+    }
+
+    #[test]
+    fn normalized_visible_range_uses_stable_scroll_cache_windows() {
+        let rope = crop::Rope::from("a".repeat(HIGHLIGHT_PARSE_WINDOW_BYTES * 3));
+
+        let first = normalized_visible_range(&rope, Some((80_000, 84_000)));
+        let nearby_scroll = normalized_visible_range(&rope, Some((82_000, 86_000)));
+
+        assert_eq!(first, nearby_scroll);
+        assert!(first.0 <= 80_000);
+        assert!(first.1 >= 86_000);
+        assert_eq!(first.1 - first.0, HIGHLIGHT_PARSE_WINDOW_BYTES);
     }
 }
