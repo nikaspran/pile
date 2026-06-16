@@ -83,7 +83,8 @@ impl TextLayoutPipeline {
                 (text_origin_x + wrap_px).max(text_origin_x + super::EDITOR_MIN_WIDTH)
             }
         };
-        let content_height = (wrapped_line_count as f32 * row_height).max(available_height);
+        let content_height =
+            scrollable_content_height(wrapped_line_count, row_height, available_height);
 
         Self {
             row_height,
@@ -130,7 +131,8 @@ impl TextLayoutPipeline {
 
     /// Return the vertical range of visible line indices for a given viewport.
     pub fn visible_line_range(&self, viewport: &egui::Rect) -> (usize, usize) {
-        let first_line = (viewport.min.y / self.row_height).floor().max(0.0) as usize;
+        let first_line = ((viewport.min.y / self.row_height).floor().max(0.0) as usize)
+            .min(self.line_count);
         let last_line =
             ((viewport.max.y / self.row_height).ceil() as usize + 1).min(self.line_count);
         (first_line, last_line)
@@ -217,12 +219,16 @@ impl TextLayoutPipeline {
 
     /// Get the byte offset where a wrapped line starts in the original rope.
     pub fn wrapped_line_byte_start(&self, rope: &Rope, wrapped_line_index: usize) -> usize {
+        if wrapped_line_index >= self.line_count {
+            return rope.byte_len();
+        }
+
         if self.wrap_mode == WrapMode::NoWrap {
             byte_of_visual_line(rope, wrapped_line_index)
         } else {
             let Some(&(doc_line, start_col, _)) = self.visual_line_map.get(wrapped_line_index)
             else {
-                return 0;
+                return rope.byte_len();
             };
             let line_start = byte_of_visual_line(rope, doc_line);
             let line_slice = visual_line_text(rope, doc_line);
@@ -243,6 +249,16 @@ impl TextLayoutPipeline {
         let &(doc_line, start_col, _) = self.visual_line_map.get(wrapped_line_index)?;
         (start_col == 0).then_some(doc_line + 1)
     }
+}
+
+fn scrollable_content_height(line_count: usize, row_height: f32, available_height: f32) -> f32 {
+    let text_height = line_count as f32 * row_height;
+    let scroll_past_height = if text_height > available_height {
+        super::SCROLL_PAST_LINES as f32 * row_height
+    } else {
+        0.0
+    };
+    (text_height + scroll_past_height).max(available_height)
 }
 
 fn build_wrap_map(
@@ -423,5 +439,40 @@ mod tests {
 
         assert_eq!(pos.y, 0.0);
         assert_eq!(pos.x, layout.text_origin_x + 10.0 * layout.char_width);
+    }
+
+    #[test]
+    fn scrollable_content_height_adds_scroll_past_only_when_text_overflows() {
+        assert_eq!(scrollable_content_height(5, 10.0, 100.0), 100.0);
+        assert_eq!(
+            scrollable_content_height(11, 10.0, 100.0),
+            110.0 + super::super::SCROLL_PAST_LINES as f32 * 10.0
+        );
+    }
+
+    #[test]
+    fn visible_line_range_clamps_to_real_lines_inside_scroll_past() {
+        let layout = TextLayoutPipeline::for_test(
+            10.0,
+            8.0,
+            egui::FontId::monospace(14.0),
+            44.0,
+            54.0,
+            800.0,
+            400.0,
+            3,
+        );
+        let viewport =
+            egui::Rect::from_min_max(egui::pos2(0.0, 120.0), egui::pos2(800.0, 220.0));
+
+        assert_eq!(layout.visible_line_range(&viewport), (3, 3));
+    }
+
+    #[test]
+    fn wrapped_line_byte_start_returns_eof_inside_scroll_past() {
+        let rope = Rope::from("abcdefghijklmnopqrstuv");
+        let layout = wrapped_layout(vec![(0, 0, 10), (0, 10, 20), (0, 20, 22)]);
+
+        assert_eq!(layout.wrapped_line_byte_start(&rope, 3), rope.byte_len());
     }
 }

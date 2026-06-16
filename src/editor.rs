@@ -43,6 +43,7 @@ const LINE_GUTTER_PADDING: f32 = 10.0;
 const EDITOR_MIN_WIDTH: f32 = 320.0;
 const TRIPLE_CLICK_DURATION: f32 = 0.4;
 const SMOOTH_SCROLL_DURATION: f32 = 0.15; // seconds
+const SCROLL_PAST_LINES: usize = 20;
 const LARGE_FILE_LINE_COUNT: usize = 50000;
 const LARGE_FILE_BYTE_SIZE: usize = 5_000_000;
 
