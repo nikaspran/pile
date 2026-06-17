@@ -3,7 +3,8 @@ set -euo pipefail
 
 asset_dir="${1:-dist/release-assets}"
 version="${VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)}"
-tag="${GITHUB_REF_NAME:-v$version}"
+channel="${RELEASE_CHANNEL:-stable}"
+tag="${RELEASE_TAG:-${GITHUB_REF_NAME:-v$version}}"
 commit="${GITHUB_SHA:-$(git rev-parse HEAD)}"
 repo="${GITHUB_REPOSITORY:-nikaspran/pile}"
 base_url="${RELEASE_DOWNLOAD_BASE_URL:-https://github.com/$repo/releases/download/$tag}"
@@ -15,6 +16,7 @@ tmp="$(mktemp)"
 {
   printf '{\n'
   printf '  "version": "%s",\n' "$version"
+  printf '  "channel": "%s",\n' "$channel"
   printf '  "tag": "%s",\n' "$tag"
   printf '  "commit": "%s",\n' "$commit"
   printf '  "minimum_session_schema": 5,\n'

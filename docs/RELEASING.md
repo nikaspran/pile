@@ -4,7 +4,11 @@ Releases are cut from `main` with annotated version tags. Tags must use the
 format `vMAJOR.MINOR.PATCH`, for example `v0.1.0`.
 
 GitHub Actions runs checks, builds platform artifacts, generates checksums and
-an update manifest, and publishes the GitHub Release when a `v*` tag is pushed.
+an update manifest, and publishes release assets in two channels:
+
+- `stable`: immutable releases from `v*` tags.
+- `continuous`: a rolling prerelease updated after every successful push to
+  `main`.
 
 Current release artifacts:
 
@@ -15,7 +19,17 @@ Current release artifacts:
 - `SHA256SUMS`.
 - `pile-update-manifest.json`.
 
-## Cut a Release
+## Continuous Releases
+
+Every commit merged to `main` triggers the build workflow. If checks and all
+platform package jobs pass, CI force-moves the `continuous` tag to that commit
+and updates the GitHub prerelease named `Continuous build`.
+
+Continuous releases are for early testing and future opt-in update channels.
+They are marked as prereleases and are not published as GitHub's latest stable
+release.
+
+## Cut a Stable Release
 
 1. Update `Cargo.toml` package version.
 2. Update `Cargo.toml` `[package.metadata.bundle].version`.
@@ -44,7 +58,7 @@ The script verifies:
 
 Then it creates an annotated tag, pushes `main`, and pushes the tag. CI does the
 formatting, Clippy, test, package-build, artifact-upload, checksum, manifest,
-and GitHub Release publishing work from the pushed tag.
+and stable GitHub Release publishing work from the pushed tag.
 
 ## Release Assets
 
@@ -56,12 +70,12 @@ CI packages target-specific artifacts:
 - `pile-VERSION-x86_64-unknown-linux-gnu-linux.tar.gz`
 - `pile_VERSION_amd64.deb`
 
-The release job also publishes:
+Both stable and continuous release jobs publish:
 
 - `SHA256SUMS`, generated over all release assets and the update manifest.
 - `pile-update-manifest.json`, a machine-readable artifact index with version,
-  tag, commit, download URLs, platform labels, package kinds, and SHA-256
-  hashes.
+  channel, tag, commit, download URLs, platform labels, package kinds, and
+  SHA-256 hashes.
 - `SHA256SUMS.asc` and `pile-update-manifest.json.asc` when `GPG_PRIVATE_KEY`
   is configured.
 
@@ -94,7 +108,7 @@ Verify the GitHub Release:
 
 - all expected platform artifacts were uploaded;
 - `SHA256SUMS` contains every artifact;
-- `pile-update-manifest.json` points at the tag's release downloads;
+- `pile-update-manifest.json` points at the release downloads;
 - release notes are readable;
 - at least one downloaded artifact launches successfully on each platform you
   can access.

@@ -12,6 +12,7 @@ only consume immutable release metadata.
 Each manifest records:
 
 - release `version`;
+- release `channel`;
 - release `tag`;
 - source `commit`;
 - minimum readable session schema;
@@ -26,6 +27,9 @@ verify the downloaded artifact hash and should verify
 Use explicit user consent for applying updates. Passive background checks may
 surface that a newer version exists, but they should not replace the app while
 the user is writing.
+
+Default update checks should use the `stable` channel. The `continuous` channel
+is for explicit opt-in testing builds and should never be enabled by default.
 
 Before applying an update, force a final session snapshot through the existing
 save worker shutdown path. The updater must preserve the product rule that users

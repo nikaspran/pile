@@ -49,6 +49,9 @@ tar -xzf pile-0.1.0-x86_64-unknown-linux-gnu-linux.tar.gz
 Release assets include `SHA256SUMS` and `pile-update-manifest.json` for
 download verification and future update checks.
 
+Each successful push to `main` also updates a rolling prerelease named
+`Continuous build`. Tagged `v*` releases remain the stable channel.
+
 ## Build From Source
 
 Requirements:

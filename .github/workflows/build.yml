@@ -250,7 +250,8 @@ jobs:
           mkdir -p dist/release-assets
           find dist/artifacts -type f \( -name 'pile-*' -o -name 'pile_*.deb' \) \
             -exec cp {} dist/release-assets/ \;
-          scripts/generate-release-manifest.sh dist/release-assets
+          RELEASE_CHANNEL=stable RELEASE_TAG="$GITHUB_REF_NAME" \
+            scripts/generate-release-manifest.sh dist/release-assets
           (
             cd dist/release-assets
             sha256sum * > SHA256SUMS
@@ -267,3 +268,61 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/release-assets/*
+
+  continuous-release:
+    name: Continuous GitHub Release
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs:
+      - checks
+      - linux
+      - macos
+      - windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/artifacts
+
+      - name: Prepare continuous release assets
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          mkdir -p dist/release-assets
+          find dist/artifacts -type f \( -name 'pile-*' -o -name 'pile_*.deb' \) \
+            -exec cp {} dist/release-assets/ \;
+          RELEASE_CHANNEL=continuous RELEASE_TAG=continuous \
+            scripts/generate-release-manifest.sh dist/release-assets
+          (
+            cd dist/release-assets
+            sha256sum * > SHA256SUMS
+          )
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+              --armor --detach-sign dist/release-assets/SHA256SUMS
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+              --armor --detach-sign dist/release-assets/pile-update-manifest.json
+          fi
+
+      - name: Move continuous tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --force continuous "$GITHUB_SHA"
+          git push --force origin refs/tags/continuous
+
+      - name: Publish continuous release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous
+          name: Continuous build
+          body: Latest successful build from main at ${{ github.sha }}.
+          prerelease: true
+          make_latest: false
+          files: dist/release-assets/*
+          overwrite_files: true
