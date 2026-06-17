@@ -206,7 +206,10 @@ fn install_menu(menu: &muda::Menu) {
     }
     #[cfg(target_os = "linux")]
     {
-        let _ = menu.init_for_gtk();
+        let _ = menu;
+        // muda's Linux backend requires a GTK window/container. eframe does not
+        // expose one here, so keep Linux menu construction compile-checked but
+        // skip native installation until the window integration is explicit.
     }
 }
 
