@@ -479,7 +479,7 @@ fn test_expand_selection_by_indent_block_basic() {
 
     let sel = primary_selection(&document);
     let expected_start = "no indent\n".len(); // 10
-                                              // The indent block ends at position 63 (the '\n' after "indented line 3")
+    // The indent block ends at position 63 (the '\n' after "indented line 3")
     let expected_end =
         "no indent\n  indented line 1\n  indented line 2\n  indented line 3\n".len() - 1; // 63
     assert_eq!(sel.anchor, expected_start);

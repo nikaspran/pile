@@ -144,7 +144,11 @@ impl UndoState {
         }
     }
 
-    pub fn import_persisted(&mut self, persisted: PersistedUndoStacks, document_len: usize) -> bool {
+    pub fn import_persisted(
+        &mut self,
+        persisted: PersistedUndoStacks,
+        document_len: usize,
+    ) -> bool {
         if !history_is_valid(&persisted, document_len) {
             return false;
         }
@@ -223,17 +227,16 @@ mod tests {
         }
         assert_eq!(undo.undo_stack.len(), MAX_UNDO_GROUPS);
         assert_eq!(undo.undo_stack[0][0].inserted_text, "2");
-        assert_eq!(
-            undo.undo_stack.last().unwrap()[0].inserted_text,
-            "11"
-        );
+        assert_eq!(undo.undo_stack.last().unwrap()[0].inserted_text, "11");
     }
 
     #[test]
     fn export_applies_byte_budget() {
         let mut undo = UndoState::default();
-        undo.undo_stack.push(vec![sample_txn(0, 0, "", &"x".repeat(300_000))]);
-        undo.undo_stack.push(vec![sample_txn(0, 0, "", &"y".repeat(300_000))]);
+        undo.undo_stack
+            .push(vec![sample_txn(0, 0, "", &"x".repeat(300_000))]);
+        undo.undo_stack
+            .push(vec![sample_txn(0, 0, "", &"y".repeat(300_000))]);
 
         let exported = undo.export_persisted();
         assert_eq!(exported.undo_stack.len(), 1);

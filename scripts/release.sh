@@ -14,7 +14,7 @@ it would run. Pass --execute to create and push the annotated tag.
 Required:
   - clean git working tree
   - current branch is main
-  - Cargo.toml package.version matches the tag without the leading "v"
+  - Cargo.toml package.version and app metadata match the tag without the leading "v"
   - tag does not already exist locally or on origin
 USAGE
 }
@@ -61,6 +61,20 @@ CURRENT_BRANCH="$(git branch --show-current)"
 CARGO_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
 [[ "$CARGO_VERSION" == "$VERSION" ]] || \
   die "Cargo.toml version $CARGO_VERSION does not match tag $TAG"
+
+BUNDLE_VERSION="$(awk '
+  /^\[package.metadata.bundle\]$/ { in_bundle = 1; next }
+  /^\[/ && in_bundle { exit }
+  in_bundle && /^version = / { gsub(/"/, "", $3); print $3; exit }
+' Cargo.toml)"
+[[ "$BUNDLE_VERSION" == "$VERSION" ]] || \
+  die "bundle metadata version $BUNDLE_VERSION does not match tag $TAG"
+
+PLIST_VERSION="$(awk '
+  /CFBundleShortVersionString/ { getline; gsub(/^[ \t]*<string>|<\/string>[ \t]*$/, "", $0); print; exit }
+' assets/Info.plist)"
+[[ "$PLIST_VERSION" == "$VERSION" ]] || \
+  die "Info.plist version $PLIST_VERSION does not match tag $TAG"
 
 git rev-parse --verify --quiet "$TAG" >/dev/null && die "local tag already exists: $TAG"
 

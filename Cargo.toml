@@ -5,6 +5,8 @@ edition = "2024"
 rust-version = "1.88"
 license = "MIT"
 description = "A minimalist infinite scratchpad editor."
+repository = "https://github.com/nikaspran/pile"
+homepage = "https://github.com/nikaspran/pile"
 
 [dependencies]
 eframe = "0.33.3"
@@ -89,6 +91,6 @@ icon = ["assets/pile.icns"]
 version = "0.1.0"
 short_description = "A minimalist infinite scratchpad editor."
 category = "Developer-tool"
-copyright = "MIT OR Apache-2.0"
+copyright = "Copyright (c) 2026 Nikas Praninskas"
 macos_min_system_version = "11.0"
 macos_info_plist = "assets/Info.plist"

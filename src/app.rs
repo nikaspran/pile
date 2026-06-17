@@ -411,19 +411,15 @@ impl PileApp {
             return;
         };
 
-        let (visible_start, visible_end) =
-            normalized_visible_range(&document.rope, visible_range);
+        let (visible_start, visible_end) = normalized_visible_range(&document.rope, visible_range);
 
         // Check if we need to parse
-        if !document
-            .syntax_state
-            .needs_parse_for_range(
-                detection.language,
-                document.revision,
-                visible_start,
-                visible_end,
-            )
-        {
+        if !document.syntax_state.needs_parse_for_range(
+            detection.language,
+            document.revision,
+            visible_start,
+            visible_end,
+        ) {
             return;
         }
 

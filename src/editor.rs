@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use crate::model::{Document, DocumentEdit, Selection};
 use crate::settings::VisibleWhitespaceMode;
-use crate::syntax_highlighting::{highlight_color, highlight_name, HighlightSpan};
+use crate::syntax_highlighting::{HighlightSpan, highlight_color, highlight_name};
 
 pub mod geometry;
 mod input;
@@ -35,7 +35,7 @@ pub use multicursor::{
 };
 use multicursor::{backspace_all, backspace_word_all, delete_word_all};
 use ops::*;
-pub use ops::{convert_case_all_selections, convert_case_selection, CaseType};
+pub use ops::{CaseType, convert_case_all_selections, convert_case_selection};
 pub use replace::{replace_all_matches, replace_match};
 
 const LINE_GUTTER_MIN_WIDTH: f32 = 44.0;

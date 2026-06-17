@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=pile
+GenericName=Scratchpad Editor
+Comment=A minimalist infinite scratchpad editor
+Exec=pile %U
+Icon=ai.opencode.pile
+Terminal=false
+Categories=Utility;TextEditor;
+StartupWMClass=pile

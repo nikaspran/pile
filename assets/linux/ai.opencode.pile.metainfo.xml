@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>ai.opencode.pile</id>
+  <name>pile</name>
+  <summary>A minimalist infinite scratchpad editor</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      pile is a native scratchpad editor for keeping many unsaved notes alive
+      without ceremony.
+    </p>
+  </description>
+  <launchable type="desktop-id">ai.opencode.pile.desktop</launchable>
+  <categories>
+    <category>Utility</category>
+    <category>TextEditor</category>
+  </categories>
+  <url type="homepage">https://github.com/nikaspran/pile</url>
+</component>

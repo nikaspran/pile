@@ -131,8 +131,8 @@ impl TextLayoutPipeline {
 
     /// Return the vertical range of visible line indices for a given viewport.
     pub fn visible_line_range(&self, viewport: &egui::Rect) -> (usize, usize) {
-        let first_line = ((viewport.min.y / self.row_height).floor().max(0.0) as usize)
-            .min(self.line_count);
+        let first_line =
+            ((viewport.min.y / self.row_height).floor().max(0.0) as usize).min(self.line_count);
         let last_line =
             ((viewport.max.y / self.row_height).ceil() as usize + 1).min(self.line_count);
         (first_line, last_line)
@@ -462,8 +462,7 @@ mod tests {
             400.0,
             3,
         );
-        let viewport =
-            egui::Rect::from_min_max(egui::pos2(0.0, 120.0), egui::pos2(800.0, 220.0));
+        let viewport = egui::Rect::from_min_max(egui::pos2(0.0, 120.0), egui::pos2(800.0, 220.0));
 
         assert_eq!(layout.visible_line_range(&viewport), (3, 3));
     }

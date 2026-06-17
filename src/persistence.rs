@@ -527,8 +527,9 @@ fn migrate_v4_to_v5(envelope: SessionEnvelope) -> Result<SessionEnvelope> {
         });
     }
 
-    let legacy: session_v4::SessionSnapshotLegacy = bincode::deserialize(&envelope.payload_bytes)
-        .with_context(|| "failed to deserialize legacy v4 session")?;
+    let legacy: session_v4::SessionSnapshotLegacy =
+        bincode::deserialize(&envelope.payload_bytes)
+            .with_context(|| "failed to deserialize legacy v4 session")?;
     let snapshot = session_v4::snapshot_from_legacy(legacy);
     let payload_bytes = bincode::serialize(&snapshot)?;
 
@@ -809,16 +810,12 @@ fn restore_from_backup_or_fail(
             telemetry.recovery_events.push(RecoveryEvent {
                 timestamp: std::time::SystemTime::now(),
                 kind: RecoveryEventKind::BackupRestored,
-                message: format!(
-                    "Restored session from backup {}",
-                    backup_path.display()
-                ),
+                message: format!("Restored session from backup {}", backup_path.display()),
             });
             Ok(Some(snapshot))
         }
-        Ok(None) => Err(main_err.context(
-            "session file exists but could not be loaded from main file or any backup",
-        )),
+        Ok(None) => Err(main_err
+            .context("session file exists but could not be loaded from main file or any backup")),
         Err(backup_err) => Err(main_err
             .context("session file exists but could not be loaded from main file")
             .context(format!("backup recovery also failed: {backup_err}"))),

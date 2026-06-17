@@ -108,7 +108,12 @@ where
 {
     let matches = match command().try_get_matches_from(args) {
         Ok(matches) => matches,
-        Err(err) if matches!(err.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) => {
+        Err(err)
+            if matches!(
+                err.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            ) =>
+        {
             write!(out, "{err}")?;
             return Ok(());
         }
@@ -126,6 +131,7 @@ where
 fn command() -> ClapCommand {
     ClapCommand::new("pile")
         .about("A minimalist infinite scratchpad editor.")
+        .version(env!("CARGO_PKG_VERSION"))
         .subcommand_required(true)
         .arg_required_else_help(true)
         .subcommand(
@@ -580,6 +586,13 @@ mod tests {
 
         assert!(output.contains("Usage: pile search [OPTIONS] <query>"));
         assert!(output.contains("--case-sensitive"));
+    }
+
+    #[test]
+    fn version_is_successful_output() {
+        let output = run_text(vec!["pile".into(), "--version".into()]);
+
+        assert!(output.contains(env!("CARGO_PKG_VERSION")));
     }
 
     #[test]

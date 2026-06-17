@@ -29,22 +29,25 @@ scratch buffers later.
 ## Install
 
 Prebuilt release artifacts are published from GitHub Actions when version tags
-are pushed. Until platform installers are added, artifacts are plain binaries:
+are pushed:
 
-- `pile-macos`
-- `pile-windows.exe`
-- `pile-ubuntu`
-- `pile-debian`
-- `pile-fedora`
-- `pile-arch`
+- `pile-VERSION-x86_64-apple-darwin-macos.zip`
+- `pile-VERSION-aarch64-apple-darwin-macos.zip`
+- `pile-VERSION-x86_64-pc-windows-msvc-windows.zip`
+- `pile-VERSION-x86_64-unknown-linux-gnu-linux.tar.gz`
+- `pile_VERSION_amd64.deb`
 
-Download the artifact for your platform from the GitHub Releases page, mark it
-executable if needed, and run it.
+Download the artifact for your platform from the GitHub Releases page. macOS
+downloads contain `pile.app`; Windows downloads contain `pile.exe`; Linux
+downloads contain an installable `/usr`-style tree or a Debian package.
 
 ```sh
-chmod +x pile-ubuntu
-./pile-ubuntu
+tar -xzf pile-0.1.0-x86_64-unknown-linux-gnu-linux.tar.gz
+./pile-0.1.0-x86_64-unknown-linux-gnu-linux/bin/pile
 ```
+
+Release assets include `SHA256SUMS` and `pile-update-manifest.json` for
+download verification and future update checks.
 
 ## Build From Source
 
@@ -122,6 +125,7 @@ Not saved:
 - [Performance invariants](docs/PERFORMANCE_INVARIANTS.md)
 - [Non-goals](docs/NON_GOALS.md)
 - [Releasing](docs/RELEASING.md)
+- [Updates](docs/UPDATES.md)
 - [Roadmap](ROADMAP.md)
 
 ## Contributing
