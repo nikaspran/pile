@@ -4,6 +4,8 @@ pub mod command;
 pub mod command_palette;
 pub mod editor;
 pub mod grammar_registry;
+#[cfg(target_os = "macos")]
+pub mod macos_window;
 pub mod model;
 pub mod native_menu;
 pub mod parse_worker;

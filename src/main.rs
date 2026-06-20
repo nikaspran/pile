@@ -4,6 +4,8 @@ mod command;
 mod command_palette;
 mod editor;
 mod grammar_registry;
+#[cfg(target_os = "macos")]
+mod macos_window;
 mod model;
 mod native_menu;
 mod parse_worker;

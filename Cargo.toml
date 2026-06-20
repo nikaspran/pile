@@ -76,6 +76,11 @@ path = "tests/platform_menu_tests.rs"
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.2.2", default-features = false, features = ["NSScreen", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.2.2", default-features = false, features = ["NSGeometry"] }
+raw-window-handle = "0.6.2"
+
 [profile.release]
 codegen-units = 1
 lto = "thin"

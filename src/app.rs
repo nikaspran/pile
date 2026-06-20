@@ -2551,8 +2551,11 @@ impl PileApp {
 }
 
 impl eframe::App for PileApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let frame_start = std::time::Instant::now();
+
+        #[cfg(target_os = "macos")]
+        crate::macos_window::fill_visible_frame_when_zoomed(frame);
 
         // Check for system shutdown signal
         if self.shutdown_flag.load(Ordering::Relaxed) {
