@@ -23,6 +23,7 @@ const BACKUP_ROTATION_COUNT: usize = 5;
 
 /// Current envelope version. Increment this when the session format changes.
 const ENVELOPE_VERSION: u32 = 5;
+pub const SESSION_SCHEMA_VERSION: u32 = ENVELOPE_VERSION;
 
 /// Maximum allowed serialized snapshot size in bytes (50 MB).
 /// If the snapshot exceeds this, the save is skipped to prevent stalling the UI.

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Sender, bounded};
 use eframe::egui;
@@ -32,6 +32,7 @@ use crate::{
     syntax::{LanguageDetection, LanguageId},
     tab_switcher::TabSwitcher,
     theme::apply_theme,
+    update::{UpdateEvent, UpdateUiState, UpdateWorker},
 };
 
 mod commands;
@@ -84,6 +85,7 @@ const EDITOR_MINIMAP_MIN_EDITOR_WIDTH: f32 = 320.0;
 const INITIAL_HIGHLIGHT_PARSE_BYTES: usize = 4 * 1024;
 const HIGHLIGHT_PARSE_WINDOW_BYTES: usize = 128 * 1024;
 const HIGHLIGHT_PARSE_WINDOW_STEP_BYTES: usize = 32 * 1024;
+const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 impl EditorPane {
     fn new(document_id: DocumentId) -> Self {
@@ -122,6 +124,9 @@ pub struct PileApp {
     worker_event_rx: Option<Receiver<WorkerEvent>>,
     shutdown_flag: Arc<AtomicBool>,
     parse_worker: Option<ParseWorker>,
+    update_worker: Option<UpdateWorker>,
+    update_state: UpdateUiState,
+    last_update_check_request: Option<Instant>,
     frame_time_ms: f64,
 }
 
@@ -237,6 +242,8 @@ impl PileApp {
 
         // Spawn the background parse worker
         let parse_worker = ParseWorker::spawn();
+        let update_worker = UpdateWorker::spawn();
+        let update_state = UpdateUiState::load();
         let native_menu = NativeMenu::install(&settings);
 
         let mut app = Self {
@@ -267,9 +274,13 @@ impl PileApp {
             worker_event_rx: Some(event_rx),
             shutdown_flag: shutdown_flag.clone(),
             parse_worker: Some(parse_worker),
+            update_worker: Some(update_worker),
+            update_state,
+            last_update_check_request: None,
             frame_time_ms: 0.0,
         };
         app.request_background_parse_for_active();
+        app.request_update_check(false);
         app
     }
 
@@ -329,6 +340,72 @@ impl PileApp {
             kind: RecoveryEventKind::FileOperationFailed,
             message,
         });
+    }
+
+    fn request_update_check(&mut self, manual: bool) {
+        if self.update_state.checking {
+            return;
+        }
+        if let Some(worker) = &self.update_worker {
+            self.update_state.checking = true;
+            self.update_state.last_error = None;
+            self.update_state.not_applicable = None;
+            self.last_update_check_request = Some(Instant::now());
+            worker.request_check();
+            if manual {
+                self.ctx.request_repaint();
+            }
+        }
+    }
+
+    fn maybe_request_periodic_update_check(&mut self) {
+        if self.update_state.checking {
+            return;
+        }
+        let should_check = self
+            .last_update_check_request
+            .is_none_or(|last_check| last_check.elapsed() >= UPDATE_CHECK_INTERVAL);
+        if should_check {
+            self.request_update_check(false);
+        }
+    }
+
+    fn handle_update_events(&mut self) {
+        let Some(worker) = &self.update_worker else {
+            return;
+        };
+
+        let mut events = Vec::new();
+        while let Some(event) = worker.try_recv() {
+            events.push(event);
+        }
+
+        for event in events {
+            if matches!(
+                event,
+                UpdateEvent::UpToDate
+                    | UpdateEvent::Staged { .. }
+                    | UpdateEvent::NotApplicable { .. }
+                    | UpdateEvent::Failed { .. }
+            ) {
+                self.last_update_check_request = Some(Instant::now());
+            }
+            self.update_state.apply_event(event);
+        }
+    }
+
+    fn restart_to_update(&mut self) {
+        if self.update_state.staged.is_none() {
+            return;
+        }
+        self.flush_session();
+        match crate::update::restart_to_update() {
+            Ok(()) => self.ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Err(err) => {
+                self.update_state.last_error = Some(err.to_string());
+                self.update_state.staged = None;
+            }
+        }
     }
 
     fn refresh_active_document_detection(&mut self) {
@@ -1295,6 +1372,8 @@ impl PileApp {
             }
             AppCommand::ImportFile => self.import_file(),
             AppCommand::ExportFile => self.export_file(),
+            AppCommand::CheckForUpdates => self.request_update_check(true),
+            AppCommand::RestartToUpdate => self.restart_to_update(),
             AppCommand::Preferences => self.preferences.toggle(),
             AppCommand::MoveTabLeft => {
                 let active = self.state.active_document;
@@ -1582,6 +1661,8 @@ impl PileApp {
             // File operations
             ImportFile => self.import_file(),
             ExportFile => self.export_file(),
+            CheckForUpdates => self.execute_command(AppCommand::CheckForUpdates),
+            RestartToUpdate => self.execute_command(AppCommand::RestartToUpdate),
             Preferences => self.preferences.toggle(),
             ToggleBookmark => self.toggle_bookmark(),
             JumpToNextBookmark => self.jump_to_next_bookmark(),
@@ -2565,8 +2646,10 @@ impl eframe::App for PileApp {
         }
 
         self.handle_native_menu_commands();
+        self.handle_update_events();
+        self.maybe_request_periodic_update_check();
         if let Some(native_menu) = &self.native_menu {
-            native_menu.sync_settings(&self.settings);
+            native_menu.sync_settings(&self.settings, &self.update_state.menu_state());
         }
         self.handle_clipboard_events(ctx);
         self.handle_keyboard_shortcuts(ctx);
@@ -2911,6 +2994,7 @@ impl eframe::App for PileApp {
         if let Some(worker) = self.save_worker.take() {
             worker.shutdown();
         }
+        self.update_worker = None;
     }
 }
 

@@ -74,8 +74,8 @@ Both stable and continuous release jobs publish:
 
 - `SHA256SUMS`, generated over all release assets and the update manifest.
 - `pile-update-manifest.json`, a machine-readable artifact index with version,
-  channel, tag, commit, download URLs, platform labels, package kinds, and
-  SHA-256 hashes.
+  channel, tag, commit, download URLs, platform labels, target triples, package
+  kinds, and SHA-256 hashes.
 - `SHA256SUMS.asc` and `pile-update-manifest.json.asc` when `GPG_PRIVATE_KEY`
   is configured.
 
@@ -118,5 +118,5 @@ Verify the GitHub Release:
 - macOS and Windows signing depend on repository secrets and certificates.
 - Windows is a portable zip, not yet MSI/MSIX.
 - Linux has tarball and `.deb`; AppImage, Flatpak, and `.rpm` are not wired yet.
-- Update checks should consume the published manifest, but the app does not yet
-  apply updates itself.
+- Automatic apply is currently macOS-first. Windows and Linux artifacts are
+  still published in the manifest for future platform-specific apply backends.

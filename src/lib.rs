@@ -18,6 +18,7 @@ pub mod syntax;
 pub mod syntax_highlighting;
 pub mod tab_switcher;
 pub mod theme;
+pub mod update;
 
 pub use app::PileApp;
 pub use editor::EditorViewState;

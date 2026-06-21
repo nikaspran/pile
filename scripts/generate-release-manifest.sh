@@ -31,11 +31,19 @@ tmp="$(mktemp)"
 
     sha="$(sha256sum "$file" | awk '{print $1}')"
     platform="unknown"
+    target="unknown"
     kind="archive"
     case "$name" in
       *apple-darwin*|*macos*) platform="macos" ;;
       *windows*) platform="windows" ;;
       *.deb|*linux*) platform="linux" ;;
+    esac
+    case "$name" in
+      *aarch64-apple-darwin*) target="aarch64-apple-darwin" ;;
+      *x86_64-apple-darwin*) target="x86_64-apple-darwin" ;;
+      *x86_64-pc-windows-msvc*) target="x86_64-pc-windows-msvc" ;;
+      *x86_64-unknown-linux-gnu*) target="x86_64-unknown-linux-gnu" ;;
+      *.deb) target="x86_64-unknown-linux-gnu" ;;
     esac
     case "$name" in
       *.deb) kind="deb" ;;
@@ -51,6 +59,7 @@ tmp="$(mktemp)"
     printf '    {\n'
     printf '      "name": "%s",\n' "$name"
     printf '      "platform": "%s",\n' "$platform"
+    printf '      "target": "%s",\n' "$target"
     printf '      "kind": "%s",\n' "$kind"
     printf '      "sha256": "%s",\n' "$sha"
     printf '      "url": "%s/%s"\n' "$base_url" "$name"

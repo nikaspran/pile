@@ -8,6 +8,8 @@ pub enum NativeMenuCommand {
     RenameTab,
     ImportFile,
     ExportFile,
+    CheckForUpdates,
+    RestartToUpdate,
     Preferences,
     Quit,
 
@@ -89,6 +91,16 @@ pub struct NativeMenu {
     _menu: muda::Menu,
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     view_items: ViewMenuItems,
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    update_items: UpdateMenuItems,
+}
+
+#[derive(Clone, Debug)]
+pub struct NativeUpdateMenuState {
+    pub check_label: String,
+    pub check_enabled: bool,
+    pub restart_label: String,
+    pub restart_enabled: bool,
 }
 
 impl NativeMenu {
@@ -101,6 +113,7 @@ impl NativeMenu {
                     Some(Self {
                         _menu: menu.menu,
                         view_items: menu.view_items,
+                        update_items: menu.update_items,
                     })
                 }
                 Err(err) => {
@@ -115,10 +128,11 @@ impl NativeMenu {
         }
     }
 
-    pub fn sync_settings(&self, settings: &Settings) {
+    pub fn sync_settings(&self, settings: &Settings, update: &NativeUpdateMenuState) {
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
             self.view_items.sync(settings);
+            self.update_items.sync(update);
         }
     }
 
@@ -139,6 +153,7 @@ impl NativeMenu {
 struct BuiltMenu {
     menu: muda::Menu,
     view_items: ViewMenuItems,
+    update_items: UpdateMenuItems,
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -151,6 +166,22 @@ struct ViewMenuItems {
     toggle_minimap: muda::CheckMenuItem,
     toggle_status_bar: muda::CheckMenuItem,
     toggle_theme: muda::MenuItem,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+struct UpdateMenuItems {
+    check_for_updates: muda::MenuItem,
+    restart_to_update: muda::MenuItem,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+impl UpdateMenuItems {
+    fn sync(&self, state: &NativeUpdateMenuState) {
+        self.check_for_updates.set_text(&state.check_label);
+        self.check_for_updates.set_enabled(state.check_enabled);
+        self.restart_to_update.set_text(&state.restart_label);
+        self.restart_to_update.set_enabled(state.restart_enabled);
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -223,6 +254,8 @@ fn command_from_id(id: &str) -> Option<NativeMenuCommand> {
         "pile.rename_tab" => Some(RenameTab),
         "pile.import_file" => Some(ImportFile),
         "pile.export_file" => Some(ExportFile),
+        "pile.check_for_updates" => Some(CheckForUpdates),
+        "pile.restart_to_update" => Some(RestartToUpdate),
         "pile.preferences" => Some(Preferences),
         "pile.quit" => Some(Quit),
 
@@ -315,6 +348,8 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
 
     // App menu (macOS) or File menu (other platforms)
     #[cfg(target_os = "macos")]
+    let update_items;
+    #[cfg(target_os = "macos")]
     {
         let about = PredefinedMenuItem::about(
             Some("About pile"),
@@ -333,6 +368,10 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
             true,
             Some(parse_accel("cmdorctrl+,")?),
         );
+        let check_for_updates =
+            MenuItem::with_id("pile.check_for_updates", "Check for Updates...", true, None);
+        let restart_to_update =
+            MenuItem::with_id("pile.restart_to_update", "Restart to Update", false, None);
         let app_menu = Submenu::with_items(
             "pile",
             true,
@@ -340,6 +379,9 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
                 &about,
                 &PredefinedMenuItem::separator(),
                 &preferences,
+                &PredefinedMenuItem::separator(),
+                &check_for_updates,
+                &restart_to_update,
                 &PredefinedMenuItem::separator(),
                 &PredefinedMenuItem::hide(None),
                 &PredefinedMenuItem::hide_others(None),
@@ -349,6 +391,10 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
             ],
         )?;
         menu.append(&app_menu)?;
+        update_items = UpdateMenuItems {
+            check_for_updates,
+            restart_to_update,
+        };
     }
 
     // File menu
@@ -378,6 +424,13 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
     );
     let rename_tab = MenuItem::with_id("pile.rename_tab", "Rename Tab", true, None);
     let pin_tab = MenuItem::with_id("pile.pin_tab", "Pin/Unpin Tab", true, None);
+
+    #[cfg(not(target_os = "macos"))]
+    let check_for_updates =
+        MenuItem::with_id("pile.check_for_updates", "Check for Updates...", true, None);
+    #[cfg(not(target_os = "macos"))]
+    let restart_to_update =
+        MenuItem::with_id("pile.restart_to_update", "Restart to Update", false, None);
 
     #[cfg(target_os = "macos")]
     let file_items: &[&dyn muda::IsMenuItem] = &[
@@ -409,8 +462,17 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
             Some(parse_accel("cmdorctrl+,")?),
         ),
         &PredefinedMenuItem::separator(),
+        &check_for_updates,
+        &restart_to_update,
+        &PredefinedMenuItem::separator(),
         &PredefinedMenuItem::quit(None),
     ];
+
+    #[cfg(not(target_os = "macos"))]
+    let update_items = UpdateMenuItems {
+        check_for_updates,
+        restart_to_update,
+    };
 
     let file_menu = Submenu::with_items("File", true, file_items)?;
     menu.append(&file_menu)?;
@@ -892,5 +954,9 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
     let window_menu = Submenu::with_items("Window", true, window_items)?;
     menu.append(&window_menu)?;
 
-    Ok(BuiltMenu { menu, view_items })
+    Ok(BuiltMenu {
+        menu,
+        view_items,
+        update_items,
+    })
 }

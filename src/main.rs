@@ -18,6 +18,7 @@ mod syntax;
 mod syntax_highlighting;
 mod tab_switcher;
 mod theme;
+mod update;
 
 use anyhow::Result;
 
@@ -26,6 +27,10 @@ use eframe::egui;
 fn main() -> Result<()> {
     if std::env::args_os().len() > 1 {
         return cli::run_from_env();
+    }
+
+    if update::apply_staged_update_on_launch()? {
+        return Ok(());
     }
 
     tracing_subscriber::fmt()

@@ -116,6 +116,8 @@ pub enum Command {
     // File
     ImportFile,
     ExportFile,
+    CheckForUpdates,
+    RestartToUpdate,
     Preferences,
 
     // Bookmarks
@@ -383,6 +385,8 @@ pub const KEYBOARD_COMMANDS: &[Command] = &[
     Command::ClosePane,
     Command::ImportFile,
     Command::ExportFile,
+    Command::CheckForUpdates,
+    Command::RestartToUpdate,
     Command::GoToLine,
     Command::CommandPalette,
     Command::QuickSwitchTabs,
@@ -1385,6 +1389,20 @@ pub fn all_commands() -> Vec<CommandMetadata> {
             description: "Export the current scratch buffer content to a file",
             category: App,
             shortcut: primary_shortcut(ExportFile),
+        },
+        CommandMetadata {
+            command: CheckForUpdates,
+            name: "Check for Updates",
+            description: "Check the continuous release channel for a newer build",
+            category: App,
+            shortcut: None,
+        },
+        CommandMetadata {
+            command: RestartToUpdate,
+            name: "Restart to Update",
+            description: "Restart Pile and apply the downloaded update",
+            category: App,
+            shortcut: None,
         },
         CommandMetadata {
             command: ToggleBookmark,
