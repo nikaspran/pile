@@ -1372,6 +1372,13 @@ impl PileApp {
             }
             AppCommand::ImportFile => self.import_file(),
             AppCommand::ExportFile => self.export_file(),
+            AppCommand::Update => {
+                if self.update_state.staged.is_some() {
+                    self.restart_to_update();
+                } else {
+                    self.request_update_check(true);
+                }
+            }
             AppCommand::CheckForUpdates => self.request_update_check(true),
             AppCommand::RestartToUpdate => self.restart_to_update(),
             AppCommand::Preferences => self.preferences.toggle(),

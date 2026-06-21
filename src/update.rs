@@ -86,16 +86,19 @@ impl UpdateUiState {
     }
 
     pub fn menu_state(&self) -> crate::native_menu::NativeUpdateMenuState {
-        let check_label = if self.checking {
+        let label = if self.checking {
             "Checking for Updates..."
+        } else if let Some(update) = &self.staged {
+            return crate::native_menu::NativeUpdateMenuState {
+                label: format!("Restart to Update ({})", short_commit(&update.commit)),
+                enabled: true,
+            };
         } else if let Some(error) = &self.last_error {
             if error.trim().is_empty() {
                 "Check for Updates..."
             } else {
                 "Check for Updates Failed"
             }
-        } else if self.staged.is_some() {
-            "Update Downloaded"
         } else if let Some(reason) = &self.not_applicable {
             if reason.contains("published") {
                 "No Published Updates"
@@ -108,16 +111,9 @@ impl UpdateUiState {
             "Check for Updates..."
         };
 
-        let restart_label = match &self.staged {
-            Some(update) => format!("Restart to Update ({})", short_commit(&update.commit)),
-            None => "Restart to Update".to_owned(),
-        };
-
         crate::native_menu::NativeUpdateMenuState {
-            check_label: check_label.to_owned(),
-            check_enabled: !self.checking,
-            restart_label,
-            restart_enabled: self.staged.is_some(),
+            label: label.to_owned(),
+            enabled: !self.checking,
         }
     }
 
@@ -653,7 +649,7 @@ mod tests {
     }
 
     #[test]
-    fn menu_state_enables_restart_only_when_staged() {
+    fn menu_state_replaces_check_with_restart_when_staged() {
         let mut state = UpdateUiState {
             checking: false,
             staged: None,
@@ -661,7 +657,8 @@ mod tests {
             last_error: None,
             not_applicable: None,
         };
-        assert!(!state.menu_state().restart_enabled);
+        assert_eq!(state.menu_state().label, "Check for Updates...");
+        assert!(state.menu_state().enabled);
 
         state.staged = Some(StagedUpdate {
             version: "0.1.0".to_owned(),
@@ -674,8 +671,9 @@ mod tests {
         });
 
         let menu = state.menu_state();
-        assert!(menu.restart_enabled);
-        assert!(menu.restart_label.contains("abcdef1"));
+        assert!(menu.enabled);
+        assert!(menu.label.contains("Restart to Update"));
+        assert!(menu.label.contains("abcdef1"));
     }
 
     #[test]
@@ -687,10 +685,10 @@ mod tests {
             last_error: None,
             not_applicable: None,
         };
-        assert_eq!(state.menu_state().check_label, "No Updates Available");
+        assert_eq!(state.menu_state().label, "No Updates Available");
 
         state.not_applicable = Some("no continuous update manifest has been published yet".into());
-        assert_eq!(state.menu_state().check_label, "No Published Updates");
+        assert_eq!(state.menu_state().label, "No Published Updates");
     }
 
     fn artifact(platform: &str, target: &str) -> UpdateArtifact {

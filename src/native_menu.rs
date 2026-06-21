@@ -8,8 +8,7 @@ pub enum NativeMenuCommand {
     RenameTab,
     ImportFile,
     ExportFile,
-    CheckForUpdates,
-    RestartToUpdate,
+    Update,
     Preferences,
     Quit,
 
@@ -97,10 +96,8 @@ pub struct NativeMenu {
 
 #[derive(Clone, Debug)]
 pub struct NativeUpdateMenuState {
-    pub check_label: String,
-    pub check_enabled: bool,
-    pub restart_label: String,
-    pub restart_enabled: bool,
+    pub label: String,
+    pub enabled: bool,
 }
 
 impl NativeMenu {
@@ -170,17 +167,14 @@ struct ViewMenuItems {
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 struct UpdateMenuItems {
-    check_for_updates: muda::MenuItem,
-    restart_to_update: muda::MenuItem,
+    update: muda::MenuItem,
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 impl UpdateMenuItems {
     fn sync(&self, state: &NativeUpdateMenuState) {
-        self.check_for_updates.set_text(&state.check_label);
-        self.check_for_updates.set_enabled(state.check_enabled);
-        self.restart_to_update.set_text(&state.restart_label);
-        self.restart_to_update.set_enabled(state.restart_enabled);
+        self.update.set_text(&state.label);
+        self.update.set_enabled(state.enabled);
     }
 }
 
@@ -254,8 +248,7 @@ fn command_from_id(id: &str) -> Option<NativeMenuCommand> {
         "pile.rename_tab" => Some(RenameTab),
         "pile.import_file" => Some(ImportFile),
         "pile.export_file" => Some(ExportFile),
-        "pile.check_for_updates" => Some(CheckForUpdates),
-        "pile.restart_to_update" => Some(RestartToUpdate),
+        "pile.update" => Some(Update),
         "pile.preferences" => Some(Preferences),
         "pile.quit" => Some(Quit),
 
@@ -368,10 +361,7 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
             true,
             Some(parse_accel("cmdorctrl+,")?),
         );
-        let check_for_updates =
-            MenuItem::with_id("pile.check_for_updates", "Check for Updates...", true, None);
-        let restart_to_update =
-            MenuItem::with_id("pile.restart_to_update", "Restart to Update", false, None);
+        let update = MenuItem::with_id("pile.update", "Check for Updates...", true, None);
         let app_menu = Submenu::with_items(
             "pile",
             true,
@@ -380,8 +370,7 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
                 &PredefinedMenuItem::separator(),
                 &preferences,
                 &PredefinedMenuItem::separator(),
-                &check_for_updates,
-                &restart_to_update,
+                &update,
                 &PredefinedMenuItem::separator(),
                 &PredefinedMenuItem::hide(None),
                 &PredefinedMenuItem::hide_others(None),
@@ -391,10 +380,7 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
             ],
         )?;
         menu.append(&app_menu)?;
-        update_items = UpdateMenuItems {
-            check_for_updates,
-            restart_to_update,
-        };
+        update_items = UpdateMenuItems { update };
     }
 
     // File menu
@@ -426,11 +412,7 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
     let pin_tab = MenuItem::with_id("pile.pin_tab", "Pin/Unpin Tab", true, None);
 
     #[cfg(not(target_os = "macos"))]
-    let check_for_updates =
-        MenuItem::with_id("pile.check_for_updates", "Check for Updates...", true, None);
-    #[cfg(not(target_os = "macos"))]
-    let restart_to_update =
-        MenuItem::with_id("pile.restart_to_update", "Restart to Update", false, None);
+    let update = MenuItem::with_id("pile.update", "Check for Updates...", true, None);
 
     #[cfg(target_os = "macos")]
     let file_items: &[&dyn muda::IsMenuItem] = &[
@@ -462,17 +444,13 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
             Some(parse_accel("cmdorctrl+,")?),
         ),
         &PredefinedMenuItem::separator(),
-        &check_for_updates,
-        &restart_to_update,
+        &update,
         &PredefinedMenuItem::separator(),
         &PredefinedMenuItem::quit(None),
     ];
 
     #[cfg(not(target_os = "macos"))]
-    let update_items = UpdateMenuItems {
-        check_for_updates,
-        restart_to_update,
-    };
+    let update_items = UpdateMenuItems { update };
 
     let file_menu = Submenu::with_items("File", true, file_items)?;
     menu.append(&file_menu)?;
