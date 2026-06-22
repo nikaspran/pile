@@ -450,7 +450,9 @@ fn build_menu(settings: &Settings) -> muda::Result<BuiltMenu> {
     ];
 
     #[cfg(not(target_os = "macos"))]
-    let update_items = UpdateMenuItems { update };
+    let update_items = UpdateMenuItems {
+        update: update.clone(),
+    };
 
     let file_menu = Submenu::with_items("File", true, file_items)?;
     menu.append(&file_menu)?;
