@@ -227,7 +227,7 @@ fn install_menu(menu: &muda::Menu) {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = menu.init_for_hwnd(std::ptr::null_mut());
+        let _ = unsafe { menu.init_for_hwnd(0) };
     }
     #[cfg(target_os = "linux")]
     {
