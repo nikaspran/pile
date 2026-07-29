@@ -62,6 +62,19 @@ CI publishes:
 Artifact names include the version and target. The exact names are printed in
 the GitHub Release.
 
+## Application icons
+
+`assets/pile-logo.svg` is the canonical logo source. Regenerate the committed
+platform assets with:
+
+```sh
+scripts/generate-icons.sh
+```
+
+This updates the macOS/Linux PNG icon set, `assets/pile.icns`, and
+`assets/pile.ico`. ImageMagick is required; macOS `sips` (or `iconutil` on
+other macOS setups) generates the `.icns` file.
+
 ## Signing
 
 Unsigned packages still build.

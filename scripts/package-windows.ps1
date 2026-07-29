@@ -46,6 +46,7 @@ $zipPath = Join-Path $DistDir "$packageName.zip"
 Remove-Item -Recurse -Force $packageDir -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 Copy-Item $BinaryPath (Join-Path $packageDir "pile.exe")
+Copy-Item assets/pile.ico (Join-Path $packageDir "pile.ico")
 Copy-Item LICENSE (Join-Path $packageDir "LICENSE")
 Copy-Item README.md (Join-Path $packageDir "README.md")
 

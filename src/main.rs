@@ -45,6 +45,10 @@ fn main() -> Result<()> {
     let window_state = &settings.window_state;
 
     let mut options = eframe::NativeOptions::default();
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!(
+        "../assets/icons.iconset/icon_512x512.png"
+    ))?;
+    options.viewport = options.viewport.with_icon(icon);
 
     if let Some(size) = window_state.size {
         options.viewport.inner_size = Some(egui::Vec2::new(size[0], size[1]));
