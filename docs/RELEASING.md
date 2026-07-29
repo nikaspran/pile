@@ -1,122 +1,99 @@
 # Releasing pile
 
-Releases are cut from `main` with annotated version tags. Tags must use the
-format `vMAJOR.MINOR.PATCH`, for example `v0.1.0`.
+Releases start from `main`.
+Tags use the form `vMAJOR.MINOR.PATCH`, for example `v0.1.0`.
 
-GitHub Actions runs checks, builds platform artifacts, generates checksums and
-an update manifest, and publishes release assets in two channels:
+GitHub Actions checks the code, builds the app, creates packages, and publishes
+release files.
 
-- `stable`: immutable releases from `v*` tags.
-- `continuous`: a rolling prerelease updated after every successful push to
-  `main`.
+## Release channels
 
-Current release artifacts:
+`stable` comes from version tags.
 
-- macOS `.app` bundles zipped per architecture.
-- Windows portable zip.
-- Linux tarball with desktop metadata.
-- Linux Debian package.
-- `SHA256SUMS`.
-- `pile-update-manifest.json`.
+`continuous` is a prerelease. It is rebuilt after a successful push to `main`.
+It is for testing.
 
-## Continuous Releases
+## Create a release
 
-Every commit merged to `main` triggers the build workflow. If checks and all
-platform package jobs pass, CI force-moves the `continuous` tag to that commit
-and updates the GitHub prerelease named `Continuous build`.
+1. Set the same version in these files:
 
-Continuous releases are for early testing and future opt-in update channels.
-They are marked as prereleases and are not published as GitHub's latest stable
-release.
+   - `Cargo.toml`;
+   - `Cargo.toml` under `[package.metadata.bundle]`;
+   - `assets/Info.plist`;
+   - `CHANGELOG.md`.
 
-## Cut a Stable Release
+2. Commit and push `main`.
 
-1. Update `Cargo.toml` package version.
-2. Update `Cargo.toml` `[package.metadata.bundle].version`.
-3. Update `assets/Info.plist` `CFBundleShortVersionString`.
-4. Update `CHANGELOG.md`.
-5. Commit and push `main`.
-6. Run the release script in dry-run mode:
+3. Check the release:
 
 ```sh
 scripts/release.sh v0.1.0
 ```
 
-7. If the dry run is correct, execute it:
+4. Create and push the tag:
 
 ```sh
 scripts/release.sh v0.1.0 --execute
 ```
 
-The script verifies:
+The script checks the branch, working tree, versions, and tag.
 
-- the working tree is clean;
-- the current branch is `main`;
-- `Cargo.toml` package version and app metadata match the tag without the
-  leading `v`;
-- the tag does not already exist locally or on `origin`.
+CI then runs:
 
-Then it creates an annotated tag, pushes `main`, and pushes the tag. CI does the
-formatting, Clippy, test, package-build, artifact-upload, checksum, manifest,
-and stable GitHub Release publishing work from the pushed tag.
+- format checks;
+- Clippy;
+- tests;
+- release builds;
+- package jobs;
+- checksum and manifest generation;
+- GitHub Release publishing.
 
-## Release Assets
+## Release files
 
-CI packages target-specific artifacts:
+CI publishes:
 
-- `pile-VERSION-x86_64-apple-darwin-macos.zip`
-- `pile-VERSION-aarch64-apple-darwin-macos.zip`
-- `pile-VERSION-x86_64-pc-windows-msvc-windows.zip`
-- `pile-VERSION-x86_64-unknown-linux-gnu-linux.tar.gz`
-- `pile_VERSION_amd64.deb`
+- macOS archives for Intel and Apple silicon;
+- a Windows portable zip;
+- a Linux tarball;
+- a Linux Debian package;
+- `SHA256SUMS`;
+- `pile-update-manifest.json`.
 
-Both stable and continuous release jobs publish:
+Artifact names include the version and target. The exact names are printed in
+the GitHub Release.
 
-- `SHA256SUMS`, generated over all release assets and the update manifest.
-- `pile-update-manifest.json`, a machine-readable artifact index with version,
-  channel, tag, commit, download URLs, platform labels, target triples, package
-  kinds, and SHA-256 hashes.
-- `SHA256SUMS.asc` and `pile-update-manifest.json.asc` when `GPG_PRIVATE_KEY`
-  is configured.
+## Signing
 
-## Signing and Notarization
+Unsigned packages still build.
 
-Unsigned builds still package successfully. Add these GitHub Actions secrets to
-enable signed macOS artifacts:
+macOS signing and notarization use these repository secrets:
 
-- `APPLE_CERTIFICATE_P12`: base64-encoded Developer ID Application certificate.
-- `APPLE_CERTIFICATE_PASSWORD`: certificate password.
-- `APPLE_CODESIGN_IDENTITY`: Developer ID identity name.
-- `APPLE_NOTARIZE`: set to `1` to notarize.
-- `APPLE_ID`: Apple ID used with notarytool.
-- `APPLE_TEAM_ID`: Apple developer team id.
-- `APPLE_APP_SPECIFIC_PASSWORD`: app-specific password for notarytool.
+- `APPLE_CERTIFICATE_P12`;
+- `APPLE_CERTIFICATE_PASSWORD`;
+- `APPLE_CODESIGN_IDENTITY`;
+- `APPLE_NOTARIZE`;
+- `APPLE_ID`;
+- `APPLE_TEAM_ID`;
+- `APPLE_APP_SPECIFIC_PASSWORD`.
 
-Add `WINDOWS_SIGNTOOL_CERT_SHA1` to sign Windows binaries with `signtool` when
-the certificate is available in the Windows runner certificate store. If the
-certificate is supplied another way, adapt `scripts/package-windows.ps1` to
-import it before signing.
+Windows signing uses `WINDOWS_SIGNTOOL_CERT_SHA1` when the certificate is
+available on the runner.
 
-Add these secrets to sign release metadata:
+Release metadata can be signed with `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`.
 
-- `GPG_PRIVATE_KEY`: ASCII-armored private key.
-- `GPG_PASSPHRASE`: passphrase for the private key.
+## After the release
 
-## After Tag Push
+Check that:
 
-Verify the GitHub Release:
+- every expected file is present;
+- the checksums include the packages and manifest;
+- the manifest URLs point to the release;
+- the release notes are correct;
+- at least one package starts on each platform you can test.
 
-- all expected platform artifacts were uploaded;
-- `SHA256SUMS` contains every artifact;
-- `pile-update-manifest.json` points at the release downloads;
-- release notes are readable;
-- at least one downloaded artifact launches successfully on each platform you
-  can access.
+## Current limits
 
-## Current Limitations
-
-- macOS and Windows signing depend on repository secrets and certificates.
-- Windows is a portable zip, not yet MSI/MSIX.
-- Linux has tarball and `.deb`; AppImage, Flatpak, and `.rpm` are not wired yet.
-- Automatic apply is currently macOS-first. Windows and Linux artifacts are
-  still published in the manifest for future platform-specific apply backends.
+- Windows has a portable zip. It does not have MSI or MSIX.
+- Linux has a tarball and a Debian package. It does not have AppImage, Flatpak,
+  or RPM packages.
+- Automatic update apply works on macOS first.

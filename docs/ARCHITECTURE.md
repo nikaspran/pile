@@ -4,7 +4,7 @@ This document records the current internal direction for `pile`. It is meant for
 future contributors and agents working in the codebase, not for end-user product
 documentation.
 
-## Current Shape
+## app shape
 
 The live application state still belongs to the UI thread. `PileApp` owns the
 session state, editor view state, search state, syntax detection state, native
@@ -77,12 +77,9 @@ Use these helpers for new single-range edits. Avoid adding new editor code that
 manually updates rope, selection, revision, and undo state when a `DocumentEdit`
 can express the change.
 
-The current transaction API is intentionally not a full multi-cursor system.
-Several line operations still perform manual multi-step rope edits and then
-record full-document undo snapshots. Before implementing multiple cursors,
-replace-all transactions, or rectangular selection edits, extend the model with a
-multi-edit transaction type that can apply non-overlapping ranges in reverse
-order and record one grouped undo step.
+The model supports multi-range edits with `Document::apply_multi_edit`.
+Multiple cursors and replace-all use this API.
+Some operations still use full-document undo snapshots when that is simpler.
 
 ## Persistence Guarantees and Recovery Behavior
 
@@ -139,10 +136,9 @@ On startup, if the main session file is corrupt:
 
 ## Near-Term Direction
 
-The next cleanup should move remaining direct editor mutations toward explicit
+Remaining cleanup should move more direct editor mutations toward explicit
 transactions:
 
-- Add a multi-edit transaction type for ordered, non-overlapping range edits.
 - Migrate replace-all, indentation, outdent, line move, duplicate-line, and
   delete-line operations away from full-document snapshots where practical.
 - Keep whole-document snapshots only for operations whose natural implementation

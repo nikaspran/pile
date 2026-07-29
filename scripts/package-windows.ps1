@@ -14,7 +14,13 @@ if (-not $Target) {
     $Target = "x86_64-pc-windows-msvc"
 }
 if (-not $BinaryPath) {
-    $BinaryPath = "target\$Target\release\pile.exe"
+    $targetBinaryPath = Join-Path "target" "$Target\release\pile.exe"
+    $defaultBinaryPath = Join-Path "target" "release\pile.exe"
+    if (Test-Path $targetBinaryPath) {
+        $BinaryPath = $targetBinaryPath
+    } else {
+        $BinaryPath = $defaultBinaryPath
+    }
 }
 if (-not $DistDir) {
     $DistDir = "dist"

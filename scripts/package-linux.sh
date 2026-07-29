@@ -6,14 +6,23 @@ cd "$ROOT"
 
 version="${VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)}"
 target="${TARGET:-x86_64-unknown-linux-gnu}"
-binary="${BINARY_PATH:-target/$target/release/pile}"
+binary="${BINARY_PATH:-}"
 dist="${DIST_DIR:-dist}"
 app_id="ai.opencode.pile"
 package_name="pile-$version-$target-linux"
 package_dir="$dist/$package_name"
 
+if [[ -z "$binary" ]]; then
+  for candidate in "target/$target/release/pile" "target/release/pile"; do
+    if [[ -x "$candidate" ]]; then
+      binary="$candidate"
+      break
+    fi
+  done
+fi
+
 if [[ ! -x "$binary" ]]; then
-  echo "package-linux: binary not found or not executable: $binary" >&2
+  echo "package-linux: binary not found or not executable; checked target/$target/release/pile and target/release/pile" >&2
   exit 1
 fi
 

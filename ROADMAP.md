@@ -1,8 +1,8 @@
 # pile Roadmap
 
-This document tracks the major missing capabilities needed for `pile` to become
-a mature, fast, general-purpose scratchpad editor while preserving its core
-constraint: no project system, no LSP, no terminal, and no manual save prompts.
+This list records planned work and completed work.
+The product boundary stays the same: no project system, no LSP, no terminal,
+and no manual save prompts.
 
 ## Editing Core
 
@@ -12,7 +12,7 @@ constraint: no project system, no LSP, no terminal, and no manual save prompts.
 - Completed: implement cursor movement by grapheme cluster.
 - Completed: implement cursor movement by word, line, paragraph, document boundary, and page.
 - Completed: add mouse drag selection and richer selection rendering for the custom editor.
-- Completed: add robust selection expansion and contraction for character, word, line,
++ Completed: add selection expansion and contraction for character, word, line,
   bracket pair, and indentation block scopes.
 - Completed: add multiple cursors as a first-class model with add-next-match, add-all-match,
   split-selection-into-lines, and rectangular/column selection.

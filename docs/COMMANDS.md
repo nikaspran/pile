@@ -9,7 +9,7 @@ The application uses three command enums, each scoped to a different layer:
 
 ### `Command` (src/command.rs)
 
-The primary, comprehensive command enum. Every user-facing action is represented
+The main command enum. Every user-facing action is represented
 here. This enum powers the command palette and carries metadata for display and
 shortcut registration.
 
@@ -120,7 +120,7 @@ User input
 - **F-keys** are used for tab operations (F2 rename, F3 find under cursor, F4 bookmarks)
 - **Cmd+P** opens quick tab switcher (distinct from command palette at Cmd+Shift+P)
 
-## Future Work
+## not done yet
 
 - Add user-configurable keybinding overrides by replacing or layering on top of
   `default_shortcuts()` before dispatch

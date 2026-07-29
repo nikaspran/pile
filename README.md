@@ -1,66 +1,52 @@
 # pile
 
-`pile` is a native scratchpad editor for keeping many unsaved notes alive
-without ceremony. It is built for fast capture, low-latency editing, and
-automatic restoration after normal exits, crashes, restarts, and power loss.
+```text
+---
+---
+-
 
-The app is intentionally not an IDE. It has no project tree, LSP integration,
-terminal, debugger, plugin system, workspace setup, or manual save prompt. The
-main workflow is: write text, close the app whenever, and come back to the same
-scratch buffers later.
+pile
+```
+
+pile is a scratchpad editor for notes that may never become files.
+It saves your session in the background and restores it when you reopen the app.
+
+The primary workflow does not require projects, filenames, or save dialogs.
 
 ## Features
 
-- Rope-backed editor buffers for large scratch documents.
-- Automatic background session persistence with atomic replacement and backup
-  recovery.
-- Tabs, quick tab switching, recent tab ordering, pinned tabs, and split panes.
-- Multiple cursors, column selection, selection expansion, and common line
-  operations.
-- Search and replace with case-sensitive, whole-word, regex, and search-in-tabs
-  modes.
-- Content-aware syntax detection and tree-sitter highlighting with Markdown code
-  fence injection.
-- Configurable wrapping, rulers, visible whitespace, indentation guides,
-  minimap, font settings, themes, and status bar.
-- Native menus, clipboard integration, drag-and-drop import, and explicit
-  file import/export for interop.
+- keeps many scratch buffers open;
+- restores sessions after normal exits and crashes;
+- searches across open and closed buffers;
+- supports multiple cursors, line operations, and undo/redo;
+- highlights prose, code, and mixed-language notes;
+- imports and exports files when required.
+
+Session data is written automatically in the background.
+
+pile is not an IDE. It has no projects, LSP, terminal, debugger, plugin system,
+or workspace setup.
 
 ## Install
 
-Prebuilt release artifacts are published from GitHub Actions when version tags
-are pushed:
+Download a release from [GitHub Releases](https://github.com/nikaspran/pile/releases).
 
-- `pile-VERSION-x86_64-apple-darwin-macos.zip`
-- `pile-VERSION-aarch64-apple-darwin-macos.zip`
-- `pile-VERSION-x86_64-pc-windows-msvc-windows.zip`
-- `pile-VERSION-x86_64-unknown-linux-gnu-linux.tar.gz`
-- `pile_VERSION_amd64.deb`
+Releases contain:
 
-Download the artifact for your platform from the GitHub Releases page. macOS
-downloads contain `pile.app`; Windows downloads contain `pile.exe`; Linux
-downloads contain an installable `/usr`-style tree or a Debian package.
+- macOS `.app` archives for Intel and Apple silicon;
+- a Windows portable zip;
+- a Linux tarball;
+- a Linux Debian package;
+- checksums and an update manifest.
 
-```sh
-tar -xzf pile-0.1.0-x86_64-unknown-linux-gnu-linux.tar.gz
-./pile-0.1.0-x86_64-unknown-linux-gnu-linux/bin/pile
-```
+macOS downloads contain `pile.app`. Windows downloads contain `pile.exe`.
 
-Release assets include `SHA256SUMS` and `pile-update-manifest.json` for
-download verification and app update checks.
-
-Each successful push to `main` also updates a rolling prerelease named
-`Continuous build`. Tagged `v*` releases remain the stable channel. The app's
-updater follows the continuous channel by commit identity.
-
-## Build From Source
+## Build from source
 
 Requirements:
 
-- Rust 1.88 or newer.
-- Platform GUI dependencies required by `eframe`/`egui`.
-- On Linux, install X11/Wayland/GTK development packages. The GitHub Actions
-  workflow shows the exact packages used for Ubuntu, Debian, Fedora, and Arch.
+- Rust 1.88 or newer;
+- the GUI development packages required by `eframe` on Linux.
 
 ```sh
 git clone https://github.com/nikaspran/pile.git
@@ -68,6 +54,18 @@ cd pile
 cargo build --locked --release
 ./target/release/pile
 ```
+
+To create a local package after the build:
+
+```sh
+# macOS
+scripts/package-macos.sh
+
+# Linux
+scripts/package-linux.sh
+```
+
+On Windows, run `./scripts/package-windows.ps1` in PowerShell.
 
 For development:
 
@@ -77,11 +75,11 @@ cargo clippy --locked --all-targets
 cargo test --locked
 ```
 
-## CLI Retrieval
+## Command line
 
-Running `pile` without arguments starts the native app. Read-only CLI commands
-are available for tools and agents that need to inspect the last persisted
-session snapshot:
+Running `pile` starts the app.
+
+These read the last saved session:
 
 ```sh
 pile list
@@ -89,55 +87,56 @@ pile search "query"
 pile get <document-id>
 ```
 
-CLI output defaults to JSON for machine use. Pass `--format human` for compact
-terminal output. Each command reads the platform default session file unless
-`--session <path>` is provided.
+Use `--format human` for readable output. Use `--session <path>` to read a
+specific session file.
 
-Useful options:
+`pile list --closed` includes closed notes.
 
-- `pile list --closed` includes recently closed scratch buffers.
-- `pile search "query" --closed --case-sensitive --whole-word --regex`
-  searches open buffers and, when requested, closed buffers.
-- `pile search "query" --limit 20 --context 120` bounds returned matches and
-  surrounding context.
-- `pile get <document-id> --closed --lines 10:25` retrieves a 1-based inclusive
-  line range.
+`pile search` accepts `--closed`, `--case-sensitive`, `--whole-word`, and
+`--regex`. Use `--limit` and `--context` to keep the output small.
 
-## Data and Recovery
+`pile get` accepts `--closed` and `--lines 10:25`.
 
-`pile` stores scratch buffers in an automatic session file under the
-platform-specific local data directory selected by the `directories` crate. The
-session is serialized with `bincode`, wrapped in a versioned envelope, and
-written with atomic file replacement. Recent session backups are rotated next to
-the main session file and are used for recovery if the main session is corrupt.
+## Data and recovery
 
-Settings are stored separately as JSON in the same application data area.
+pile stores the session in the platform data directory.
+
+Saved:
+
+- note text;
+- open and closed notes;
+- tab order and active panes;
+- selections, scroll positions, and bookmarks;
+- a limited undo and redo history.
 
 Not saved:
 
-- Undo/redo history.
-- Clipboard contents.
-- Transient UI state such as command palette visibility.
+- clipboard contents;
+- command palette and search UI state;
+- in-flight typing groups.
 
-`pile` does not intentionally collect telemetry or send usage data.
+Session writes happen in the background. The app uses atomic replacement and
+keeps backups. If the main session is damaged, pile tries a backup.
+
+pile does not collect telemetry or send note content.
 
 ## Documentation
 
+- [Commands](docs/COMMANDS.md)
 - [Architecture](docs/ARCHITECTURE.md)
-- [Commands and shortcuts](docs/COMMANDS.md)
 - [Language detection](docs/LANGUAGE_DETECTION.md)
-- [Performance invariants](docs/PERFORMANCE_INVARIANTS.md)
-- [Non-goals](docs/NON_GOALS.md)
+- [Performance rules](docs/PERFORMANCE_INVARIANTS.md)
+- [Boundaries](docs/NON_GOALS.md)
 - [Releasing](docs/RELEASING.md)
 - [Updates](docs/UPDATES.md)
 - [Roadmap](ROADMAP.md)
 
 ## Contributing
 
-Contributions are welcome when they preserve the core product boundary: a fast,
-reliable scratchpad, not an IDE. Start with [CONTRIBUTING.md](CONTRIBUTING.md)
-for setup, tests, and pull request expectations.
+Keep changes small. Keep the scratchpad boundary clear.
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 ## License
 
-`pile` is licensed under the MIT License. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

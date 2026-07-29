@@ -6,14 +6,23 @@ cd "$ROOT"
 
 version="${VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)}"
 target="${TARGET:-$(rustc -vV | sed -n 's/^host: //p')}"
-binary="${BINARY_PATH:-target/$target/release/pile}"
+binary="${BINARY_PATH:-}"
 dist="${DIST_DIR:-dist}"
 bundle_version="${BUNDLE_VERSION:-${GITHUB_RUN_NUMBER:-1}}"
 app_dir="$dist/pile.app"
 zip_path="$dist/pile-$version-$target-macos.zip"
 
+if [[ -z "$binary" ]]; then
+  for candidate in "target/$target/release/pile" "target/release/pile"; do
+    if [[ -x "$candidate" ]]; then
+      binary="$candidate"
+      break
+    fi
+  done
+fi
+
 if [[ ! -x "$binary" ]]; then
-  echo "package-macos: binary not found or not executable: $binary" >&2
+  echo "package-macos: binary not found or not executable; checked target/$target/release/pile and target/release/pile" >&2
   exit 1
 fi
 
@@ -40,7 +49,7 @@ else
 fi
 
 rm -f "$zip_path"
-ditto -c -k --keepParent "$app_dir" "$zip_path"
+ditto -c -k --norsrc --keepParent "$app_dir" "$zip_path"
 
 if [[ "${APPLE_NOTARIZE:-0}" == "1" ]]; then
   : "${APPLE_ID:?APPLE_ID is required when APPLE_NOTARIZE=1}"
@@ -53,7 +62,7 @@ if [[ "${APPLE_NOTARIZE:-0}" == "1" ]]; then
     --wait
   xcrun stapler staple "$app_dir"
   rm -f "$zip_path"
-  ditto -c -k --keepParent "$app_dir" "$zip_path"
+  ditto -c -k --norsrc --keepParent "$app_dir" "$zip_path"
 fi
 
 echo "package-macos: wrote $zip_path"

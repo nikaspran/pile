@@ -1,110 +1,50 @@
-# Non-Goals
+# Product boundaries
 
-This document defines what `pile` is explicitly NOT, so that feature requests and PRs do not gradually pull the app toward an IDE scope.
+pile is a scratchpad editor, not an IDE.
 
-## Core Non-Goals
+## No project system
 
-### 1. No Project System
+pile does not manage projects, folders, workspaces, or dependencies.
+Editing does not depend on a project.
 
-`pile` is not a project editor. It does not:
+## No language server
 
-- Manage project files, workspaces, or sutions
-- Require opening a folder or workspace before editing
-- Index project-wide symbols, references, or dependencies
-- Provide project-aware navigation (go-to-definition across files, find all references)
-- Support multi-root workspaces or project templates
+pile does not provide completion, diagnostics, go-to-definition, references,
+rename, or code actions.
 
-**Rationale**: The primary workflow is hundreds of untitled scratch buffers. Adding projects would fundamentally change the product.
+It does provide syntax highlighting, comments, and basic indentation.
 
-### 2. No LSP (Language Server Protocol)
+## No terminal
 
-`pile` does not provide:
+pile does not run shells, tasks, builds, or debuggers.
 
-- Code completion (IntelliSense)
-- Go-to-definition or peek definition
-- Find all references
-- Real-time diagnostics (errors, warnings, hints)
-- Rename symbol across files
-- Code actions / quick fixes
+## No save prompts
 
-**What we DO provide instead**: Syntax highlighting via tree-sitter, comment toggling, and basic indentation rules. These are self-contained, do not require external processes, and do not turn `pile` into an IDE.
+pile does not ask users to save scratch buffers.
+It saves the session in the background.
+Files can be imported or exported when needed.
 
-### 3. No Integrated Terminal
+## No file-first workflow
 
-`pile` does not include:
+New buffers do not require a path or a name.
+Files are for import and export, not the main workflow.
 
-- An embedded terminal emulator
-- Shell integration or command palete with terminal output
-- Task running or build system integration
-- Debugger integration or output panels
+## No collaboration or cloud sync
 
-**Rationale**: Terminal emulation is a huge surface area that distracts from the scratchpad use case. Users who need terminals have them outside `pile`.
+Buffers remain on the local machine.
+pile does not provide shared editing, comments, cloud sync, or version control.
 
-### 4. No Manual Save Prompts
+## No plugin system
 
-`pile` will never:
+pile does not load plugins or extensions.
 
-- Ask "Do you want to save?" when closing a tab or the app
-- Show save dialogs for scratch buffers
-- Require naming documents before editing
-- Block exit for unsaved changes
+## Feature test
 
-**How persistence works instead**: Everything is auto-saved to a session file in the background. The UI never blocks on I/O. Users can manually export files via `Import/Export` commands, but the core workflow assumes unsaved scratch buffers.
+Before adding a feature, check:
 
-### 5. No File-First Workflow
+1. Does it improve capture, editing, search, or recovery?
+2. Does it preserve typing and navigation performance?
+3. Does it work without a project or setup step?
+4. Does it preserve automatic session recovery?
 
-`pile` does not:
-
-- Require choosing where to save before editing
-- Show file paths in tab titles (unless manually renamed)
-- Make "Open File" the primary way to start editing
-- Treat "Save" as a core workflow step
-
-**What we DO provide**: Native file import/export commands for when users want to load/save files, but the default state is an empty scratch buffer.
-
-### 6. No Collaborative Editing
-
-`pile` does not support:
-
-- Real-time collaborative editing (CRDTs, OT, etc.)
-- Comments or review threads
-- Version control integration (git diff, blame, etc.)
-- Cloud sync or sharing
-
-**Rationale**: The scratchpad use case is personal and local.
-
-### 7. No Plugin/Extension System
-
-`pile` does not provide:
-
-- Plugin APIs or extension points
-- Marketplace or plugin manager
-- User-installable themes (bundled themes only)
-- Custom syntax definitions via user config (use `GrammarRegistry` in code instead)
-
-**Rationale**: Keep the surface area small. Users who need extensibility should fork the code.
-
-## What `pile` IS
-
-To clarify by contrast, `pile` IS:
-
-- A fast, native scratchpad for dumping and recovering notes
-- Optimized for hundreds of open unsaved buffers
-- Reliable across crashes and restarts
-- Low-latency typing and navigation
-- Mixed prose/code with content-aware highlighting
-- Self-contained: no external dependencies beyond system libraries
-
-## Feature Request Filter
-
-When evaluating feature requests, ask:
-
-1. Does this require a project system? → **No**
-2. Does this require LSP or language servers? → **No**
-3. Does this add a terminal or build system? → **No**
-4. Does this add save prompts or file-first workflow? → **No**
-5. Does this add collaboration or cloud features? → **No**
-6. Does this add a plugin system? → **No**
-7. Does this pull the app toward IDE scope? → **No**
-
-If the answer is "yes" to any of these, the feature is out of scope for `pile`.
+If not, it is outside the product scope.

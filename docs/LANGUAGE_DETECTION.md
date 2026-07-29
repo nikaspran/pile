@@ -107,7 +107,7 @@ pub struct HighlightSpan {
 
 ## Design Decisions
 
-1. **Scored detection over single-rule**: Allows combining multiple weak signals for robust detection
+1. **Scored detection over single-rule**: Combines several weak signals
 2. **Bounded sampling**: Prevents UI stalls on huge documents
 3. **Injection via tree-sitter**: Leverages tree-sitter's native injection support rather than custom parsing
 4. **Injection registry as cache**: Lazy-initialized `OnceLock` map for O(1) language lookup during highlighting
