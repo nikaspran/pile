@@ -71,9 +71,10 @@ platform assets with:
 scripts/generate-icons.sh
 ```
 
-This updates the macOS/Linux PNG icon set, `assets/pile.icns`, and
-`assets/pile.ico`. ImageMagick is required; macOS `sips` (or `iconutil` on
-other macOS setups) generates the `.icns` file.
+This updates the macOS/Linux PNG icon set, the macOS `AppIcon.appiconset`,
+`assets/pile.icns`, and `assets/pile.ico`. ImageMagick is required. On macOS,
+`actool` compiles the asset catalog into `Assets.car` during packaging, while
+the `.icns` file remains a compatibility fallback.
 
 ## Signing
 

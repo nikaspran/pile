@@ -32,6 +32,17 @@ cp "$binary" "$app_dir/Contents/MacOS/pile"
 cp assets/pile.icns "$app_dir/Contents/Resources/pile.icns"
 chmod 0755 "$app_dir/Contents/MacOS/pile"
 
+if command -v actool >/dev/null 2>&1; then
+  actool \
+    --compile "$app_dir/Contents/Resources" \
+    --platform macosx \
+    --minimum-deployment-target 11.0 \
+    --app-icon AppIcon \
+    --standalone-icon-behavior none \
+    --output-partial-info-plist "$app_dir/Contents/actool-info.plist" \
+    assets/macos/Assets.xcassets >/dev/null
+fi
+
 perl \
   -e '
     local $/;
@@ -41,6 +52,8 @@ perl \
     $plist =~ s/<key>CFBundleVersion<\/key>\s*<string>[^<]*<\/string>/<key>CFBundleVersion<\/key>\n    <string>'"$bundle_version"'<\/string>/;
     print $plist;
   ' assets/Info.plist > "$app_dir/Contents/Info.plist"
+
+rm -f "$app_dir/Contents/actool-info.plist"
 
 if [[ -n "${APPLE_CODESIGN_IDENTITY:-}" ]]; then
   codesign --force --options runtime --timestamp --sign "$APPLE_CODESIGN_IDENTITY" "$app_dir"

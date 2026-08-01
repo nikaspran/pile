@@ -8,6 +8,8 @@
     <string>pile</string>
     <key>CFBundleIconFile</key>
     <string>pile</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>ai.opencode.pile</string>
     <key>CFBundleInfoDictionaryVersion</key>

@@ -69,7 +69,8 @@ To regenerate the committed platform icons from the SVG source:
 scripts/generate-icons.sh
 ```
 
-This requires ImageMagick. On macOS, `sips` generates the `.icns` asset.
+This requires ImageMagick. On macOS, `actool` compiles the standard asset
+catalog into `Assets.car` during packaging; `.icns` remains a fallback.
 
 For development:
 

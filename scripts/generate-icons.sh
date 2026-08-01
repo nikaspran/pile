@@ -8,6 +8,15 @@ source="${LOGO_SOURCE:-assets/pile-logo.svg}"
 iconset="${ICONSET_DIR:-assets/icons.iconset}"
 mac_icon="${MAC_ICON_PATH:-assets/pile.icns}"
 windows_icon="${WINDOWS_ICON_PATH:-assets/pile.ico}"
+mac_appiconset="${MAC_APPICONSET_DIR:-assets/macos/Assets.xcassets/AppIcon.appiconset}"
+
+mac_icon_names=(
+  icon_16x16.png icon_16x16@2x.png
+  icon_32x32.png icon_32x32@2x.png
+  icon_128x128.png icon_128x128@2x.png
+  icon_256x256.png icon_256x256@2x.png
+  icon_512x512.png icon_512x512@2x.png
+)
 
 if [[ ! -f "$source" ]]; then
   echo "generate-icons: source SVG not found: $source" >&2
@@ -19,7 +28,7 @@ command -v magick >/dev/null 2>&1 || {
   exit 1
 }
 
-mkdir -p "$iconset"
+mkdir -p "$iconset" "$mac_appiconset"
 output_dir="$(mktemp -d -t pile-icons)"
 trap 'rm -R "$output_dir"' EXIT
 
@@ -43,14 +52,27 @@ render_png 512  "$iconset/icon_512x512.png"
 render_png 1024 "$iconset/icon_512x512@2x.png"
 render_png 1024 "$iconset/icon_1024x1024.png"
 
+for name in "${mac_icon_names[@]}"; do
+  cp "$iconset/$name" "$mac_appiconset/$name"
+done
+
 magick -background none "$source" \
   -define icon:auto-resize=256,128,64,48,32,16 \
   "ICO:$output_dir/pile.ico"
 mv "$output_dir/pile.ico" "$windows_icon"
 
-if command -v sips >/dev/null 2>&1; then
-  sips -s format icns "$iconset/icon_512x512.png" --out "$output_dir/pile.icns" >/dev/null
-  mv "$output_dir/pile.icns" "$mac_icon"
+if command -v actool >/dev/null 2>&1; then
+  actool_output="$output_dir/actool"
+  mkdir -p "$actool_output"
+  actool \
+    --compile "$actool_output" \
+    --platform macosx \
+    --minimum-deployment-target 11.0 \
+    --app-icon AppIcon \
+    --standalone-icon-behavior all \
+    --output-partial-info-plist "$output_dir/partial-info.plist" \
+    assets/macos/Assets.xcassets >/dev/null
+  mv "$actool_output/AppIcon.icns" "$mac_icon"
 elif command -v iconutil >/dev/null 2>&1; then
   iconset_for_icns="$output_dir/pile.iconset"
   mkdir -p "$iconset_for_icns"
@@ -64,8 +86,11 @@ elif command -v iconutil >/dev/null 2>&1; then
   done
   iconutil -c icns "$iconset_for_icns" -o "$output_dir/pile.icns"
   mv "$output_dir/pile.icns" "$mac_icon"
+elif command -v sips >/dev/null 2>&1; then
+  sips -s format icns "$iconset/icon_512x512.png" --out "$output_dir/pile.icns" >/dev/null
+  mv "$output_dir/pile.icns" "$mac_icon"
 else
-  echo "generate-icons: sips/iconutil not found; skipped $mac_icon (run on macOS to generate it)" >&2
+  echo "generate-icons: actool/iconutil/sips not found; skipped $mac_icon (run on macOS to generate it)" >&2
 fi
 
-echo "generate-icons: updated $iconset, $windows_icon${mac_icon:+, $mac_icon}"
+echo "generate-icons: updated $iconset, $mac_appiconset, $windows_icon${mac_icon:+, $mac_icon}"
