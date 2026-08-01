@@ -2,14 +2,16 @@
   <title id="title">pile logo</title>
   <desc id="desc">Three stacked white outlined layers on a charcoal rounded square.</desc>
 
-  <rect width="512" height="512" fill="#25292b"/>
+  <rect x="32" y="32" width="448" height="448" rx="96" fill="#25292b"/>
 
-  <path d="M256,234 L412,322 L256,410 L100,322 Z" fill="#f5f6f4"/>
-  <path d="M256,251 L382,322 L256,393 L130,322 Z" fill="#25292b"/>
+  <g transform="matrix(0.82 0 0 0.82 46.08 46.08)">
+    <path d="M256,234 L412,322 L256,410 L100,322 Z" fill="#f5f6f4"/>
+    <path d="M256,251 L382,322 L256,393 L130,322 Z" fill="#25292b"/>
 
-  <path d="M256,168 L412,256 L256,344 L100,256 Z" fill="#f5f6f4"/>
-  <path d="M256,185 L382,256 L256,327 L130,256 Z" fill="#25292b"/>
+    <path d="M256,168 L412,256 L256,344 L100,256 Z" fill="#f5f6f4"/>
+    <path d="M256,185 L382,256 L256,327 L130,256 Z" fill="#25292b"/>
 
-  <path d="M256,102 L412,190 L256,278 L100,190 Z" fill="#f5f6f4"/>
-  <path d="M256,119 L382,190 L256,261 L130,190 Z" fill="#25292b"/>
+    <path d="M256,102 L412,190 L256,278 L100,190 Z" fill="#f5f6f4"/>
+    <path d="M256,119 L382,190 L256,261 L130,190 Z" fill="#25292b"/>
+  </g>
 </svg>
