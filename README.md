@@ -1,12 +1,8 @@
 # pile
 
-```text
----
----
--
-
-pile
-```
+<p align="center">
+  <img src="assets/pile-logo.svg" alt="pile logo" width="128">
+</p>
 
 pile is a scratchpad editor for notes that may never become files.
 It saves your session in the background and restores it when you reopen the app.
@@ -66,6 +62,14 @@ scripts/package-linux.sh
 ```
 
 On Windows, run `./scripts/package-windows.ps1` in PowerShell.
+
+To regenerate the committed platform icons from the SVG source:
+
+```sh
+scripts/generate-icons.sh
+```
+
+This requires ImageMagick. On macOS, `sips` generates the `.icns` asset.
 
 For development:
 
