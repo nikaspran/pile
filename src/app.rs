@@ -2660,7 +2660,11 @@ impl eframe::App for PileApp {
         }
         self.handle_clipboard_events(ctx);
         self.handle_keyboard_shortcuts(ctx);
-        if self.handle_parse_events() {
+        // A parse completion only changes pixels. Keep its cached syntax data while the
+        // app is in the background, but do not wake macOS for an invisible redraw.
+        // The focus event will naturally produce a frame when the user returns.
+        let window_is_focused = ctx.input(|input| input.focused);
+        if self.handle_parse_events() && should_repaint_after_parse(window_is_focused) {
             ctx.request_repaint();
         }
         if !ctx.input(|input| input.pointer.primary_down()) {
@@ -3032,6 +3036,10 @@ fn should_accept_parse_result(
     document.revision == result.revision
 }
 
+fn should_repaint_after_parse(window_is_focused: bool) -> bool {
+    window_is_focused
+}
+
 fn normalized_visible_range(
     rope: &crop::Rope,
     visible_range: Option<(usize, usize)>,
@@ -3147,6 +3155,12 @@ mod tests {
         };
 
         assert!(!should_accept_parse_result(&document, &result));
+    }
+
+    #[test]
+    fn background_parse_completion_does_not_request_a_redraw() {
+        assert!(!should_repaint_after_parse(false));
+        assert!(should_repaint_after_parse(true));
     }
 
     #[test]
