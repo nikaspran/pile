@@ -392,6 +392,7 @@ pub fn show_editor(
         .show_viewport(ui, |ui, viewport| {
             let (rect, response) =
                 ui.allocate_exact_size(layout.content_size(), egui::Sense::click_and_drag());
+            let response = response.on_hover_cursor(egui::CursorIcon::Text);
 
             if *focus_pending {
                 response.request_focus();
